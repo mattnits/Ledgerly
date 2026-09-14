@@ -1,0 +1,1 @@
+A finances app that takes in csv files or pdfs and parses the data into readable sortable data to view trends
