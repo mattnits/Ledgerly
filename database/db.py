@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 
@@ -30,3 +30,30 @@ def init_db():
     from database import models
 
     Base.metadata.create_all(bind=engine)
+
+
+def user_exists() -> bool:
+    from database.models import User
+
+    with SessionLocal() as session:
+        return session.scalar(
+            select(User.id).limit(1)
+        ) is not None
+
+
+def get_users() -> list[dict[str, str]]:
+    from database.models import User
+
+    with SessionLocal() as session:
+        users = session.scalars(
+            select(User).order_by(User.created_at, User.id)
+        ).all()
+
+        return [
+            {
+                "id": user.id,
+                "name": user.name,
+                "color": user.color,
+            }
+            for user in users
+        ]
