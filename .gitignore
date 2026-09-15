@@ -8,5 +8,8 @@ venv/
 .venv/
 env/
 
+# Database
+data/*.db
+
 # Other
 /test_data/
