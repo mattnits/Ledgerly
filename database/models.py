@@ -155,6 +155,16 @@ class Account(Base):
         nullable=False,
     )
 
+    balance: Mapped[Decimal | None] = mapped_column(
+        Numeric(12, 2),
+        nullable=True,
+    )
+
+    balance_as_of: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True,
+    )
+
     user: Mapped["User | None"] = relationship(
         back_populates="accounts",
     )
@@ -200,6 +210,20 @@ class Category(Base):
 
     transactions: Mapped[list["Transaction"]] = relationship(
         back_populates="category",
+    )
+
+
+class CategoryRule(Base):
+    __tablename__ = "category_rules"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    description_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    description_example: Mapped[str] = mapped_column(String(255), nullable=False)
+    category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "description_key", name="uq_category_rule_user_description"),
     )
 
 

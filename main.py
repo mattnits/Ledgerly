@@ -2,12 +2,13 @@ import sys
 
 from PySide6.QtWidgets import QApplication
 
-from database.db import init_db
+from database.db import ensure_categories, init_db
 from ui.shell import ShellWindow
 
 
 def main():
     init_db()
+    ensure_categories()
 
     app = QApplication(sys.argv)
 

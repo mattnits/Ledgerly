@@ -12,7 +12,6 @@ from ui.welcome import WelcomePage
 from ui.add_user import AddUserPage
 from ui.dashboard import DashboardPage
 from ui.transactions import TransactionsPage
-from ui.import_data import ImportPage
 from ui.settings import SettingsPage
 
 
@@ -62,7 +61,6 @@ class ShellWindow(QMainWindow):
 
         self.dashboard_page = DashboardPage()
         self.transactions_page = TransactionsPage()
-        self.import_page = ImportPage()
         self.settings_page = SettingsPage()
 
         self.pages.addWidget(
@@ -79,10 +77,6 @@ class ShellWindow(QMainWindow):
 
         self.pages.addWidget(
             self.transactions_page
-        )
-
-        self.pages.addWidget(
-            self.import_page
         )
 
         self.pages.addWidget(
@@ -135,6 +129,7 @@ class ShellWindow(QMainWindow):
     def load_users(self, current_user_id: str | None = None):
         users = get_users()
         self.sidebar.set_users(users, current_user_id)
+        self.transactions_page.set_user_id(self.sidebar.current_user_id)
 
         if users:
             self.sidebar.show()
@@ -153,6 +148,7 @@ class ShellWindow(QMainWindow):
         self.load_users(user_id)
 
     def handle_user_changed(self, user_id: str):
+        self.transactions_page.set_user_id(user_id)
         self.pages.setCurrentWidget(self.dashboard_page)
 
     def change_page(self, page_name: str):
@@ -160,11 +156,12 @@ class ShellWindow(QMainWindow):
         pages = {
             "dashboard": self.dashboard_page,
             "transactions": self.transactions_page,
-            "import": self.import_page,
             "settings": self.settings_page,
         }
 
         page = pages.get(page_name)
 
         if page is not None:
+            if page is self.transactions_page:
+                self.transactions_page.reload()
             self.pages.setCurrentWidget(page)

@@ -66,11 +66,6 @@ class Sidebar(QFrame):
             "transactions",
         )
 
-        self.import_button = self.create_button(
-            "Import",
-            "import",
-        )
-
         self.settings_button = self.create_button(
             "Settings",
             "settings",
@@ -80,7 +75,6 @@ class Sidebar(QFrame):
 
         layout.addWidget(self.dashboard_button)
         layout.addWidget(self.transactions_button)
-        layout.addWidget(self.import_button)
 
         # Pushes settings to bottom
         layout.addStretch()
@@ -279,7 +273,6 @@ class Sidebar(QFrame):
         buttons = [
             self.dashboard_button,
             self.transactions_button,
-            self.import_button,
             self.settings_button,
         ]
 

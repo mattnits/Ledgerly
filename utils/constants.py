@@ -1,0 +1,2 @@
+ADD_STATMENT_LABEL = "Add Statement(s)"
+SUPPORTED_PARSE_TYPES = ("TD", "Amex")
