@@ -5,6 +5,7 @@ from decimal import Decimal
 import uuid
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -207,6 +208,8 @@ class Category(Base):
         unique=True,
         nullable=False,
     )
+    color: Mapped[str] = mapped_column(String(7), nullable=False, default="#64748b")
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     transactions: Mapped[list["Transaction"]] = relationship(
         back_populates="category",
@@ -242,6 +245,11 @@ class Import(Base):
     file_name: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
+    )
+
+    content_hash: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
     )
 
     imported_at: Mapped[datetime] = mapped_column(

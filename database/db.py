@@ -3,6 +3,8 @@ from pathlib import Path
 from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
+from utils.constants import DEFAULT_CATEGORY_COLORS
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = BASE_DIR / "data" / "finance.db"
@@ -31,6 +33,8 @@ def init_db(db_engine=engine):
 
     Base.metadata.create_all(bind=db_engine)
     ensure_account_balance_columns(db_engine)
+    ensure_category_columns(db_engine)
+    ensure_import_hash_column(db_engine)
 
 
 def ensure_account_balance_columns(db_engine=engine) -> None:
@@ -50,17 +54,33 @@ def ensure_account_balance_columns(db_engine=engine) -> None:
             )
 
 
-DEFAULT_CATEGORIES = (
-    "Transport",
-    "Food",
-    "Groceries",
-    "Shopping",
-    "Entertainment",
-    "Subscriptions",
-    "Income",
-    "Health & Fitness",
-    "Bills & Utilities",
-)
+def ensure_category_columns(db_engine=engine) -> None:
+    inspector = inspect(db_engine)
+    if not inspector.has_table("categories"):
+        return
+
+    existing = {column["name"] for column in inspector.get_columns("categories")}
+    with db_engine.begin() as connection:
+        if "color" not in existing:
+            connection.exec_driver_sql(
+                "ALTER TABLE categories ADD COLUMN color VARCHAR(7) NOT NULL DEFAULT '#64748b'"
+            )
+        if "is_default" not in existing:
+            connection.exec_driver_sql(
+                "ALTER TABLE categories ADD COLUMN is_default BOOLEAN NOT NULL DEFAULT 0"
+            )
+
+
+def ensure_import_hash_column(db_engine=engine) -> None:
+    inspector = inspect(db_engine)
+    if not inspector.has_table("imports"):
+        return
+    existing = {column["name"] for column in inspector.get_columns("imports")}
+    if "content_hash" not in existing:
+        with db_engine.begin() as connection:
+            connection.exec_driver_sql(
+                "ALTER TABLE imports ADD COLUMN content_hash VARCHAR(64)"
+            )
 
 
 def ensure_categories(db_engine=engine) -> None:
@@ -68,14 +88,18 @@ def ensure_categories(db_engine=engine) -> None:
 
     Category.__table__.create(bind=db_engine, checkfirst=True)
     with Session(db_engine) as session, session.begin():
-        existing = set(session.scalars(
-            select(Category.name).where(Category.name.in_(DEFAULT_CATEGORIES))
-        ))
-        session.add_all(
-            Category(name=name)
-            for name in DEFAULT_CATEGORIES
-            if name not in existing
-        )
+        existing = {
+            category.name: category
+            for category in session.scalars(
+                select(Category).where(Category.name.in_(DEFAULT_CATEGORY_COLORS))
+            )
+        }
+        for name, color in DEFAULT_CATEGORY_COLORS.items():
+            if name in existing:
+                existing[name].color = color
+                existing[name].is_default = True
+            else:
+                session.add(Category(name=name, color=color, is_default=True))
 
 
 def user_exists() -> bool:

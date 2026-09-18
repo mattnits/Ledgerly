@@ -2,9 +2,10 @@ from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
-    QLabel,
     QPushButton,
 )
+
+from ui.components.page_header import PageHeader
 
 
 class WelcomePage(QWidget):
@@ -19,24 +20,11 @@ class WelcomePage(QWidget):
         layout.setAlignment(Qt.AlignCenter)
         layout.setSpacing(20)
 
-        title = QLabel("Welcome to the Finance App")
-        title.setAlignment(Qt.AlignCenter)
-
-        title.setStyleSheet("""
-            font-size: 32px;
-            font-weight: 700;
-        """)
-
-        description = QLabel(
-            "Please click below to add a user."
+        header = PageHeader(
+            "Welcome to the Finance App",
+            "Please click below to add a user.",
+            centered=True,
         )
-
-        description.setAlignment(Qt.AlignCenter)
-
-        description.setStyleSheet("""
-            font-size: 16px;
-            color: #666666;
-        """)
 
         add_user_button = QPushButton("Add User")
 
@@ -56,8 +44,7 @@ class WelcomePage(QWidget):
             self.add_user_clicked.emit
         )
 
-        layout.addWidget(title)
-        layout.addWidget(description)
+        layout.addWidget(header)
         layout.addSpacing(10)
         layout.addWidget(
             add_user_button,

@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 
 from database.db import SessionLocal
 from database.models import User
+from ui.components.page_header import PageHeader
 
 
 class AddUserPage(QWidget):
@@ -37,19 +38,6 @@ class AddUserPage(QWidget):
         # Form container
         form = QVBoxLayout()
         form.setSpacing(16)
-
-        # -------------------------
-        # Title
-        # -------------------------
-
-        title = QLabel("Add User")
-
-        title.setStyleSheet("""
-            font-size: 28px;
-            font-weight: 700;
-        """)
-
-        title.setAlignment(Qt.AlignCenter)
 
         # -------------------------
         # Name
@@ -119,7 +107,7 @@ class AddUserPage(QWidget):
         # Add to form
         # -------------------------
 
-        form.addWidget(title)
+        form.addWidget(PageHeader("Add User", centered=True))
 
         form.addSpacing(20)
 

@@ -8,6 +8,19 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from utils.constants import (
+    ACCOUNTS_LABEL,
+    ACCOUNTS_PAGE,
+    CATEGORIES_LABEL,
+    CATEGORIES_PAGE,
+    DASHBOARD_LABEL,
+    DASHBOARD_PAGE,
+    SETTINGS_LABEL,
+    SETTINGS_PAGE,
+    TRANSACTIONS_LABEL,
+    TRANSACTIONS_PAGE,
+)
+
 
 class Sidebar(QFrame):
     page_changed = Signal(str)
@@ -57,24 +70,37 @@ class Sidebar(QFrame):
         layout.addWidget(self.create_user_button)
 
         self.dashboard_button = self.create_button(
-            "Dashboard",
-            "dashboard",
+            DASHBOARD_LABEL,
+            DASHBOARD_PAGE,
         )
 
         self.transactions_button = self.create_button(
-            "Transactions",
-            "transactions",
+            TRANSACTIONS_LABEL,
+            TRANSACTIONS_PAGE,
+        )
+
+        self.accounts_button = self.create_button(
+            ACCOUNTS_LABEL,
+            ACCOUNTS_PAGE,
+        )
+
+        self.categories_button = self.create_button(
+            CATEGORIES_LABEL,
+            CATEGORIES_PAGE,
         )
 
         self.settings_button = self.create_button(
-            "Settings",
-            "settings",
+            SETTINGS_LABEL,
+            SETTINGS_PAGE,
         )
 
         layout.addSpacing(24)
 
         layout.addWidget(self.dashboard_button)
         layout.addWidget(self.transactions_button)
+        layout.addWidget(self.accounts_button)
+        layout.addWidget(self.categories_button)
+
 
         # Pushes settings to bottom
         layout.addStretch()
@@ -273,6 +299,8 @@ class Sidebar(QFrame):
         buttons = [
             self.dashboard_button,
             self.transactions_button,
+            self.accounts_button,
+            self.categories_button,
             self.settings_button,
         ]
 

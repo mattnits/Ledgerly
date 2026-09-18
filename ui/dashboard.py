@@ -1,13 +1,12 @@
 from PySide6.QtWidgets import (
-    QHBoxLayout,
     QPushButton,
     QWidget,
     QVBoxLayout,
-    QLabel,
 )
 
 from parsers.generic_parser import GenericParser
-from ui.file_upload_dialog import FileUploadDialog
+from ui.components.page_header import PageHeader
+from ui.components.file_upload_dialog import FileUploadDialog
 from utils.constants import ADD_STATMENT_LABEL
 
 
@@ -24,22 +23,10 @@ class DashboardPage(QWidget):
             32,
         )
 
-        title = QLabel("Dashboard")
-
-        title.setStyleSheet("""
-            font-size: 28px;
-            font-weight: 700;
-        """)
-
         self.files_to_parse = []
         add_files_button = QPushButton(ADD_STATMENT_LABEL)
         add_files_button.clicked.connect(self.open_file_selection)
-
-        header = QHBoxLayout()
-        header.addWidget(title)
-        header.addStretch()
-        header.addWidget(add_files_button)
-        layout.addLayout(header)
+        layout.addWidget(PageHeader("Dashboard", action_button=add_files_button))
 
         layout.addStretch()
 

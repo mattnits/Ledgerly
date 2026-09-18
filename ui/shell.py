@@ -6,6 +6,8 @@ from PySide6.QtWidgets import (
 )
 
 from database.db import get_users
+from ui.accounts import AccountsPage
+from ui.categories import CategoriesPage
 from ui.sidebar import Sidebar
 
 from ui.welcome import WelcomePage
@@ -13,6 +15,13 @@ from ui.add_user import AddUserPage
 from ui.dashboard import DashboardPage
 from ui.transactions import TransactionsPage
 from ui.settings import SettingsPage
+from utils.constants import (
+    ACCOUNTS_PAGE,
+    CATEGORIES_PAGE,
+    DASHBOARD_PAGE,
+    SETTINGS_PAGE,
+    TRANSACTIONS_PAGE,
+)
 
 
 class ShellWindow(QMainWindow):
@@ -62,6 +71,8 @@ class ShellWindow(QMainWindow):
         self.dashboard_page = DashboardPage()
         self.transactions_page = TransactionsPage()
         self.settings_page = SettingsPage()
+        self.accounts_page = AccountsPage()
+        self.categories_page = CategoriesPage()
 
         self.pages.addWidget(
             self.welcome_page
@@ -78,6 +89,12 @@ class ShellWindow(QMainWindow):
         self.pages.addWidget(
             self.transactions_page
         )
+
+        self.pages.addWidget(
+            self.accounts_page
+        )
+
+        self.pages.addWidget(self.categories_page)
 
         self.pages.addWidget(
             self.settings_page
@@ -154,9 +171,11 @@ class ShellWindow(QMainWindow):
     def change_page(self, page_name: str):
 
         pages = {
-            "dashboard": self.dashboard_page,
-            "transactions": self.transactions_page,
-            "settings": self.settings_page,
+            DASHBOARD_PAGE: self.dashboard_page,
+            TRANSACTIONS_PAGE: self.transactions_page,
+            ACCOUNTS_PAGE: self.accounts_page,
+            CATEGORIES_PAGE: self.categories_page,
+            SETTINGS_PAGE: self.settings_page,
         }
 
         page = pages.get(page_name)
@@ -164,4 +183,8 @@ class ShellWindow(QMainWindow):
         if page is not None:
             if page is self.transactions_page:
                 self.transactions_page.reload()
+            if page is self.accounts_page:
+                self.accounts_page.reload()
+            if page is self.categories_page:
+                self.categories_page.reload()
             self.pages.setCurrentWidget(page)

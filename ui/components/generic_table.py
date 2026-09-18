@@ -25,10 +25,10 @@ class GenericTable(QTableWidget):
         self.setMinimumHeight(360)
 
         self.verticalHeader().hide()
-        self.verticalHeader().setDefaultSectionSize(50)
+        self.verticalHeader().setDefaultSectionSize(37)
         self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.horizontalHeader().setMinimumSectionSize(96)
-        self.horizontalHeader().setFixedHeight(52)
+        self.horizontalHeader().setFixedHeight(44)
         self.horizontalHeader().setDefaultAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
@@ -39,7 +39,7 @@ class GenericTable(QTableWidget):
                 alternate-background-color: #22262d;
                 color: #cbd4e1;
                 border: none;
-                font-size: 14px;
+                font-size: 12px;
                 selection-background-color: #283a50;
                 selection-color: #eef5ff;
             }
@@ -48,8 +48,8 @@ class GenericTable(QTableWidget):
                 color: #dce4ef;
                 border: none;
                 border-bottom: 1px solid #343a43;
-                padding: 12px 14px;
-                font-weight: 500;
+                padding: 10px 14px;
+                font-weight: 700;
             }
             QTableWidget::item {
                 padding: 0 14px;
@@ -70,9 +70,13 @@ class GenericTable(QTableWidget):
 
     def set_rows(self, rows: Sequence[Sequence[str | QWidget]]) -> None:
         self.setRowCount(0)
-        for row_number, cells in enumerate(rows):
+        self.append_rows(rows)
+
+    def append_rows(self, rows: Sequence[Sequence[str | QWidget]]) -> None:
+        for cells in rows:
             if len(cells) != self.columnCount():
                 raise ValueError("Row length must match the number of columns")
+            row_number = self.rowCount()
             self.insertRow(row_number)
             for column_number, cell in enumerate(cells):
                 if isinstance(cell, QWidget):

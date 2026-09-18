@@ -1,8 +1,9 @@
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
-    QLabel,
 )
+
+from ui.components.page_header import PageHeader
 
 
 class SettingsPage(QWidget):
@@ -13,13 +14,6 @@ class SettingsPage(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(32, 32, 32, 32)
 
-        title = QLabel("Settings")
-
-        title.setStyleSheet("""
-            font-size: 28px;
-            font-weight: 700;
-        """)
-
-        layout.addWidget(title)
+        layout.addWidget(PageHeader("Settings"))
 
         layout.addStretch()

@@ -1,4 +1,4 @@
-from math import ceil
+from datetime import date
 
 from PySide6.QtCore import Qt, QSignalBlocker, QTimer
 from PySide6.QtGui import QColor
@@ -6,9 +6,9 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QHeaderView,
+    QComboBox,
     QLabel,
     QLineEdit,
-    QMenu,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -23,20 +23,109 @@ from ui.components.transaction_row import TransactionRow
 
 
 class StatementsTable(QWidget):
-    PAGE_SIZE = 10
+    PAGE_SIZE = 200
+    COLUMN_HEADERS = ("Date", "Description", "Amount", "Account", "Imported at", "Category")
 
     def __init__(self, parent=None, session_factory=SessionLocal):
         super().__init__(parent)
         self.session_factory = session_factory
         self.user_id: str | None = None
         self.rows: list[TransactionRow] = []
-        self.category_options: list[tuple[int, str]] = []
+        self.category_options: list[tuple[int, str, str]] = []
         self.total_count = 0
-        self.current_page = 1
+        self.filtered_count = 0
+        self.loaded_count = 0
+        self._loading = False
+        self._query = None
+        self.sort_column = 0
+        self.sort_order = Qt.SortOrder.DescendingOrder
         self.category_filter: int | str | None = "all"
+        self.account_filter: int | str = "all"
+        self.period_filter = "monthly"
+        self.date_range_filter = "this_month"
+        today = date.today()
+        self.selected_month = (today.year, today.month)
+        self.available_months: set[tuple[int, int]] = set()
 
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(12)
+
+        toolbar = QWidget()
+        toolbar.setObjectName("transactionsToolbar")
+        toolbar_layout = QHBoxLayout(toolbar)
+        toolbar_layout.setContentsMargins(0, 0, 0, 0)
+        toolbar_layout.setSpacing(12)
+
+        self.monthly_button = QPushButton("Monthly")
+        self.all_time_button = QPushButton("All Time")
+        for button in (self.monthly_button, self.all_time_button):
+            button.setObjectName("periodButton")
+            button.setCheckable(True)
+            button.setFixedWidth(102)
+            toolbar_layout.addWidget(button)
+        self.monthly_button.setChecked(True)
+        self.monthly_button.clicked.connect(lambda: self._set_period_filter("monthly"))
+        self.all_time_button.clicked.connect(lambda: self._set_period_filter("all"))
+
+        self.month_selector = QComboBox()
+        self.month_selector.setObjectName("monthSelector")
+        self.month_selector.setMinimumWidth(145)
+        self.month_selector.currentIndexChanged.connect(self._select_month)
+        toolbar_layout.addWidget(self.month_selector)
+
+        self.count_label = QLabel("0 transactions")
+        self.count_label.setObjectName("transactionsCount")
+        toolbar_layout.addWidget(self.count_label)
+        toolbar_layout.addStretch()
+
+        self.search = QLineEdit()
+        self.search.setObjectName("transactionSearch")
+        self.search.setPlaceholderText("Search transactions...")
+        self.search.setClearButtonEnabled(True)
+        self.search.setFixedWidth(290)
+        self.search.textChanged.connect(self._reset_and_apply)
+        toolbar_layout.addWidget(self.search)
+
+        outer_layout.addWidget(toolbar)
+
+        filter_bar = QFrame()
+        filter_bar.setObjectName("filterBar")
+        filter_layout = QHBoxLayout(filter_bar)
+        filter_layout.setContentsMargins(14, 10, 14, 10)
+        filter_layout.setSpacing(16)
+
+        self.account_selector = QComboBox()
+        self.account_selector.addItem("All Accounts", "all")
+        self.account_selector.currentIndexChanged.connect(self._select_account)
+        self._add_filter_field(filter_layout, "Account", self.account_selector)
+
+        self.category_selector = QComboBox()
+        self.category_selector.addItem("All Categories", "all")
+        self.category_selector.currentIndexChanged.connect(self._select_category)
+        self._add_filter_field(filter_layout, "Category", self.category_selector)
+
+        self.date_range_selector = QComboBox()
+        for label, value in (
+            ("This Month", "this_month"),
+            ("Last Month", "last_month"),
+            ("Selected Month", "selected_month"),
+            ("This Year", "this_year"),
+            ("All Time", "all"),
+        ):
+            self.date_range_selector.addItem(label, value)
+        self.date_range_selector.currentIndexChanged.connect(self._select_date_range)
+        self._add_filter_field(filter_layout, "Date Range", self.date_range_selector)
+
+        divider = QFrame()
+        divider.setObjectName("filterDivider")
+        divider.setFrameShape(QFrame.Shape.VLine)
+        filter_layout.addWidget(divider)
+        self.clear_filters_button = QPushButton("Clear Filters")
+        self.clear_filters_button.setObjectName("clearFiltersButton")
+        self.clear_filters_button.clicked.connect(self._clear_filters)
+        filter_layout.addWidget(self.clear_filters_button)
+        outer_layout.addWidget(filter_bar)
 
         card = QFrame()
         card.setObjectName("transactionsCard")
@@ -45,45 +134,19 @@ class StatementsTable(QWidget):
         card_layout.setContentsMargins(0, 0, 0, 0)
         card_layout.setSpacing(0)
 
-        header = QWidget()
-        header.setObjectName("transactionsHeader")
-        header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(26, 18, 26, 18)
-        header_layout.setSpacing(14)
-
-        heading = QVBoxLayout()
-        heading.setSpacing(5)
-        title = QLabel("Transactions")
-        title.setObjectName("transactionsTitle")
-        self.count_label = QLabel("0 transactions")
-        self.count_label.setObjectName("transactionsCount")
-        heading.addWidget(title)
-        heading.addWidget(self.count_label)
-        header_layout.addLayout(heading)
-        header_layout.addStretch()
-
-        self.search = QLineEdit()
-        self.search.setObjectName("transactionSearch")
-        self.search.setPlaceholderText("Search transactions...")
-        self.search.setClearButtonEnabled(True)
-        self.search.setFixedWidth(290)
-        self.search.textChanged.connect(self._reset_and_apply)
-        header_layout.addWidget(self.search)
-
-        self.filter_button = QPushButton("Filter")
-        self.filter_button.setObjectName("transactionFilter")
-        self.filter_menu = QMenu(self.filter_button)
-        self.filter_button.setMenu(self.filter_menu)
-        header_layout.addWidget(self.filter_button)
-        card_layout.addWidget(header)
-
-        self.table = GenericTable((
-            "Date", "Description", "Amount", "Account", "Imported at", "Category",
-        ))
+        self.table = GenericTable(self.COLUMN_HEADERS)
         table_header = self.table.horizontalHeader()
+        table_header.setSectionsClickable(True)
+        table_header.sectionClicked.connect(self._sort_by_column)
+        table_header.setSortIndicatorShown(False)
+        self.table.verticalScrollBar().valueChanged.connect(self._on_scroll)
         for column, width in ((0, 155), (2, 135), (3, 135), (4, 170), (5, 220)):
             table_header.setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
             self.table.setColumnWidth(column, width)
+        self.table.horizontalHeaderItem(2).setTextAlignment(
+            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter
+        )
+        self._update_sort_headers()
         card_layout.addWidget(self.table, 1)
 
         self.message = QLabel("No transactions yet")
@@ -101,49 +164,55 @@ class StatementsTable(QWidget):
         footer_layout.addWidget(self.range_label)
         footer_layout.addStretch()
 
-        self.previous_button = QPushButton("‹")
-        self.previous_button.setObjectName("pageArrow")
-        self.previous_button.clicked.connect(lambda: self._go_to_page(self.current_page - 1))
-        footer_layout.addWidget(self.previous_button)
-
-        self.page_buttons_layout = QHBoxLayout()
-        self.page_buttons_layout.setSpacing(4)
-        footer_layout.addLayout(self.page_buttons_layout)
-
-        self.next_button = QPushButton("›")
-        self.next_button.setObjectName("pageArrow")
-        self.next_button.clicked.connect(lambda: self._go_to_page(self.current_page + 1))
-        footer_layout.addWidget(self.next_button)
         card_layout.addWidget(footer)
 
         self.setStyleSheet("""
             QFrame#transactionsCard {
                 background: #1f2329;
                 border: 1px solid #353b44;
-                border-radius: 18px;
-            }
-            QWidget#transactionsHeader, QWidget#transactionsFooter {
-                background: #252a31;
-            }
-            QWidget#transactionsHeader {
-                border-top-left-radius: 18px;
-                border-top-right-radius: 18px;
+                border-radius: 16px;
             }
             QWidget#transactionsFooter {
-                border-bottom-left-radius: 18px;
-                border-bottom-right-radius: 18px;
-            }
-            QLabel#transactionsTitle {
-                color: #f5f7fb;
-                font-size: 26px;
-                font-weight: 700;
+                background: #222730;
+                border-bottom-left-radius: 16px;
+                border-bottom-right-radius: 16px;
             }
             QLabel#transactionsCount, QLabel#transactionsRange,
             QLabel#transactionsMessage {
                 color: #b6c0ce;
                 font-size: 13px;
             }
+            QLabel#transactionsCount { padding-left: 10px; }
             QLabel#transactionsMessage { padding: 10px 24px; }
+            QPushButton#periodButton {
+                color: #dbe2ee;
+                background: #1c2027;
+                border: 1px solid #303743;
+                border-radius: 10px;
+                padding: 9px 14px;
+                font-size: 13px;
+            }
+            QPushButton#periodButton:checked {
+                color: #ffffff;
+                background: #273353;
+                border-color: #5368ef;
+                font-weight: 600;
+            }
+            QPushButton#periodButton:hover { background: #2a3241; }
+            QComboBox#monthSelector {
+                color: #e3eaf4;
+                background: #1e2228;
+                border: 1px solid #3b424d;
+                border-radius: 10px;
+                padding: 8px 30px 8px 12px;
+            }
+            QComboBox#monthSelector::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 28px;
+                border: none;
+                background: transparent;
+            }
             QLineEdit#transactionSearch {
                 color: #e3eaf4;
                 background: #1e2228;
@@ -153,40 +222,171 @@ class StatementsTable(QWidget):
                 font-size: 14px;
             }
             QLineEdit#transactionSearch:focus { border-color: #5a9fea; }
-            QPushButton#transactionFilter, QPushButton#pageArrow,
-            QPushButton#pageNumber {
-                color: #d8e0eb;
-                background: #252a31;
-                border: 1px solid #3a414b;
-                border-radius: 9px;
-                padding: 8px 13px;
-                font-size: 13px;
+            QFrame#filterBar {
+                background: #1d232b;
+                border: 1px solid #38414d;
+                border-radius: 12px;
             }
-            QPushButton#transactionFilter:hover, QPushButton#pageArrow:hover,
-            QPushButton#pageNumber:hover { background: #303844; }
-            QPushButton#pageArrow:disabled { color: #697481; border-color: #303741; }
-            QPushButton#pageNumber[active="true"] {
-                color: #ffffff;
-                background: #294669;
-                border-color: #4c9af5;
+            QLabel#filterLabel {
+                color: #cbd4e1;
+                font-size: 11px;
             }
-            QMenu {
-                color: #d8e0eb;
-                background: #23282f;
+            QComboBox#filterCombo {
+                color: #e3eaf4;
+                background: #1a2028;
+                border: 1px solid #3b4552;
+                border-radius: 8px;
+                padding: 7px 30px 7px 12px;
+                min-height: 20px;
+            }
+            QComboBox#filterCombo::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 28px;
+                border: none;
+                background: transparent;
+            }
+            QComboBox#filterCombo QAbstractItemView {
+                color: #e3eaf4;
+                background: #232a33;
                 border: 1px solid #414955;
-                padding: 5px;
+                selection-background-color: #304b6b;
             }
-            QMenu::item { padding: 7px 24px; border-radius: 5px; }
-            QMenu::item:selected { background: #304b6b; }
+            QFrame#filterDivider { color: #38414d; }
+            QPushButton#clearFiltersButton {
+                color: #8ba8ff;
+                background: transparent;
+                border: none;
+                padding: 8px 10px;
+            }
+            QPushButton#clearFiltersButton:hover { color: #bdcbff; }
         """)
-        self._build_filter_menu([])
+        self._apply_filters()
+
+    @staticmethod
+    def _add_filter_field(layout: QHBoxLayout, label: str, selector: QComboBox) -> None:
+        field = QWidget()
+        field_layout = QVBoxLayout(field)
+        field_layout.setContentsMargins(0, 0, 0, 0)
+        field_layout.setSpacing(3)
+        title = QLabel(label)
+        title.setObjectName("filterLabel")
+        selector.setObjectName("filterCombo")
+        field_layout.addWidget(title)
+        field_layout.addWidget(selector)
+        layout.addWidget(field, 1)
+
+    def _month_range_key(self) -> str:
+        today = date.today()
+        current = (today.year, today.month)
+        previous = (today.year - (today.month == 1), (today.month - 2) % 12 + 1)
+        if self.selected_month == current:
+            return "this_month"
+        if self.selected_month == previous:
+            return "last_month"
+        return "selected_month"
+
+    def _set_date_range_choice(self) -> None:
+        with QSignalBlocker(self.date_range_selector):
+            index = self.date_range_selector.findData(self.date_range_filter)
+            self.date_range_selector.setCurrentIndex(index)
+
+    def _refresh_month_choices(self) -> None:
+        today = date.today()
+        months = self.available_months | {
+            self.selected_month, (today.year, today.month)
+        }
+        with QSignalBlocker(self.month_selector):
+            self.month_selector.clear()
+            for year, month in sorted(months, reverse=True):
+                self.month_selector.addItem(
+                    date(year, month, 1).strftime("%B %Y"), (year, month)
+                )
+            selected_index = next(
+                index for index in range(self.month_selector.count())
+                if self.month_selector.itemData(index) == self.selected_month
+            )
+            self.month_selector.setCurrentIndex(selected_index)
+
+    def _set_period_filter(self, period: str) -> None:
+        self.period_filter = period
+        self.date_range_filter = self._month_range_key() if period == "monthly" else "all"
+        self.monthly_button.setChecked(period == "monthly")
+        self.all_time_button.setChecked(period == "all")
+        self.month_selector.setVisible(period == "monthly")
+        self._set_date_range_choice()
+        self._apply_filters()
+
+    def _select_month(self, index: int) -> None:
+        month = self.month_selector.itemData(index)
+        if month is not None:
+            self.selected_month = month
+            self.date_range_filter = self._month_range_key()
+            self._set_date_range_choice()
+            self._apply_filters()
+
+    def _select_account(self, index: int) -> None:
+        value = self.account_selector.itemData(index)
+        if value is not None:
+            self.account_filter = value
+            self._apply_filters()
+
+    def _select_category(self, index: int) -> None:
+        value = self.category_selector.itemData(index)
+        if index >= 0:
+            self.category_filter = value
+            self._apply_filters()
+
+    def _select_date_range(self, index: int) -> None:
+        value = self.date_range_selector.itemData(index)
+        if value is None:
+            return
+        self.date_range_filter = value
+        today = date.today()
+        if value == "this_month":
+            self.selected_month = (today.year, today.month)
+        elif value == "last_month":
+            self.selected_month = (
+                today.year - (today.month == 1),
+                (today.month - 2) % 12 + 1,
+            )
+        self.period_filter = "all" if value in ("this_year", "all") else "monthly"
+        self.monthly_button.setChecked(self.period_filter == "monthly")
+        self.all_time_button.setChecked(self.period_filter == "all")
+        self.month_selector.setVisible(self.period_filter == "monthly")
+        self._refresh_month_choices()
+        self._apply_filters()
+
+    def _clear_filters(self) -> None:
+        today = date.today()
+        self.selected_month = (today.year, today.month)
+        self.period_filter = "monthly"
+        self.date_range_filter = "this_month"
+        self.account_filter = "all"
+        self.category_filter = "all"
+        self.monthly_button.setChecked(True)
+        self.all_time_button.setChecked(False)
+        self.month_selector.show()
+        with QSignalBlocker(self.account_selector), QSignalBlocker(self.category_selector), QSignalBlocker(self.search):
+            self.account_selector.setCurrentIndex(0)
+            self.category_selector.setCurrentIndex(0)
+            self.search.clear()
+        self._refresh_month_choices()
+        self._set_date_range_choice()
         self._apply_filters()
 
     def set_user_id(self, user_id: str | None) -> None:
         self.user_id = user_id
-        self.current_page = 1
+        today = date.today()
+        self.selected_month = (today.year, today.month)
+        self.period_filter = "monthly"
+        self.date_range_filter = "this_month"
+        self.account_filter = "all"
         self.category_filter = "all"
-        self.filter_button.setText("Filter")
+        self.monthly_button.setChecked(True)
+        self.all_time_button.setChecked(False)
+        self.month_selector.show()
+        self._set_date_range_choice()
         with QSignalBlocker(self.search):
             self.search.clear()
         self.reload()
@@ -194,56 +394,91 @@ class StatementsTable(QWidget):
     def reload(self) -> None:
         if self.user_id is None:
             self.category_options = []
-            self.total_count = 0
-            self._build_filter_menu([])
-            self._apply_filters()
-            return
+            accounts = []
+            months = []
+        else:
+            with self.session_factory() as session:
+                accounts = session.execute(
+                    select(Account.id, Account.name, Account.institution)
+                    .where(Account.user_id == self.user_id)
+                    .order_by(Account.name, Account.id)
+                ).all()
+                self.category_options = list(session.execute(
+                    select(Category.id, Category.name, Category.color).order_by(Category.name)
+                ).all())
+                months = session.scalars(
+                    select(func.strftime("%Y-%m", Transaction.transaction_date))
+                    .join(Account, Transaction.account_id == Account.id)
+                    .where(Account.user_id == self.user_id)
+                    .distinct()
+                ).all()
 
-        with self.session_factory() as session:
-            self.category_options = list(session.execute(
-                select(Category.id, Category.name).order_by(Category.name)
-            ).all())
-            self.total_count = session.scalar(
-                select(func.count(Transaction.id))
-                .join(Account, Transaction.account_id == Account.id)
-                .where(Account.user_id == self.user_id)
-            ) or 0
-
-        self._build_filter_menu(self.category_options)
+        self.available_months = {
+            (int(month[:4]), int(month[5:7]))
+            for month in months if month
+        }
+        self._refresh_month_choices()
+        with QSignalBlocker(self.account_selector):
+            self.account_selector.clear()
+            self.account_selector.addItem("All Accounts", "all")
+            for account_id, name, institution in accounts:
+                self.account_selector.addItem(f"{name} ({institution})", account_id)
+            selected = self.account_selector.findData(self.account_filter)
+            if selected < 0:
+                self.account_filter = "all"
+                selected = 0
+            self.account_selector.setCurrentIndex(selected)
+        with QSignalBlocker(self.category_selector):
+            self.category_selector.clear()
+            self.category_selector.addItem("All Categories", "all")
+            self.category_selector.addItem("Uncategorized", None)
+            for category_id, name, _ in self.category_options:
+                self.category_selector.addItem(name, category_id)
+            selected = self.category_selector.findData(self.category_filter)
+            if selected < 0:
+                self.category_filter = "all"
+                selected = 0
+            self.category_selector.setCurrentIndex(selected)
         self._apply_filters()
-
-    def _build_filter_menu(self, categories: list[tuple[int, str]]) -> None:
-        self.filter_menu.clear()
-        choices = [("All categories", "all"), ("Uncategorized", None)]
-        choices.extend((name, category_id) for category_id, name in categories)
-        for name, category_id in choices:
-            action = self.filter_menu.addAction(name)
-            action.triggered.connect(
-                lambda checked=False, selected=category_id, label=name:
-                self._set_category_filter(selected, label)
-            )
-
-    def _set_category_filter(self, category_id: int | str | None, name: str) -> None:
-        self.category_filter = category_id
-        self.filter_button.setText("Filter" if category_id == "all" else name)
-        self._reset_and_apply()
 
     def _reset_and_apply(self) -> None:
-        self.current_page = 1
         self._apply_filters()
 
-    def _go_to_page(self, page: int) -> None:
-        self.current_page = page
+    def _sort_by_column(self, column: int) -> None:
+        if column == self.sort_column:
+            self.sort_order = (
+                Qt.SortOrder.AscendingOrder
+                if self.sort_order == Qt.SortOrder.DescendingOrder
+                else Qt.SortOrder.DescendingOrder
+            )
+        else:
+            self.sort_column = column
+            self.sort_order = (
+                Qt.SortOrder.DescendingOrder if column in (0, 2, 4)
+                else Qt.SortOrder.AscendingOrder
+            )
+        self._update_sort_headers()
         self._apply_filters()
+
+    def _update_sort_headers(self) -> None:
+        arrow = "↑" if self.sort_order == Qt.SortOrder.AscendingOrder else "↓"
+        for index, label in enumerate(self.COLUMN_HEADERS):
+            self.table.horizontalHeaderItem(index).setText(
+                f"{label} {arrow}" if index == self.sort_column else label
+            )
+
+    def _on_scroll(self, value: int) -> None:
+        scrollbar = self.table.verticalScrollBar()
+        if scrollbar.maximum() > 0 and value >= (
+            scrollbar.maximum() - self.table.verticalHeader().defaultSectionSize() * 2
+        ):
+            self._load_more()
 
     def _apply_filters(self) -> None:
-        self.count_label.setText(
-            f"{self.total_count:,} transaction{'s' if self.total_count != 1 else ''}"
-        )
-        if self.user_id is None:
-            total = 0
-            transactions = []
-        else:
+        self._query = None
+        self.total_count = 0
+        self.filtered_count = 0
+        if self.user_id is not None:
             base = (
                 select(
                     Transaction.id,
@@ -258,6 +493,29 @@ class StatementsTable(QWidget):
                 .outerjoin(Category, Transaction.category_id == Category.id)
                 .where(Account.user_id == self.user_id)
             )
+            if self.period_filter == "monthly":
+                year, month = self.selected_month
+                first_day = date(year, month, 1)
+                next_month = date(year + (month == 12), month % 12 + 1, 1)
+                base = base.where(
+                    Transaction.transaction_date >= first_day,
+                    Transaction.transaction_date < next_month,
+                )
+            elif self.date_range_filter == "this_year":
+                year = date.today().year
+                base = base.where(
+                    Transaction.transaction_date >= date(year, 1, 1),
+                    Transaction.transaction_date < date(year + 1, 1, 1),
+                )
+
+            with self.session_factory() as session:
+                self.total_count = session.scalar(
+                    select(func.count()).select_from(base.order_by(None).subquery())
+                ) or 0
+
+            if self.account_filter != "all":
+                base = base.where(Account.id == self.account_filter)
+
             if self.category_filter != "all":
                 base = base.where(Transaction.category_id == self.category_filter)
 
@@ -272,92 +530,92 @@ class StatementsTable(QWidget):
                     cast(Transaction.amount, String).ilike(pattern),
                 ))
 
+            sort_expressions = (
+                Transaction.transaction_date,
+                Transaction.description,
+                Transaction.amount,
+                Account.name,
+                Transaction.imported_at,
+                func.coalesce(Category.name, "Uncategorized"),
+            )
+            expression = sort_expressions[self.sort_column]
+            ordering = (
+                expression.desc()
+                if self.sort_order == Qt.SortOrder.DescendingOrder
+                else expression.asc()
+            )
+            self._query = base.order_by(ordering, Transaction.id.desc())
             with self.session_factory() as session:
-                total = session.scalar(
+                self.filtered_count = session.scalar(
                     select(func.count()).select_from(base.order_by(None).subquery())
                 ) or 0
-                total_pages = max(1, ceil(total / self.PAGE_SIZE))
-                self.current_page = min(max(self.current_page, 1), total_pages)
-                start = (self.current_page - 1) * self.PAGE_SIZE
-                transactions = session.execute(
-                    base.order_by(
-                        Transaction.transaction_date.desc(),
-                        Transaction.imported_at.desc(),
-                        Transaction.id.desc(),
-                    )
-                    .limit(self.PAGE_SIZE)
-                    .offset(start)
-                ).all()
 
-        total_pages = max(1, ceil(total / self.PAGE_SIZE))
-        self.current_page = min(max(self.current_page, 1), total_pages)
-        start = (self.current_page - 1) * self.PAGE_SIZE
-        self._show_rows(transactions)
-
-        if total:
-            self.range_label.setText(
-                f"Showing {start + 1}–{min(start + self.PAGE_SIZE, total)} of {total:,} transactions"
-            )
-            self.message.hide()
-        else:
-            self.range_label.setText("Showing 0 transactions")
-            self.message.setText(
-                "No transactions yet" if self.total_count == 0 else "No transactions match your search or filter"
-            )
-            self.message.show()
-
-        self.previous_button.setEnabled(self.current_page > 1)
-        self.next_button.setEnabled(self.current_page < total_pages)
-        self._render_page_buttons(total_pages)
-
-    def _show_rows(self, transactions) -> None:
+        self.count_label.setText(
+            f"{self.total_count:,} transaction{'s' if self.total_count != 1 else ''}"
+        )
         for row in self.rows:
             row.deleteLater()
         self.rows = []
+        self.loaded_count = 0
+        self.table.setRowCount(0)
+        self.table.verticalScrollBar().setValue(0)
+        self.range_label.setText(f"Showing 0 of {self.filtered_count:,} transactions")
+        if self.filtered_count:
+            self.message.hide()
+            self._load_more()
+        else:
+            self.message.setText(
+                "No transactions yet" if self.total_count == 0
+                else "No transactions match your search or filter"
+            )
+            self.message.show()
+
+    def _load_more(self) -> None:
+        if self._loading or self._query is None or self.loaded_count >= self.filtered_count:
+            return
+        self._loading = True
+        try:
+            with self.session_factory() as session:
+                transactions = session.execute(
+                    self._query.limit(self.PAGE_SIZE).offset(self.loaded_count)
+                ).all()
+            if not transactions:
+                self.filtered_count = self.loaded_count
+                return
+            self._append_rows(transactions)
+            self.loaded_count += len(transactions)
+            self.range_label.setText(
+                f"Showing {self.loaded_count:,} of {self.filtered_count:,} transactions"
+            )
+        finally:
+            self._loading = False
+
+    def _append_rows(self, transactions) -> None:
+        new_rows = []
         for transaction in transactions:
             row = TransactionRow(*transaction, self.category_options, parent=self)
             row.category_changed.connect(
                 lambda transaction_id, category_id, row=row:
                 self._save_category(row, transaction_id, category_id)
             )
-            self.rows.append(row)
+            new_rows.append(row)
 
-        self.table.set_rows([row.cells for row in self.rows])
-        for row_number, row in enumerate(self.rows):
-            amount_item = self.table.item(row_number, 2)
-            amount_item.setTextAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-            )
-            amount_item.setForeground(QColor(
-                "#fb7977" if row.amount < 0 else "#63dba0" if row.amount > 0 else "#cbd4e1"
-            ))
-            self.table.item(row_number, 4).setForeground(QColor("#9eabba"))
-
-    def _render_page_buttons(self, total_pages: int) -> None:
-        while self.page_buttons_layout.count():
-            item = self.page_buttons_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-
-        pages = sorted({
-            page for page in (
-                1, total_pages, self.current_page - 1,
-                self.current_page, self.current_page + 1,
-            ) if 1 <= page <= total_pages
-        })
-        previous = 0
-        for page in pages:
-            if page - previous > 1:
-                dots = QLabel("…")
-                dots.setStyleSheet("color: #aab4c2; padding: 0 5px;")
-                self.page_buttons_layout.addWidget(dots)
-            button = QPushButton(str(page))
-            button.setObjectName("pageNumber")
-            button.setProperty("active", page == self.current_page)
-            button.clicked.connect(lambda checked=False, selected=page: self._go_to_page(selected))
-            self.page_buttons_layout.addWidget(button)
-            previous = page
+        first_row = self.table.rowCount()
+        self.table.setUpdatesEnabled(False)
+        try:
+            self.table.append_rows([row.cells for row in new_rows])
+            for row_number, row in enumerate(new_rows, first_row):
+                amount_item = self.table.item(row_number, 2)
+                amount_item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter
+                )
+                amount_item.setForeground(QColor(
+                    "#fb7977" if row.amount < 0 else "#63dba0" if row.amount > 0 else "#cbd4e1"
+                ))
+                self.table.item(row_number, 4).setForeground(QColor("#9eabba"))
+        finally:
+            self.table.setUpdatesEnabled(True)
+        self.rows.extend(new_rows)
 
     def _save_category(
         self,
