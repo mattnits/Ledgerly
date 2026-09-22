@@ -42,6 +42,10 @@ def delete_category(category_id: int) -> None:
             .values(category_id=None)
         )
         session.execute(
+            update(Transaction).where(Transaction.previous_category_id == category_id)
+            .values(previous_category_id=None)
+        )
+        session.execute(
             delete(CategoryRule).where(CategoryRule.category_id == category_id)
         )
         session.delete(category)

@@ -1,13 +1,41 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from PySide6.QtCore import QObject, QSignalBlocker, Qt, Signal
-from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QWidget
+from PySide6.QtCore import QObject, QSignalBlocker, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QPushButton, QWidget
+
+
+def _action_icon(restore: bool) -> QIcon:
+    pixmap = QPixmap(18, 18)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(QPen(QColor("#dce6f3"), 1.6, Qt.PenStyle.SolidLine,
+                        Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+    if restore:
+        path = QPainterPath()
+        path.moveTo(4, 8)
+        path.cubicTo(5, 4, 10, 3, 13, 6)
+        path.cubicTo(16, 9, 14, 14, 9, 14)
+        painter.drawPath(path)
+        painter.drawLine(4, 8, 4, 4)
+        painter.drawLine(4, 8, 8, 8)
+    else:
+        painter.drawLine(4, 5, 14, 5)
+        painter.drawLine(7, 3, 11, 3)
+        painter.drawLine(5, 7, 6, 15)
+        painter.drawLine(13, 7, 12, 15)
+        painter.drawLine(6, 15, 12, 15)
+        painter.drawLine(8, 8, 8, 13)
+        painter.drawLine(10, 8, 10, 13)
+    painter.end()
+    return QIcon(pixmap)
 
 
 class TransactionRow(QObject):
     category_changed = Signal(int, object)
+    deletion_changed = Signal(int, bool)
 
     def __init__(
         self,
@@ -19,6 +47,7 @@ class TransactionRow(QObject):
         category_id: int | None,
         account_name: str,
         categories: list[tuple[int, str, str]],
+        deleted_category_id: int | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -30,12 +59,16 @@ class TransactionRow(QObject):
             available_id: color for available_id, _, color in categories
         }
         self.amount = amount
+        self.is_deleted = category_id == deleted_category_id and deleted_category_id is not None
 
         self.category_combo = QComboBox()
-        self.category_combo.addItem("Uncategorized", None)
+        if not self.is_deleted:
+            self.category_combo.addItem("Uncategorized", None)
         for available_id, name, _ in categories:
-            self.category_combo.addItem(name, available_id)
+            if (available_id == deleted_category_id) == self.is_deleted:
+                self.category_combo.addItem(name, available_id)
         self.category_combo.setCurrentIndex(self.category_combo.findData(category_id))
+        self.category_combo.setEnabled(not self.is_deleted)
         self._style_category()
         self.category_combo.currentIndexChanged.connect(self._category_selected)
 
@@ -46,6 +79,38 @@ class TransactionRow(QObject):
         category_layout.addWidget(self.category_combo, alignment=Qt.AlignmentFlag.AlignVCenter)
         category_layout.addStretch()
 
+        self.action_button = QPushButton()
+        self.action_button.setObjectName("transactionActionButton")
+        self.action_button.setIcon(_action_icon(self.is_deleted))
+        self.action_button.setIconSize(QSize(18, 18))
+        self.action_button.setAccessibleName(
+            "Restore transaction" if self.is_deleted else "Remove transaction"
+        )
+        self.action_button.setToolTip(
+            "Restore this transaction to its previous category"
+            if self.is_deleted else "Move this transaction to Deleted"
+        )
+        self.action_button.setFixedSize(28, 28)
+        self.action_button.setStyleSheet("""
+            QPushButton#transactionActionButton {
+                color: #cbd4e1;
+                background: #303945;
+                border: 1px solid #465263;
+                border-radius: 6px;
+            }
+            QPushButton#transactionActionButton:hover {
+                color: #ffffff;
+                background: #465263;
+            }
+        """)
+        self.action_button.clicked.connect(
+            lambda: self.deletion_changed.emit(self.transaction_id, not self.is_deleted)
+        )
+        self.action_cell = QWidget()
+        action_layout = QHBoxLayout(self.action_cell)
+        action_layout.setContentsMargins(4, 0, 4, 0)
+        action_layout.addWidget(self.action_button, alignment=Qt.AlignmentFlag.AlignCenter)
+
         self.cells = (
             f"{transaction_date:%b} {transaction_date.day}, {transaction_date.year}",
             description,
@@ -53,6 +118,7 @@ class TransactionRow(QObject):
             account_name,
             f"{imported_at:%b} {imported_at.day}, {imported_at:%I:%M %p}",
             self.category_cell,
+            self.action_cell,
         )
 
     def _style_category(self) -> None:

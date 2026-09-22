@@ -137,6 +137,8 @@ class ShellWindow(QMainWindow):
             self.handle_user_created
         )
 
+        self.settings_page.data_reset.connect(self.handle_data_reset)
+
         # -------------------------
         # Initial page
         # -------------------------
@@ -146,6 +148,7 @@ class ShellWindow(QMainWindow):
     def load_users(self, current_user_id: str | None = None):
         users = get_users()
         self.sidebar.set_users(users, current_user_id)
+        self.dashboard_page.set_user_id(self.sidebar.current_user_id)
         self.transactions_page.set_user_id(self.sidebar.current_user_id)
 
         if users:
@@ -165,8 +168,14 @@ class ShellWindow(QMainWindow):
         self.load_users(user_id)
 
     def handle_user_changed(self, user_id: str):
+        self.dashboard_page.set_user_id(user_id)
         self.transactions_page.set_user_id(user_id)
         self.pages.setCurrentWidget(self.dashboard_page)
+
+    def handle_data_reset(self) -> None:
+        self.dashboard_page.reload()
+        self.transactions_page.reload()
+        self.accounts_page.reload()
 
     def change_page(self, page_name: str):
 
@@ -183,6 +192,8 @@ class ShellWindow(QMainWindow):
         if page is not None:
             if page is self.transactions_page:
                 self.transactions_page.reload()
+            if page is self.dashboard_page:
+                self.dashboard_page.reload()
             if page is self.accounts_page:
                 self.accounts_page.reload()
             if page is self.categories_page:

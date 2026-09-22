@@ -18,13 +18,16 @@ from sqlalchemy import String, cast, func, or_, select
 from database.db import SessionLocal
 from database.category_rules import categorize_matching_transactions, save_category_rule
 from database.models import Account, Category, Transaction
+from database.transactions import get_transaction_months, set_transaction_deleted
 from ui.components.generic_table import GenericTable
+from ui.components.period_selector import PeriodSelector
 from ui.components.transaction_row import TransactionRow
+from utils.constants import DELETED_CATEGORY_NAME
 
 
 class StatementsTable(QWidget):
     PAGE_SIZE = 200
-    COLUMN_HEADERS = ("Date", "Description", "Amount", "Account", "Imported at", "Category")
+    COLUMN_HEADERS = ("Date", "Description", "Amount", "Account", "Imported at", "Category", "Action")
 
     def __init__(self, parent=None, session_factory=SessionLocal):
         super().__init__(parent)
@@ -32,6 +35,7 @@ class StatementsTable(QWidget):
         self.user_id: str | None = None
         self.rows: list[TransactionRow] = []
         self.category_options: list[tuple[int, str, str]] = []
+        self.deleted_category_id: int | None = None
         self.total_count = 0
         self.filtered_count = 0
         self.loaded_count = 0
@@ -57,22 +61,12 @@ class StatementsTable(QWidget):
         toolbar_layout.setContentsMargins(0, 0, 0, 0)
         toolbar_layout.setSpacing(12)
 
-        self.monthly_button = QPushButton("Monthly")
-        self.all_time_button = QPushButton("All Time")
-        for button in (self.monthly_button, self.all_time_button):
-            button.setObjectName("periodButton")
-            button.setCheckable(True)
-            button.setFixedWidth(102)
-            toolbar_layout.addWidget(button)
-        self.monthly_button.setChecked(True)
-        self.monthly_button.clicked.connect(lambda: self._set_period_filter("monthly"))
-        self.all_time_button.clicked.connect(lambda: self._set_period_filter("all"))
-
-        self.month_selector = QComboBox()
-        self.month_selector.setObjectName("monthSelector")
-        self.month_selector.setMinimumWidth(145)
-        self.month_selector.currentIndexChanged.connect(self._select_month)
-        toolbar_layout.addWidget(self.month_selector)
+        self.period_selector = PeriodSelector()
+        self.period_selector.selection_changed.connect(self._select_period)
+        toolbar_layout.addWidget(self.period_selector)
+        self.monthly_button = self.period_selector.monthly_button
+        self.all_time_button = self.period_selector.all_time_button
+        self.month_selector = self.period_selector.month_selector
 
         self.count_label = QLabel("0 transactions")
         self.count_label.setObjectName("transactionsCount")
@@ -137,10 +131,11 @@ class StatementsTable(QWidget):
         self.table = GenericTable(self.COLUMN_HEADERS)
         table_header = self.table.horizontalHeader()
         table_header.setSectionsClickable(True)
+        table_header.setMinimumSectionSize(68)
         table_header.sectionClicked.connect(self._sort_by_column)
         table_header.setSortIndicatorShown(False)
         self.table.verticalScrollBar().valueChanged.connect(self._on_scroll)
-        for column, width in ((0, 155), (2, 135), (3, 135), (4, 170), (5, 220)):
+        for column, width in ((0, 155), (2, 135), (3, 135), (4, 170), (5, 220), (6, 68)):
             table_header.setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
             self.table.setColumnWidth(column, width)
         self.table.horizontalHeaderItem(2).setTextAlignment(
@@ -184,35 +179,6 @@ class StatementsTable(QWidget):
             }
             QLabel#transactionsCount { padding-left: 10px; }
             QLabel#transactionsMessage { padding: 10px 24px; }
-            QPushButton#periodButton {
-                color: #dbe2ee;
-                background: #1c2027;
-                border: 1px solid #303743;
-                border-radius: 10px;
-                padding: 9px 14px;
-                font-size: 13px;
-            }
-            QPushButton#periodButton:checked {
-                color: #ffffff;
-                background: #273353;
-                border-color: #5368ef;
-                font-weight: 600;
-            }
-            QPushButton#periodButton:hover { background: #2a3241; }
-            QComboBox#monthSelector {
-                color: #e3eaf4;
-                background: #1e2228;
-                border: 1px solid #3b424d;
-                border-radius: 10px;
-                padding: 8px 30px 8px 12px;
-            }
-            QComboBox#monthSelector::drop-down {
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-                width: 28px;
-                border: none;
-                background: transparent;
-            }
             QLineEdit#transactionSearch {
                 color: #e3eaf4;
                 background: #1e2228;
@@ -292,38 +258,22 @@ class StatementsTable(QWidget):
             self.date_range_selector.setCurrentIndex(index)
 
     def _refresh_month_choices(self) -> None:
-        today = date.today()
-        months = self.available_months | {
-            self.selected_month, (today.year, today.month)
-        }
-        with QSignalBlocker(self.month_selector):
-            self.month_selector.clear()
-            for year, month in sorted(months, reverse=True):
-                self.month_selector.addItem(
-                    date(year, month, 1).strftime("%B %Y"), (year, month)
-                )
-            selected_index = next(
-                index for index in range(self.month_selector.count())
-                if self.month_selector.itemData(index) == self.selected_month
-            )
-            self.month_selector.setCurrentIndex(selected_index)
+        self.period_selector.set_available_months(self.available_months)
 
     def _set_period_filter(self, period: str) -> None:
-        self.period_filter = period
-        self.date_range_filter = self._month_range_key() if period == "monthly" else "all"
-        self.monthly_button.setChecked(period == "monthly")
-        self.all_time_button.setChecked(period == "all")
-        self.month_selector.setVisible(period == "monthly")
-        self._set_date_range_choice()
-        self._apply_filters()
+        self.period_selector.set_period(period)
 
     def _select_month(self, index: int) -> None:
         month = self.month_selector.itemData(index)
         if month is not None:
-            self.selected_month = month
-            self.date_range_filter = self._month_range_key()
-            self._set_date_range_choice()
-            self._apply_filters()
+            self.period_selector.set_selected_month(month)
+
+    def _select_period(self, period: str, month: tuple[int, int]) -> None:
+        self.period_filter = period
+        self.selected_month = month
+        self.date_range_filter = self._month_range_key() if period == "monthly" else "all"
+        self._set_date_range_choice()
+        self._apply_filters()
 
     def _select_account(self, index: int) -> None:
         value = self.account_selector.itemData(index)
@@ -351,10 +301,8 @@ class StatementsTable(QWidget):
                 (today.month - 2) % 12 + 1,
             )
         self.period_filter = "all" if value in ("this_year", "all") else "monthly"
-        self.monthly_button.setChecked(self.period_filter == "monthly")
-        self.all_time_button.setChecked(self.period_filter == "all")
-        self.month_selector.setVisible(self.period_filter == "monthly")
-        self._refresh_month_choices()
+        self.period_selector.set_selected_month(self.selected_month, emit=False)
+        self.period_selector.set_period(self.period_filter, emit=False)
         self._apply_filters()
 
     def _clear_filters(self) -> None:
@@ -364,14 +312,11 @@ class StatementsTable(QWidget):
         self.date_range_filter = "this_month"
         self.account_filter = "all"
         self.category_filter = "all"
-        self.monthly_button.setChecked(True)
-        self.all_time_button.setChecked(False)
-        self.month_selector.show()
+        self.period_selector.reset(emit=False)
         with QSignalBlocker(self.account_selector), QSignalBlocker(self.category_selector), QSignalBlocker(self.search):
             self.account_selector.setCurrentIndex(0)
             self.category_selector.setCurrentIndex(0)
             self.search.clear()
-        self._refresh_month_choices()
         self._set_date_range_choice()
         self._apply_filters()
 
@@ -383,9 +328,7 @@ class StatementsTable(QWidget):
         self.date_range_filter = "this_month"
         self.account_filter = "all"
         self.category_filter = "all"
-        self.monthly_button.setChecked(True)
-        self.all_time_button.setChecked(False)
-        self.month_selector.show()
+        self.period_selector.reset(emit=False)
         self._set_date_range_choice()
         with QSignalBlocker(self.search):
             self.search.clear()
@@ -394,8 +337,8 @@ class StatementsTable(QWidget):
     def reload(self) -> None:
         if self.user_id is None:
             self.category_options = []
+            self.deleted_category_id = None
             accounts = []
-            months = []
         else:
             with self.session_factory() as session:
                 accounts = session.execute(
@@ -406,17 +349,14 @@ class StatementsTable(QWidget):
                 self.category_options = list(session.execute(
                     select(Category.id, Category.name, Category.color).order_by(Category.name)
                 ).all())
-                months = session.scalars(
-                    select(func.strftime("%Y-%m", Transaction.transaction_date))
-                    .join(Account, Transaction.account_id == Account.id)
-                    .where(Account.user_id == self.user_id)
-                    .distinct()
-                ).all()
-
-        self.available_months = {
-            (int(month[:4]), int(month[5:7]))
-            for month in months if month
-        }
+                self.deleted_category_id = next(
+                    (category_id for category_id, name, _ in self.category_options
+                     if name == DELETED_CATEGORY_NAME),
+                    None,
+                )
+        self.available_months = get_transaction_months(
+            self.user_id, self.session_factory, include_hidden_categories=True
+        )
         self._refresh_month_choices()
         with QSignalBlocker(self.account_selector):
             self.account_selector.clear()
@@ -445,6 +385,8 @@ class StatementsTable(QWidget):
         self._apply_filters()
 
     def _sort_by_column(self, column: int) -> None:
+        if column == len(self.COLUMN_HEADERS) - 1:
+            return
         if column == self.sort_column:
             self.sort_order = (
                 Qt.SortOrder.AscendingOrder
@@ -474,7 +416,12 @@ class StatementsTable(QWidget):
         ):
             self._load_more()
 
-    def _apply_filters(self) -> None:
+    def _apply_filters(self, preserve_scroll: bool = False) -> None:
+        vertical_scrollbar = self.table.verticalScrollBar()
+        horizontal_scrollbar = self.table.horizontalScrollBar()
+        scroll_position = vertical_scrollbar.value() if preserve_scroll else 0
+        horizontal_position = horizontal_scrollbar.value() if preserve_scroll else 0
+        previously_loaded = self.loaded_count if preserve_scroll else 0
         self._query = None
         self.total_count = 0
         self.filtered_count = 0
@@ -493,6 +440,14 @@ class StatementsTable(QWidget):
                 .outerjoin(Category, Transaction.category_id == Category.id)
                 .where(Account.user_id == self.user_id)
             )
+            if self.deleted_category_id is not None:
+                if self.category_filter == self.deleted_category_id:
+                    base = base.where(Transaction.category_id == self.deleted_category_id)
+                else:
+                    base = base.where(or_(
+                        Transaction.category_id.is_(None),
+                        Transaction.category_id != self.deleted_category_id,
+                    ))
             if self.period_filter == "monthly":
                 year, month = self.selected_month
                 first_day = date(year, month, 1)
@@ -558,16 +513,27 @@ class StatementsTable(QWidget):
         self.rows = []
         self.loaded_count = 0
         self.table.setRowCount(0)
-        self.table.verticalScrollBar().setValue(0)
+        vertical_scrollbar.setValue(0)
         self.range_label.setText(f"Showing 0 of {self.filtered_count:,} transactions")
         if self.filtered_count:
             self.message.hide()
             self._load_more()
+            while self.loaded_count < previously_loaded and self.loaded_count < self.filtered_count:
+                self._load_more()
+            if preserve_scroll:
+                vertical_scrollbar.setValue(min(scroll_position, vertical_scrollbar.maximum()))
+                horizontal_scrollbar.setValue(horizontal_position)
         else:
-            self.message.setText(
-                "No transactions yet" if self.total_count == 0
-                else "No transactions match your search or filter"
-            )
+            if self.total_count == 0:
+                empty_text = (
+                    "No deleted transactions"
+                    if self.category_filter == self.deleted_category_id
+                    and self.deleted_category_id is not None
+                    else "No active transactions. Use the Deleted category filter to restore items."
+                )
+            else:
+                empty_text = "No transactions match your search or filter"
+            self.message.setText(empty_text)
             self.message.show()
 
     def _load_more(self) -> None:
@@ -593,11 +559,17 @@ class StatementsTable(QWidget):
     def _append_rows(self, transactions) -> None:
         new_rows = []
         for transaction in transactions:
-            row = TransactionRow(*transaction, self.category_options, parent=self)
+            row = TransactionRow(
+                *transaction,
+                self.category_options,
+                deleted_category_id=self.deleted_category_id,
+                parent=self,
+            )
             row.category_changed.connect(
                 lambda transaction_id, category_id, row=row:
                 self._save_category(row, transaction_id, category_id)
             )
+            row.deletion_changed.connect(self._set_deleted)
             new_rows.append(row)
 
         first_row = self.table.rowCount()
@@ -630,6 +602,8 @@ class StatementsTable(QWidget):
                     raise ValueError("Transaction is no longer available")
                 if category_id is not None and session.get(Category, category_id) is None:
                     raise ValueError("Category is no longer available")
+                if category_id == self.deleted_category_id:
+                    raise ValueError("Use Remove to mark a transaction as deleted")
                 transaction.category_id = category_id
                 save_category_rule(
                     session, self.user_id, transaction.description, category_id
@@ -644,4 +618,16 @@ class StatementsTable(QWidget):
             return
 
         row.mark_saved(category_id)
-        QTimer.singleShot(0, self._apply_filters)
+        QTimer.singleShot(0, lambda: self._apply_filters(preserve_scroll=True))
+
+    def _set_deleted(self, transaction_id: int, deleted: bool) -> None:
+        try:
+            set_transaction_deleted(
+                transaction_id, self.user_id, deleted, self.session_factory
+            )
+        except Exception as exc:
+            self.message.setText(f"Could not update transaction: {exc}")
+            self.message.show()
+            return
+
+        QTimer.singleShot(0, lambda: self._apply_filters(preserve_scroll=True))

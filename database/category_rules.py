@@ -1,10 +1,11 @@
 import re
 import unicodedata
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
-from database.models import Account, CategoryRule, Transaction
+from database.models import Account, Category, CategoryRule, Transaction
+from utils.constants import DELETED_CATEGORY_NAME
 
 
 def normalize_description(description: str) -> str:
@@ -70,8 +71,11 @@ def categorize_matching_transactions(
     )
     matches = [value for value in descriptions if normalize_description(value) == key]
     account_ids = select(Account.id).where(Account.user_id == user_id)
+    deleted_category_id = session.scalar(
+        select(Category.id).where(Category.name == DELETED_CATEGORY_NAME)
+    )
     for start in range(0, len(matches), 500):
-        session.execute(
+        statement = (
             update(Transaction)
             .where(
                 Transaction.account_id.in_(account_ids),
@@ -80,3 +84,9 @@ def categorize_matching_transactions(
             .values(category_id=category_id)
             .execution_options(synchronize_session=False)
         )
+        if deleted_category_id is not None:
+            statement = statement.where(or_(
+                Transaction.category_id.is_(None),
+                Transaction.category_id != deleted_category_id,
+            ))
+        session.execute(statement)

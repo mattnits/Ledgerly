@@ -35,6 +35,7 @@ def init_db(db_engine=engine):
     ensure_account_balance_columns(db_engine)
     ensure_category_columns(db_engine)
     ensure_import_hash_column(db_engine)
+    ensure_transaction_restore_column(db_engine)
 
 
 def ensure_account_balance_columns(db_engine=engine) -> None:
@@ -80,6 +81,19 @@ def ensure_import_hash_column(db_engine=engine) -> None:
         with db_engine.begin() as connection:
             connection.exec_driver_sql(
                 "ALTER TABLE imports ADD COLUMN content_hash VARCHAR(64)"
+            )
+
+
+def ensure_transaction_restore_column(db_engine=engine) -> None:
+    inspector = inspect(db_engine)
+    if not inspector.has_table("transactions"):
+        return
+    existing = {column["name"] for column in inspector.get_columns("transactions")}
+    if "previous_category_id" not in existing:
+        with db_engine.begin() as connection:
+            connection.exec_driver_sql(
+                "ALTER TABLE transactions ADD COLUMN previous_category_id INTEGER "
+                "REFERENCES categories(id)"
             )
 
 

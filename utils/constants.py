@@ -30,5 +30,10 @@ DEFAULT_CATEGORY_COLORS = {
     "Health & Fitness": "#14b8a6",
     "Bills & Utilities": "#eab308",
     "E-Transfer": "#06b6d4",
+    "Investing": "#0a8b19",
+    "Exclude": "#64748b",
+    "Deleted": "#6b7280",
 }
 DEFAULT_CATEGORIES = tuple(DEFAULT_CATEGORY_COLORS)
+DELETED_CATEGORY_NAME = "Deleted"
+DASHBOARD_HIDDEN_CATEGORY_NAMES = ("deleted", "exclude", "excluded")

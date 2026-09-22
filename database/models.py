@@ -213,6 +213,7 @@ class Category(Base):
 
     transactions: Mapped[list["Transaction"]] = relationship(
         back_populates="category",
+        foreign_keys="Transaction.category_id",
     )
 
 
@@ -283,6 +284,10 @@ class Transaction(Base):
         ForeignKey("categories.id"),
         nullable=True,
     )
+    previous_category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("categories.id"),
+        nullable=True,
+    )
 
     import_id: Mapped[int | None] = mapped_column(
         ForeignKey("imports.id"),
@@ -316,6 +321,7 @@ class Transaction(Base):
 
     category: Mapped["Category | None"] = relationship(
         back_populates="transactions",
+        foreign_keys=[category_id],
     )
 
     import_record: Mapped["Import | None"] = relationship(
