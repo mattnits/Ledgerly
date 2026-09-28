@@ -54,7 +54,7 @@ class DashboardPage(QWidget):
         cards_layout.setVerticalSpacing(14)
 
         self.income_card = MetricCard("Income", "$", "#63dba0", False)
-        self.spending_card = MetricCard("Spending", "−", "#f16f88", True)
+        self.spending_card = MetricCard("Net Spending", "−", "#f16f88", True)
         self.investing_card = InvestingCard()
         self.category_card = CategoryCard()
         self.cash_flow_card = CashFlowCard()
@@ -121,24 +121,40 @@ class DashboardPage(QWidget):
             self.selected_month,
             self.session_factory,
         )
+        income_parts = [
+            f"Salary ${data.regular_income:,.0f}",
+            f"Other income ${data.other_income:,.0f}",
+        ]
+        if data.e_transfer_income_adjustment:
+            income_parts.append(
+                f"Net e-transfers +${data.e_transfer_income_adjustment:,.0f}"
+            )
         self.income_card.set_data(
             data.period_label,
-            data.income_total,
+            data.total_income,
             data.previous_income,
             data.month_labels,
             data.income_series,
+            " · ".join(income_parts),
         )
+        categorized_spending = data.gross_expense_spending - data.reimbursements
+        spending_parts = [f"Categorized ${categorized_spending:,.0f}"]
+        if data.e_transfer_spending_adjustment:
+            spending_parts.append(
+                f"Net e-transfers ${data.e_transfer_spending_adjustment:,.0f}"
+            )
         self.spending_card.set_data(
             data.period_label,
-            data.spending_total,
+            data.total_spending,
             data.previous_spending,
             data.month_labels,
             data.spending_series,
+            " · ".join(spending_parts),
         )
         self.investing_card.set_data(
             data.period_label,
             data.investing_total,
-            data.income_total,
+            data.total_income,
         )
         self.category_card.set_data(data.period_label, data.category_spending)
         self.cash_flow_card.set_data(

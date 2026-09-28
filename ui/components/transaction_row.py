@@ -5,6 +5,8 @@ from PySide6.QtCore import QObject, QSignalBlocker, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QPushButton, QWidget
 
+from utils.constants import TRANSACTION_TYPE_LABELS, TransactionType
+
 
 def _action_icon(restore: bool) -> QIcon:
     pixmap = QPixmap(18, 18)
@@ -35,6 +37,7 @@ def _action_icon(restore: bool) -> QIcon:
 
 class TransactionRow(QObject):
     category_changed = Signal(int, object)
+    transaction_type_changed = Signal(int, object)
     deletion_changed = Signal(int, bool)
 
     def __init__(
@@ -43,15 +46,17 @@ class TransactionRow(QObject):
         transaction_date: date,
         description: str,
         amount: Decimal,
+        transaction_type: TransactionType,
         imported_at: datetime,
         category_id: int | None,
         account_name: str,
+        is_deleted: bool,
         categories: list[tuple[int, str, str]],
-        deleted_category_id: int | None = None,
         parent=None,
     ):
         super().__init__(parent)
         self.transaction_id = transaction_id
+        self.saved_transaction_type = transaction_type
         self.saved_category_id = category_id
         self.description = description
         self.account_name = account_name
@@ -59,16 +64,25 @@ class TransactionRow(QObject):
             available_id: color for available_id, _, color in categories
         }
         self.amount = amount
-        self.is_deleted = category_id == deleted_category_id and deleted_category_id is not None
+        self.is_deleted = is_deleted
+
+        self.transaction_type_combo = QComboBox()
+        for available_type, label in TRANSACTION_TYPE_LABELS.items():
+            self.transaction_type_combo.addItem(label, available_type)
+        self.transaction_type_combo.setCurrentIndex(
+            self.transaction_type_combo.findData(transaction_type)
+        )
+        self.transaction_type_combo.setEnabled(not is_deleted)
+        self.transaction_type_combo.currentIndexChanged.connect(
+            self._transaction_type_selected
+        )
 
         self.category_combo = QComboBox()
-        if not self.is_deleted:
-            self.category_combo.addItem("Uncategorized", None)
+        self.category_combo.addItem(self._empty_category_label(transaction_type), None)
         for available_id, name, _ in categories:
-            if (available_id == deleted_category_id) == self.is_deleted:
-                self.category_combo.addItem(name, available_id)
+            self.category_combo.addItem(name, available_id)
         self.category_combo.setCurrentIndex(self.category_combo.findData(category_id))
-        self.category_combo.setEnabled(not self.is_deleted)
+        self.category_combo.setEnabled(not is_deleted)
         self._style_category()
         self.category_combo.currentIndexChanged.connect(self._category_selected)
 
@@ -81,14 +95,13 @@ class TransactionRow(QObject):
 
         self.action_button = QPushButton()
         self.action_button.setObjectName("transactionActionButton")
-        self.action_button.setIcon(_action_icon(self.is_deleted))
+        self.action_button.setIcon(_action_icon(is_deleted))
         self.action_button.setIconSize(QSize(18, 18))
         self.action_button.setAccessibleName(
-            "Restore transaction" if self.is_deleted else "Remove transaction"
+            "Restore transaction" if is_deleted else "Remove transaction"
         )
         self.action_button.setToolTip(
-            "Restore this transaction to its previous category"
-            if self.is_deleted else "Move this transaction to Deleted"
+            "Restore this transaction" if is_deleted else "Remove this transaction"
         )
         self.action_button.setFixedSize(28, 28)
         self.action_button.setStyleSheet("""
@@ -116,10 +129,23 @@ class TransactionRow(QObject):
             description,
             f"-${abs(amount):,.2f}" if amount < 0 else f"${amount:,.2f}",
             account_name,
-            f"{imported_at:%b} {imported_at.day}, {imported_at:%I:%M %p}",
+            self.transaction_type_combo,
             self.category_cell,
+            f"{imported_at:%b} {imported_at.day}, {imported_at:%I:%M %p}",
             self.action_cell,
         )
+
+    @staticmethod
+    def _empty_category_label(transaction_type: TransactionType) -> str:
+        if transaction_type in (
+            TransactionType.E_TRANSFER,
+            TransactionType.TRANSFER,
+            TransactionType.CREDIT_CARD_PAYMENT,
+            TransactionType.SAVINGS,
+            TransactionType.INVESTMENT,
+        ):
+            return "—"
+        return "Uncategorized"
 
     def _style_category(self) -> None:
         name = self.category_combo.currentText()
@@ -168,12 +194,29 @@ class TransactionRow(QObject):
         if category_id != self.saved_category_id:
             self.category_changed.emit(self.transaction_id, category_id)
 
-    def mark_saved(self, category_id: int | None) -> None:
+    def _transaction_type_selected(self, index: int) -> None:
+        transaction_type = self.transaction_type_combo.itemData(index)
+        self.category_combo.setItemText(0, self._empty_category_label(transaction_type))
+        if transaction_type != self.saved_transaction_type:
+            self.transaction_type_changed.emit(self.transaction_id, transaction_type)
+
+    def mark_saved(
+        self,
+        transaction_type: TransactionType,
+        category_id: int | None,
+    ) -> None:
+        self.saved_transaction_type = transaction_type
         self.saved_category_id = category_id
 
-    def restore_category(self) -> None:
-        with QSignalBlocker(self.category_combo):
+    def restore_assignment(self) -> None:
+        with QSignalBlocker(self.transaction_type_combo), QSignalBlocker(self.category_combo):
+            self.transaction_type_combo.setCurrentIndex(
+                self.transaction_type_combo.findData(self.saved_transaction_type)
+            )
             self.category_combo.setCurrentIndex(
                 self.category_combo.findData(self.saved_category_id)
+            )
+            self.category_combo.setItemText(
+                0, self._empty_category_label(self.saved_transaction_type)
             )
         self._style_category()

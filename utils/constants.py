@@ -19,21 +19,43 @@ class SUPPORTED_PARSE_TYPES(StrEnum):
     TD_CREDIT = "TD Credit",
     AMEX = "Amex",
 
+
+class TransactionType(StrEnum):
+    EXPENSE = "EXPENSE"
+    INCOME = "INCOME"
+    E_TRANSFER = "E_TRANSFER"
+    TRANSFER = "TRANSFER"
+    CREDIT_CARD_PAYMENT = "CREDIT_CARD_PAYMENT"
+    REFUND_REIMBURSEMENT = "REFUND_REIMBURSEMENT"
+    SAVINGS = "SAVINGS"
+    INVESTMENT = "INVESTMENT"
+
+
+TRANSACTION_TYPE_LABELS = {
+    TransactionType.EXPENSE: "Expense",
+    TransactionType.INCOME: "Income",
+    TransactionType.E_TRANSFER: "E-Transfer",
+    TransactionType.TRANSFER: "Transfer",
+    TransactionType.CREDIT_CARD_PAYMENT: "Credit Card Payment",
+    TransactionType.REFUND_REIMBURSEMENT: "Refund / Reimbursement",
+    TransactionType.SAVINGS: "Savings",
+    TransactionType.INVESTMENT: "Investment",
+}
+
 DEFAULT_CATEGORY_COLORS = {
-    "Transport": "#3b82f6",
     "Food": "#f97316",
     "Groceries": "#22c55e",
-    "Shopping": "#a855f7",
-    "Entertainment": "#ec4899",
-    "Subscriptions": "#6366f1",
-    "Income": "#10b981",
-    "Health & Fitness": "#14b8a6",
+    "Housing": "#8b5cf6",
     "Bills & Utilities": "#eab308",
-    "E-Transfer": "#06b6d4",
-    "Investing": "#0a8b19",
-    "Exclude": "#64748b",
-    "Deleted": "#6b7280",
+    "Transportation": "#3b82f6",
+    "Entertainment": "#ec4899",
+    "Travel": "#0ea5e9",
+    "Shopping": "#a855f7",
+    "Subscriptions": "#6366f1",
+    "Health & Fitness": "#14b8a6",
+    "Gifts": "#f43f5e",
+    "Other": "#64748b",
+    "Salary": "#10b981",
+    "Other Income": "#34d399",
 }
 DEFAULT_CATEGORIES = tuple(DEFAULT_CATEGORY_COLORS)
-DELETED_CATEGORY_NAME = "Deleted"
-DASHBOARD_HIDDEN_CATEGORY_NAMES = ("deleted", "exclude", "excluded")

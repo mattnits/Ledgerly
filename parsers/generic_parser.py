@@ -10,7 +10,7 @@ from sqlalchemy import or_, select
 
 from utils.constants import SUPPORTED_PARSE_TYPES
 from database.db import SessionLocal
-from database.category_rules import category_rules_for_user, normalize_description
+from database.category_rules import category_rules_for_user, classify_description
 from database.models import Account, Import, Transaction, User
 from parsers.date_parser import infer_slash_month_first, parse_transaction_date
 
@@ -148,13 +148,15 @@ class GenericParser:
                     self._skip_line(filepath, line_number, exc)
                     continue
 
+                assignment = classify_description(description, category_rules)
                 session.add(Transaction(
                     account_id=account.id,
                     import_record=import_record,
                     transaction_date=transaction_date,
                     description=description,
                     amount=amount,
-                    category_id=category_rules.get(normalize_description(description)),
+                    transaction_type=assignment.transaction_type,
+                    category_id=assignment.category_id,
                 ))
                 row_count += 1
                 if balance is not None and (
@@ -238,13 +240,15 @@ class GenericParser:
                     self._skip_line(filepath, line_number, exc)
                     continue
 
+                assignment = classify_description(description, category_rules)
                 session.add(Transaction(
                     account_id=account_id,
                     import_record=import_record,
                     transaction_date=transaction_date,
                     description=description,
                     amount=amount,
-                    category_id=category_rules.get(normalize_description(description)),
+                    transaction_type=assignment.transaction_type,
+                    category_id=assignment.category_id,
                 ))
                 row_count += 1
 

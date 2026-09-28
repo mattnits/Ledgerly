@@ -13,6 +13,7 @@ from sqlalchemy.pool import StaticPool
 from database.db import Base
 from database.models import Account, Category, Transaction, User
 from ui.components.statements_table import StatementsTable
+from utils.constants import TransactionType
 
 
 class TransactionScrollTest(unittest.TestCase):
@@ -42,6 +43,7 @@ class TransactionScrollTest(unittest.TestCase):
                     transaction_date=date.today(),
                     description=f"Unique row {index:03}",
                     amount=Decimal("-1.00"),
+                    transaction_type=TransactionType.EXPENSE,
                 )
                 for index in range(250)
             )

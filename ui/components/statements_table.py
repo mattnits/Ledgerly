@@ -22,12 +22,15 @@ from database.transactions import get_transaction_months, set_transaction_delete
 from ui.components.generic_table import GenericTable
 from ui.components.period_selector import PeriodSelector
 from ui.components.transaction_row import TransactionRow
-from utils.constants import DELETED_CATEGORY_NAME
+from utils.constants import TRANSACTION_TYPE_LABELS, TransactionType
 
 
 class StatementsTable(QWidget):
     PAGE_SIZE = 200
-    COLUMN_HEADERS = ("Date", "Description", "Amount", "Account", "Imported at", "Category", "Action")
+    COLUMN_HEADERS = (
+        "Date", "Description", "Amount", "Account", "Transaction Type",
+        "Category", "Imported At", "Action",
+    )
 
     def __init__(self, parent=None, session_factory=SessionLocal):
         super().__init__(parent)
@@ -35,7 +38,6 @@ class StatementsTable(QWidget):
         self.user_id: str | None = None
         self.rows: list[TransactionRow] = []
         self.category_options: list[tuple[int, str, str]] = []
-        self.deleted_category_id: int | None = None
         self.total_count = 0
         self.filtered_count = 0
         self.loaded_count = 0
@@ -44,6 +46,7 @@ class StatementsTable(QWidget):
         self.sort_column = 0
         self.sort_order = Qt.SortOrder.DescendingOrder
         self.category_filter: int | str | None = "all"
+        self.transaction_type_filter: TransactionType | str = "all"
         self.account_filter: int | str = "all"
         self.period_filter = "monthly"
         self.date_range_filter = "this_month"
@@ -99,6 +102,17 @@ class StatementsTable(QWidget):
         self.category_selector.currentIndexChanged.connect(self._select_category)
         self._add_filter_field(filter_layout, "Category", self.category_selector)
 
+        self.transaction_type_selector = QComboBox()
+        self.transaction_type_selector.addItem("All Transaction Types", "all")
+        for transaction_type, label in TRANSACTION_TYPE_LABELS.items():
+            self.transaction_type_selector.addItem(label, transaction_type)
+        self.transaction_type_selector.currentIndexChanged.connect(
+            self._select_transaction_type
+        )
+        self._add_filter_field(
+            filter_layout, "Transaction Type", self.transaction_type_selector
+        )
+
         self.date_range_selector = QComboBox()
         for label, value in (
             ("This Month", "this_month"),
@@ -135,7 +149,9 @@ class StatementsTable(QWidget):
         table_header.sectionClicked.connect(self._sort_by_column)
         table_header.setSortIndicatorShown(False)
         self.table.verticalScrollBar().valueChanged.connect(self._on_scroll)
-        for column, width in ((0, 155), (2, 135), (3, 135), (4, 170), (5, 220), (6, 68)):
+        for column, width in (
+            (0, 150), (2, 125), (3, 130), (4, 175), (5, 190), (6, 165), (7, 68)
+        ):
             table_header.setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
             self.table.setColumnWidth(column, width)
         self.table.horizontalHeaderItem(2).setTextAlignment(
@@ -287,6 +303,12 @@ class StatementsTable(QWidget):
             self.category_filter = value
             self._apply_filters()
 
+    def _select_transaction_type(self, index: int) -> None:
+        value = self.transaction_type_selector.itemData(index)
+        if value is not None:
+            self.transaction_type_filter = value
+            self._apply_filters()
+
     def _select_date_range(self, index: int) -> None:
         value = self.date_range_selector.itemData(index)
         if value is None:
@@ -312,10 +334,17 @@ class StatementsTable(QWidget):
         self.date_range_filter = "this_month"
         self.account_filter = "all"
         self.category_filter = "all"
+        self.transaction_type_filter = "all"
         self.period_selector.reset(emit=False)
-        with QSignalBlocker(self.account_selector), QSignalBlocker(self.category_selector), QSignalBlocker(self.search):
+        with (
+            QSignalBlocker(self.account_selector),
+            QSignalBlocker(self.category_selector),
+            QSignalBlocker(self.transaction_type_selector),
+            QSignalBlocker(self.search),
+        ):
             self.account_selector.setCurrentIndex(0)
             self.category_selector.setCurrentIndex(0)
+            self.transaction_type_selector.setCurrentIndex(0)
             self.search.clear()
         self._set_date_range_choice()
         self._apply_filters()
@@ -328,6 +357,7 @@ class StatementsTable(QWidget):
         self.date_range_filter = "this_month"
         self.account_filter = "all"
         self.category_filter = "all"
+        self.transaction_type_filter = "all"
         self.period_selector.reset(emit=False)
         self._set_date_range_choice()
         with QSignalBlocker(self.search):
@@ -337,7 +367,6 @@ class StatementsTable(QWidget):
     def reload(self) -> None:
         if self.user_id is None:
             self.category_options = []
-            self.deleted_category_id = None
             accounts = []
         else:
             with self.session_factory() as session:
@@ -349,13 +378,8 @@ class StatementsTable(QWidget):
                 self.category_options = list(session.execute(
                     select(Category.id, Category.name, Category.color).order_by(Category.name)
                 ).all())
-                self.deleted_category_id = next(
-                    (category_id for category_id, name, _ in self.category_options
-                     if name == DELETED_CATEGORY_NAME),
-                    None,
-                )
         self.available_months = get_transaction_months(
-            self.user_id, self.session_factory, include_hidden_categories=True
+            self.user_id, self.session_factory, include_deleted=True
         )
         self._refresh_month_choices()
         with QSignalBlocker(self.account_selector):
@@ -371,6 +395,7 @@ class StatementsTable(QWidget):
         with QSignalBlocker(self.category_selector):
             self.category_selector.clear()
             self.category_selector.addItem("All Categories", "all")
+            self.category_selector.addItem("Removed Transactions", "deleted")
             self.category_selector.addItem("Uncategorized", None)
             for category_id, name, _ in self.category_options:
                 self.category_selector.addItem(name, category_id)
@@ -379,6 +404,14 @@ class StatementsTable(QWidget):
                 self.category_filter = "all"
                 selected = 0
             self.category_selector.setCurrentIndex(selected)
+        with QSignalBlocker(self.transaction_type_selector):
+            selected = self.transaction_type_selector.findData(
+                self.transaction_type_filter
+            )
+            if selected < 0:
+                self.transaction_type_filter = "all"
+                selected = 0
+            self.transaction_type_selector.setCurrentIndex(selected)
         self._apply_filters()
 
     def _reset_and_apply(self) -> None:
@@ -396,7 +429,7 @@ class StatementsTable(QWidget):
         else:
             self.sort_column = column
             self.sort_order = (
-                Qt.SortOrder.DescendingOrder if column in (0, 2, 4)
+                Qt.SortOrder.DescendingOrder if column in (0, 2, 6)
                 else Qt.SortOrder.AscendingOrder
             )
         self._update_sort_headers()
@@ -432,22 +465,19 @@ class StatementsTable(QWidget):
                     Transaction.transaction_date,
                     Transaction.description,
                     Transaction.amount,
+                    Transaction.transaction_type,
                     Transaction.imported_at,
                     Transaction.category_id,
                     Account.name,
+                    Transaction.is_deleted,
                 )
                 .join(Account, Transaction.account_id == Account.id)
                 .outerjoin(Category, Transaction.category_id == Category.id)
                 .where(Account.user_id == self.user_id)
             )
-            if self.deleted_category_id is not None:
-                if self.category_filter == self.deleted_category_id:
-                    base = base.where(Transaction.category_id == self.deleted_category_id)
-                else:
-                    base = base.where(or_(
-                        Transaction.category_id.is_(None),
-                        Transaction.category_id != self.deleted_category_id,
-                    ))
+            base = base.where(
+                Transaction.is_deleted.is_(self.category_filter == "deleted")
+            )
             if self.period_filter == "monthly":
                 year, month = self.selected_month
                 first_day = date(year, month, 1)
@@ -471,8 +501,13 @@ class StatementsTable(QWidget):
             if self.account_filter != "all":
                 base = base.where(Account.id == self.account_filter)
 
-            if self.category_filter != "all":
+            if self.category_filter not in ("all", "deleted"):
                 base = base.where(Transaction.category_id == self.category_filter)
+
+            if self.transaction_type_filter != "all":
+                base = base.where(
+                    Transaction.transaction_type == self.transaction_type_filter
+                )
 
             query = self.search.text().strip()
             if query:
@@ -481,6 +516,7 @@ class StatementsTable(QWidget):
                     Transaction.description.ilike(pattern),
                     Account.name.ilike(pattern),
                     Category.name.ilike(pattern),
+                    cast(Transaction.transaction_type, String).ilike(pattern),
                     cast(Transaction.transaction_date, String).ilike(pattern),
                     cast(Transaction.amount, String).ilike(pattern),
                 ))
@@ -490,8 +526,9 @@ class StatementsTable(QWidget):
                 Transaction.description,
                 Transaction.amount,
                 Account.name,
-                Transaction.imported_at,
+                Transaction.transaction_type,
                 func.coalesce(Category.name, "Uncategorized"),
+                Transaction.imported_at,
             )
             expression = sort_expressions[self.sort_column]
             ordering = (
@@ -526,10 +563,9 @@ class StatementsTable(QWidget):
         else:
             if self.total_count == 0:
                 empty_text = (
-                    "No deleted transactions"
-                    if self.category_filter == self.deleted_category_id
-                    and self.deleted_category_id is not None
-                    else "No active transactions. Use the Deleted category filter to restore items."
+                    "No removed transactions"
+                    if self.category_filter == "deleted"
+                    else "No active transactions. Use Removed Transactions to restore items."
                 )
             else:
                 empty_text = "No transactions match your search or filter"
@@ -562,12 +598,15 @@ class StatementsTable(QWidget):
             row = TransactionRow(
                 *transaction,
                 self.category_options,
-                deleted_category_id=self.deleted_category_id,
                 parent=self,
             )
             row.category_changed.connect(
-                lambda transaction_id, category_id, row=row:
-                self._save_category(row, transaction_id, category_id)
+                lambda transaction_id, _category_id, row=row:
+                self._save_assignment(row, transaction_id)
+            )
+            row.transaction_type_changed.connect(
+                lambda transaction_id, _transaction_type, row=row:
+                self._save_assignment(row, transaction_id)
             )
             row.deletion_changed.connect(self._set_deleted)
             new_rows.append(row)
@@ -584,17 +623,29 @@ class StatementsTable(QWidget):
                 amount_item.setForeground(QColor(
                     "#fb7977" if row.amount < 0 else "#63dba0" if row.amount > 0 else "#cbd4e1"
                 ))
-                self.table.item(row_number, 4).setForeground(QColor("#9eabba"))
+                self.table.item(row_number, 6).setForeground(QColor("#9eabba"))
         finally:
             self.table.setUpdatesEnabled(True)
         self.rows.extend(new_rows)
 
-    def _save_category(
+    def _save_assignment(
         self,
         row: TransactionRow,
         transaction_id: int,
-        category_id: int | None,
     ) -> None:
+        transaction_type = row.transaction_type_combo.currentData()
+        category_id = row.category_combo.currentData()
+        if transaction_type in (
+            TransactionType.E_TRANSFER,
+            TransactionType.TRANSFER,
+            TransactionType.CREDIT_CARD_PAYMENT,
+            TransactionType.SAVINGS,
+            TransactionType.INVESTMENT,
+        ):
+            category_id = None
+            with QSignalBlocker(row.category_combo):
+                row.category_combo.setCurrentIndex(0)
+            row._style_category()
         try:
             with self.session_factory.begin() as session:
                 transaction = session.get(Transaction, transaction_id)
@@ -602,22 +653,29 @@ class StatementsTable(QWidget):
                     raise ValueError("Transaction is no longer available")
                 if category_id is not None and session.get(Category, category_id) is None:
                     raise ValueError("Category is no longer available")
-                if category_id == self.deleted_category_id:
-                    raise ValueError("Use Remove to mark a transaction as deleted")
+                transaction.transaction_type = transaction_type
                 transaction.category_id = category_id
                 save_category_rule(
-                    session, self.user_id, transaction.description, category_id
+                    session,
+                    self.user_id,
+                    transaction.description,
+                    transaction_type,
+                    category_id,
                 )
                 categorize_matching_transactions(
-                    session, self.user_id, transaction.description, category_id
+                    session,
+                    self.user_id,
+                    transaction.description,
+                    transaction_type,
+                    category_id,
                 )
         except Exception as exc:
-            row.restore_category()
-            self.message.setText(f"Could not save category: {exc}")
+            row.restore_assignment()
+            self.message.setText(f"Could not save transaction assignment: {exc}")
             self.message.show()
             return
 
-        row.mark_saved(category_id)
+        row.mark_saved(transaction_type, category_id)
         QTimer.singleShot(0, lambda: self._apply_filters(preserve_scroll=True))
 
     def _set_deleted(self, transaction_id: int, deleted: bool) -> None:

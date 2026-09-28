@@ -1,7 +1,7 @@
 from sqlalchemy import delete, select, update
 
 from database.db import SessionLocal
-from database.models import Category, CategoryRule, Transaction
+from database.models import Category, CategoryRule, MonthlyCategoryBudget, Transaction
 
 
 def list_categories() -> list[tuple[int, str, str, bool]]:
@@ -42,10 +42,11 @@ def delete_category(category_id: int) -> None:
             .values(category_id=None)
         )
         session.execute(
-            update(Transaction).where(Transaction.previous_category_id == category_id)
-            .values(previous_category_id=None)
+            delete(CategoryRule).where(CategoryRule.category_id == category_id)
         )
         session.execute(
-            delete(CategoryRule).where(CategoryRule.category_id == category_id)
+            delete(MonthlyCategoryBudget).where(
+                MonthlyCategoryBudget.category_id == category_id
+            )
         )
         session.delete(category)

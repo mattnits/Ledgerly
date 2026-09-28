@@ -201,10 +201,14 @@ class MetricCard(DashboardCard):
         self.value_label.setStyleSheet(
             "color: #f7f8fb; font-size: 32px; font-weight: 800;"
         )
+        self.breakdown_label = QLabel()
+        self.breakdown_label.setWordWrap(True)
+        self.breakdown_label.setStyleSheet("color: #aeb9c8; font-size: 10px;")
         self.change_label = QLabel()
         self.change_label.setStyleSheet("color: #8e9bad; font-size: 11px;")
         self.chart = GroupedBarChart()
         self.layout.addWidget(self.value_label)
+        self.layout.addWidget(self.breakdown_label)
         self.layout.addWidget(self.change_label)
         self.layout.addWidget(self.chart, 1)
 
@@ -215,9 +219,12 @@ class MetricCard(DashboardCard):
         previous: Decimal | None,
         labels: tuple[str, ...],
         series: tuple[ChartSeries, ...],
+        breakdown: str | None = None,
     ) -> None:
         self.subtitle_label.setText(period_label)
         self.value_label.setText(format_currency(total))
+        self.breakdown_label.setText(breakdown or "")
+        self.breakdown_label.setVisible(bool(breakdown))
         if previous is None:
             self.change_label.setText("Full transaction history")
             self.change_label.setStyleSheet("color: #8e9bad; font-size: 11px;")
@@ -277,7 +284,7 @@ class InvestingCard(DashboardCard):
         self.value_label.setStyleSheet(
             "color: #f7f8fb; font-size: 32px; font-weight: 800;"
         )
-        self.detail_label = QLabel("No investing transactions")
+        self.detail_label = QLabel("No investment snapshots")
         self.detail_label.setWordWrap(True)
         self.detail_label.setStyleSheet("color: #8e9bad; font-size: 11px;")
         value_column.addWidget(self.value_label)
@@ -288,7 +295,7 @@ class InvestingCard(DashboardCard):
         content.addWidget(self.ring, alignment=Qt.AlignmentFlag.AlignRight)
         self.layout.addLayout(content, 1)
 
-        note = QLabel("Investing is included in spending totals")
+        note = QLabel("Manual investment contributions are separate from spending")
         note.setWordWrap(True)
         note.setStyleSheet(
             "color: #afbdd0; background: #202733; border: 1px solid #303b4b;"
@@ -309,7 +316,7 @@ class InvestingCard(DashboardCard):
         self.detail_label.setText(
             f"{percentage:.0f}% of income invested"
             if income
-            else "No debit income for this period"
+            else "No categorized income for this period"
         )
 
 
