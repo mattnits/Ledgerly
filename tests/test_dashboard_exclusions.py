@@ -46,7 +46,13 @@ class DashboardTransactionTypesTest(unittest.TestCase):
                 institution="Test",
                 account_type="debit",
             )
-            session.add(account)
+            unused_account = Account(
+                user_id=user.id,
+                name="Credit Card",
+                institution="Test",
+                account_type="credit",
+            )
+            session.add_all((account, unused_account))
             session.flush()
 
             def add(
@@ -131,6 +137,13 @@ class DashboardTransactionTypesTest(unittest.TestCase):
         self.assertEqual(monthly.gross_spending, Decimal("20.00"))
         self.assertEqual(monthly.reimbursements, Decimal("3.00"))
         self.assertEqual(monthly.spending_total, Decimal("17.00"))
+        self.assertEqual(
+            [(item.name, item.amount) for item in monthly.account_spending],
+            [
+                ("Checking", Decimal("20.00")),
+                ("Credit Card", Decimal("0")),
+            ],
+        )
         self.assertEqual(monthly.investing_total, Decimal("10.00"))
         self.assertEqual(monthly.savings_goal, Decimal("200.00"))
         self.assertEqual(monthly.savings_actual, Decimal("150.00"))

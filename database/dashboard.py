@@ -50,6 +50,12 @@ class CategorySpending:
 
 
 @dataclass(frozen=True)
+class AccountSpending:
+    name: str
+    amount: Decimal
+
+
+@dataclass(frozen=True)
 class RecentTransaction:
     description: str
     account_name: str
@@ -73,6 +79,7 @@ class DashboardData:
     e_transfer_spending_adjustment: Decimal
     total_income: Decimal
     total_spending: Decimal
+    account_spending: tuple[AccountSpending, ...]
     investing_total: Decimal
     savings_goal: Decimal | None
     savings_actual: Decimal
@@ -187,12 +194,18 @@ def get_dashboard_data(
         raise ValueError(f"Unsupported dashboard period: {period}")
 
     rows = []
+    account_rows: list[tuple[int, str]] = []
     investment_rows: list[tuple[date, str, Decimal, Decimal]] = []
     savings_goal_rows: list[tuple[int, int, Decimal]] = []
     savings_rows: list[tuple[date, Decimal, Decimal | None]] = []
     budget_rows: list[tuple[int, str, int, int, Decimal]] = []
     if user_id is not None:
         with session_factory() as session:
+            account_rows = list(session.execute(
+                select(Account.id, Account.name)
+                .where(Account.user_id == user_id)
+                .order_by(Account.id)
+            ).all())
             rows = session.execute(
                 select(
                     Transaction.transaction_date,
@@ -354,6 +367,18 @@ def get_dashboard_data(
         else _summarize_by_month(selected)
     )
 
+    gross_spending_by_account: defaultdict[int, Decimal] = defaultdict(Decimal)
+    for item in selected:
+        if item.transaction_type == TransactionType.EXPENSE:
+            gross_spending_by_account[item.account_id] += abs(item.amount)
+    account_spending = tuple(
+        AccountSpending(
+            account_name,
+            gross_spending_by_account.get(account_id, Decimal()),
+        )
+        for account_id, account_name in account_rows
+    )
+
     category_totals: defaultdict[tuple[str, str], Decimal] = defaultdict(Decimal)
     category_totals_by_id: defaultdict[int, Decimal] = defaultdict(Decimal)
     for item in selected:
@@ -494,6 +519,7 @@ def get_dashboard_data(
         e_transfer_spending_adjustment=summary.e_transfer_spending_adjustment,
         total_income=summary.total_income,
         total_spending=summary.total_spending,
+        account_spending=account_spending,
         investing_total=investing_total,
         savings_goal=savings_goal,
         savings_actual=savings_actual,

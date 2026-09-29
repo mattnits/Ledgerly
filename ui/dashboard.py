@@ -134,27 +134,29 @@ class DashboardPage(QWidget):
         )
         self.income_card.set_data(
             data.period_label,
-            "Salary / regular income",
-            data.regular_income,
             "Total income",
             data.total_income,
             data.previous_income,
             (
+                ("Regular income", data.regular_income),
                 ("Other income", data.other_income),
-                ("Net positive e-transfers", data.e_transfer_income_adjustment),
+                ("Positive e-transfers", data.e_transfer_income_adjustment),
             ),
+            data.cash_flow_income,
         )
         self.spending_card.set_data(
             data.period_label,
-            "Expense transactions",
-            data.gross_expense_spending,
-            "Total spending",
+            "Total spending (after adjustments)",
             data.total_spending,
             data.previous_spending,
-            (
+            tuple(
+                (item.name, item.amount)
+                for item in data.account_spending
+            ) + (
                 ("Refunds / reimbursements", -data.reimbursements),
                 ("Net negative e-transfers", data.e_transfer_spending_adjustment),
             ),
+            data.cash_flow_spending,
         )
         self.savings_card.set_data(
             data.period_label,

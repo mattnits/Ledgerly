@@ -3,7 +3,14 @@ from __future__ import annotations
 from decimal import Decimal
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPen,
+)
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -21,7 +28,8 @@ from ui.theme import COLORS, set_label_icon
 
 def format_currency(value: Decimal, *, cents: bool = False) -> str:
     precision = 2 if cents else 0
-    return f"${value:,.{precision}f}"
+    sign = "-" if value < 0 else ""
+    return f"{sign}${abs(value):,.{precision}f}"
 
 
 class DashboardCard(QFrame):
@@ -115,6 +123,57 @@ class SummaryRow(QWidget):
         self.value_widget.setText(value)
 
 
+class SparklineChart(QWidget):
+    def __init__(self, accent: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.accent = accent
+        self.values: tuple[Decimal, ...] = ()
+        self.setMinimumHeight(50)
+
+    def set_data(self, values: tuple[Decimal, ...]) -> None:
+        self.values = values
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if not self.values:
+            return
+
+        plot = self.rect().adjusted(3, 7, -3, -7)
+        minimum = min(float(value) for value in self.values)
+        maximum = max(float(value) for value in self.values)
+        spread = max(maximum - minimum, 1.0)
+        step = plot.width() / max(len(self.values) - 1, 1)
+        points = [
+            QPointF(
+                plot.left() + index * step,
+                plot.bottom()
+                - ((float(value) - minimum) / spread) * plot.height(),
+            )
+            for index, value in enumerate(self.values)
+        ]
+        line = QPainterPath(points[0])
+        for point in points[1:]:
+            line.lineTo(point)
+
+        fill = QPainterPath(line)
+        fill.lineTo(points[-1].x(), plot.bottom())
+        fill.lineTo(points[0].x(), plot.bottom())
+        fill.closeSubpath()
+        gradient = QLinearGradient(0, plot.top(), 0, plot.bottom())
+        top_color = QColor(self.accent)
+        top_color.setAlpha(80)
+        bottom_color = QColor(self.accent)
+        bottom_color.setAlpha(5)
+        gradient.setColorAt(0, top_color)
+        gradient.setColorAt(1, bottom_color)
+        painter.fillPath(fill, gradient)
+        painter.setPen(QPen(QColor(self.accent), 2.0))
+        painter.drawPath(line)
+
+
 class MetricCard(DashboardCard):
     def __init__(
         self,
@@ -125,62 +184,65 @@ class MetricCard(DashboardCard):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(title, icon, accent, parent)
+        self.accent = accent
         self.improvement_when_down = improvement_when_down
-        self.primary_caption = QLabel()
-        self.primary_caption.setStyleSheet(
+        self.total_value = QLabel("$0")
+        self.total_value.setStyleSheet(
+            f"color: {accent}; font-size: 32px; font-weight: 800;"
+        )
+        self.total_caption = QLabel()
+        self.total_caption.setWordWrap(True)
+        self.total_caption.setStyleSheet(
             f"color: {COLORS['text_muted']}; font-size: 11px; font-weight: 600;"
         )
-        self.primary_value = QLabel("$0")
-        self.primary_value.setStyleSheet(
-            f"color: {COLORS['text']}; font-size: 29px; font-weight: 800;"
-        )
+
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setStyleSheet(f"color: {COLORS['border_soft']};")
+
         self.rows = QWidget()
         self.rows_layout = QVBoxLayout(self.rows)
         self.rows_layout.setContentsMargins(0, 0, 0, 0)
         self.rows_layout.setSpacing(4)
 
-        self.total_frame = QFrame()
-        self.total_frame.setObjectName("summaryTotal")
-        total_layout = QHBoxLayout(self.total_frame)
-        total_layout.setContentsMargins(12, 9, 12, 9)
-        self.total_caption = QLabel()
-        self.total_caption.setStyleSheet(
-            f"color: {COLORS['text_muted']}; font-size: 11px;"
+        self.trend_frame = QFrame()
+        self.trend_frame.setObjectName("metricTrend")
+        trend_layout = QHBoxLayout(self.trend_frame)
+        trend_layout.setContentsMargins(9, 5, 9, 5)
+        trend_layout.setSpacing(10)
+        self.chart = SparklineChart(accent)
+        self.change_label = QLabel()
+        self.change_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
-        self.total_value = QLabel("$0")
-        self.total_value.setStyleSheet(
-            f"color: {accent}; font-size: 16px; font-weight: 750;"
-        )
-        total_layout.addWidget(self.total_caption, 1)
-        total_layout.addWidget(self.total_value)
-        self.total_frame.setStyleSheet(f"""
-            QFrame#summaryTotal {{
-                background: {COLORS['surface_alt']};
-                border: 1px solid {COLORS['border_soft']};
+        trend_layout.addWidget(self.chart, 1)
+        trend_layout.addWidget(self.change_label)
+        tint = QColor(accent)
+        tint.setAlpha(22)
+        self.trend_frame.setStyleSheet(f"""
+            QFrame#metricTrend {{
+                background: rgba({tint.red()}, {tint.green()}, {tint.blue()}, 22);
+                border: 1px solid {QColor(accent).darker(260).name()};
                 border-radius: 9px;
             }}
         """)
 
-        self.change_label = QLabel()
-        self.layout.addWidget(self.primary_caption)
-        self.layout.addWidget(self.primary_value)
-        self.layout.addWidget(self.rows, 1)
-        self.layout.addWidget(self.total_frame)
-        self.layout.addWidget(self.change_label)
+        self.layout.addWidget(self.total_value)
+        self.layout.addWidget(self.total_caption)
+        self.layout.addWidget(divider)
+        self.layout.addWidget(_transparent_scroll(self.rows), 1)
+        self.layout.addWidget(self.trend_frame)
 
     def set_data(
         self,
         period_label: str,
-        primary_caption: str,
-        primary_value: Decimal,
         total_caption: str,
         total: Decimal,
         previous: Decimal | None,
         rows: tuple[tuple[str, Decimal], ...],
+        trend_values: tuple[Decimal, ...],
     ) -> None:
         self.subtitle_label.setText(period_label)
-        self.primary_caption.setText(primary_caption)
-        self.primary_value.setText(format_currency(primary_value))
         self.total_caption.setText(total_caption)
         self.total_value.setText(format_currency(total))
         _clear_layout(self.rows_layout)
@@ -189,24 +251,26 @@ class MetricCard(DashboardCard):
         self.rows_layout.addStretch()
 
         if previous is None:
-            self.change_label.setText("All available transaction history")
-            color = COLORS["text_dim"]
+            self.change_label.setText("All history")
+            color = self.accent
             weight = 400
         elif previous == 0:
-            self.change_label.setText("No activity in the previous month")
-            color = COLORS["text_dim"]
+            self.change_label.setText("No prior\nactivity")
+            color = self.accent
             weight = 400
         else:
             change = (total - previous) / previous * 100
             is_up = change >= 0
-            is_good = (not is_up) if self.improvement_when_down else is_up
-            color = COLORS["positive"] if is_good else COLORS["negative"]
+            color = self.accent
             weight = 650
-            direction = "up" if is_up else "down"
-            self.change_label.setText(f"{abs(change):.0f}% {direction} from last month")
+            direction = "↑" if is_up else "↓"
+            self.change_label.setText(
+                f"{direction} {abs(change):.0f}%\nvs. last month"
+            )
         self.change_label.setStyleSheet(
             f"color: {color}; font-size: 10px; font-weight: {weight};"
         )
+        self.chart.set_data(trend_values)
 
 
 class SavingsCard(DashboardCard):
