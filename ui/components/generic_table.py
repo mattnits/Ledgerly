@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 class GenericTable(QTableWidget):
     def __init__(self, columns: Sequence[str], rows: Sequence[Sequence[str | QWidget]] = (), parent=None):
         super().__init__(0, len(columns), parent)
+        self.setObjectName("genericTable")
         self.setHorizontalHeaderLabels(list(columns))
         self.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -25,47 +26,14 @@ class GenericTable(QTableWidget):
         self.setMinimumHeight(360)
 
         self.verticalHeader().hide()
-        self.verticalHeader().setDefaultSectionSize(37)
+        self.verticalHeader().setDefaultSectionSize(52)
         self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.horizontalHeader().setMinimumSectionSize(96)
-        self.horizontalHeader().setFixedHeight(44)
+        self.horizontalHeader().setFixedHeight(48)
         self.horizontalHeader().setDefaultAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
 
-        self.setStyleSheet("""
-            QTableWidget {
-                background: #1f2329;
-                alternate-background-color: #22262d;
-                color: #cbd4e1;
-                border: none;
-                font-size: 12px;
-                selection-background-color: #283a50;
-                selection-color: #eef5ff;
-            }
-            QHeaderView::section {
-                background: #23272e;
-                color: #dce4ef;
-                border: none;
-                border-bottom: 1px solid #343a43;
-                padding: 10px 14px;
-                font-weight: 700;
-            }
-            QTableWidget::item {
-                padding: 0 14px;
-                border-bottom: 1px solid #313740;
-            }
-            QScrollBar:vertical {
-                background: #1f2329;
-                width: 9px;
-                border: none;
-            }
-            QScrollBar::handle:vertical {
-                background: #4b5563;
-                border-radius: 4px;
-                min-height: 24px;
-            }
-        """)
         self.set_rows(rows)
 
     def set_rows(self, rows: Sequence[Sequence[str | QWidget]]) -> None:

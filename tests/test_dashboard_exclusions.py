@@ -8,7 +8,16 @@ from sqlalchemy.pool import StaticPool
 
 from database.dashboard import get_dashboard_data
 from database.db import Base
-from database.models import Account, Category, InvestmentSnapshot, Transaction, User
+from database.models import (
+    Account,
+    Category,
+    InvestmentSnapshot,
+    MonthlyCategoryBudget,
+    SavingsGoal,
+    SavingsSnapshot,
+    Transaction,
+    User,
+)
 from database.transactions import get_transaction_months
 from utils.constants import TransactionType
 
@@ -37,7 +46,13 @@ class DashboardTransactionTypesTest(unittest.TestCase):
                 institution="Test",
                 account_type="debit",
             )
-            session.add(account)
+            unused_account = Account(
+                user_id=user.id,
+                name="Credit Card",
+                institution="Test",
+                account_type="credit",
+            )
+            session.add_all((account, unused_account))
             session.flush()
 
             def add(
@@ -79,12 +94,40 @@ class DashboardTransactionTypesTest(unittest.TestCase):
                 date(2026, 6, 1), "Removed", "900.00",
                 TransactionType.INCOME, "Other Income", deleted=True,
             )
-            session.add(InvestmentSnapshot(
-                user_id=user.id,
-                account_name="Brokerage",
-                snapshot_date=date(2026, 8, 31),
-                monthly_contribution=Decimal("10.00"),
-                portfolio_value=Decimal("1000.00"),
+            session.add_all((
+                InvestmentSnapshot(
+                    user_id=user.id,
+                    account_name="Brokerage",
+                    snapshot_date=date(2026, 7, 31),
+                    monthly_contribution=Decimal("20.00"),
+                    portfolio_value=Decimal("800.00"),
+                ),
+                InvestmentSnapshot(
+                    user_id=user.id,
+                    account_name="Brokerage",
+                    snapshot_date=date(2026, 8, 31),
+                    monthly_contribution=Decimal("10.00"),
+                    portfolio_value=Decimal("1000.00"),
+                ),
+                SavingsGoal(
+                    user_id=user.id,
+                    year=2026,
+                    month=8,
+                    target_amount=Decimal("200.00"),
+                ),
+                SavingsSnapshot(
+                    user_id=user.id,
+                    snapshot_date=date(2026, 8, 31),
+                    amount_saved_this_month=Decimal("150.00"),
+                    total_savings_balance=Decimal("750.00"),
+                ),
+                MonthlyCategoryBudget(
+                    user_id=user.id,
+                    category_id=categories["Food"].id,
+                    year=2026,
+                    month=8,
+                    target_amount=Decimal("25.00"),
+                ),
             ))
 
         monthly = get_dashboard_data("test-user", "monthly", (2026, 8), sessions)
@@ -94,7 +137,25 @@ class DashboardTransactionTypesTest(unittest.TestCase):
         self.assertEqual(monthly.gross_spending, Decimal("20.00"))
         self.assertEqual(monthly.reimbursements, Decimal("3.00"))
         self.assertEqual(monthly.spending_total, Decimal("17.00"))
+        self.assertEqual(
+            [(item.name, item.amount) for item in monthly.account_spending],
+            [
+                ("Checking", Decimal("20.00")),
+                ("Credit Card", Decimal("0")),
+            ],
+        )
         self.assertEqual(monthly.investing_total, Decimal("10.00"))
+        self.assertEqual(monthly.savings_goal, Decimal("200.00"))
+        self.assertEqual(monthly.savings_actual, Decimal("150.00"))
+        self.assertEqual(monthly.savings_balance, Decimal("750.00"))
+        self.assertEqual(monthly.budget_progress[0].spent, Decimal("17.00"))
+        self.assertEqual(monthly.budget_progress[0].target, Decimal("25.00"))
+        self.assertEqual(monthly.portfolio_value, Decimal("1000.00"))
+        self.assertEqual(monthly.previous_portfolio_value, Decimal("800.00"))
+        self.assertEqual(
+            monthly.investment_value_series,
+            (Decimal("800.00"), Decimal("1000.00")),
+        )
         self.assertEqual(monthly.previous_income, Decimal("80.00"))
         self.assertEqual(monthly.previous_spending, Decimal("8.00"))
         self.assertEqual(monthly.cash_flow_income[-1], Decimal("135.00"))
@@ -110,6 +171,7 @@ class DashboardTransactionTypesTest(unittest.TestCase):
         all_time = get_dashboard_data("test-user", "all", (2026, 8), sessions)
         self.assertEqual(all_time.income_total, Decimal("215.00"))
         self.assertEqual(all_time.spending_total, Decimal("25.00"))
+        self.assertEqual(all_time.investing_total, Decimal("30.00"))
         self.assertEqual(len(all_time.month_labels), 2)
         self.assertEqual(
             get_transaction_months("test-user", sessions),

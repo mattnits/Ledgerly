@@ -148,7 +148,11 @@ class GenericParser:
                     self._skip_line(filepath, line_number, exc)
                     continue
 
-                assignment = classify_description(description, category_rules)
+                assignment = classify_description(
+                    description,
+                    category_rules,
+                    account.id,
+                )
                 session.add(Transaction(
                     account_id=account.id,
                     import_record=import_record,
@@ -241,7 +245,11 @@ class GenericParser:
                     self._skip_line(filepath, line_number, exc)
                     continue
 
-                assignment = classify_description(description, category_rules)
+                assignment = classify_description(
+                    description,
+                    category_rules,
+                    account_id,
+                )
                 session.add(Transaction(
                     account_id=account_id,
                     import_record=import_record,

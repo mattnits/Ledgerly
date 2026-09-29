@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from utils.constants import DEFAULT_CATEGORY_COLORS
@@ -32,6 +32,40 @@ def init_db(db_engine=engine):
     from database import models
 
     Base.metadata.create_all(bind=db_engine)
+    _migrate_category_rule_account_scope(db_engine)
+
+
+def _migrate_category_rule_account_scope(db_engine) -> None:
+    """Upgrade pre-account-scope SQLite databases without losing rules."""
+    inspector = inspect(db_engine)
+    if "category_rules" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("category_rules")}
+    if "account_id" in columns:
+        return
+    if db_engine.dialect.name != "sqlite":
+        raise RuntimeError(
+            "The category_rules table needs an account_id migration for this database."
+        )
+
+    from database.models import CategoryRule
+
+    with db_engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE category_rules RENAME TO category_rules_legacy")
+        )
+        CategoryRule.__table__.create(bind=connection)
+        connection.execute(text("""
+            INSERT INTO category_rules (
+                id, user_id, account_id, description_key, description_example,
+                match_type, transaction_type, category_id, priority, is_active
+            )
+            SELECT
+                id, user_id, NULL, description_key, description_example,
+                match_type, transaction_type, category_id, priority, is_active
+            FROM category_rules_legacy
+        """))
+        connection.execute(text("DROP TABLE category_rules_legacy"))
 
 
 def ensure_categories(db_engine=engine) -> None:

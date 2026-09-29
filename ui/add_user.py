@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 from database.db import SessionLocal
 from database.models import User
 from ui.components.page_header import PageHeader
+from ui.theme import set_button_icon
 
 
 class AddUserPage(QWidget):
@@ -21,6 +22,7 @@ class AddUserPage(QWidget):
 
     def __init__(self):
         super().__init__()
+        self.setObjectName("addUserPage")
 
         self.selected_color = QColor("#3498db")
 
@@ -74,6 +76,7 @@ class AddUserPage(QWidget):
         self.color_button = QPushButton(
             "Choose Colour"
         )
+        set_button_icon(self.color_button, "fa6s.palette", size=16)
 
         self.color_button.setFixedHeight(40)
 
@@ -95,6 +98,13 @@ class AddUserPage(QWidget):
 
         self.add_user_button = QPushButton(
             "Add User"
+        )
+        self.add_user_button.setObjectName("primaryButton")
+        set_button_icon(
+            self.add_user_button,
+            "fa6s.user-plus",
+            color="#ffffff",
+            active_color="#ffffff",
         )
 
         self.add_user_button.setFixedHeight(44)
@@ -141,7 +151,7 @@ class AddUserPage(QWidget):
             f"""
             background-color: {self.selected_color.name()};
             border-radius: 8px;
-            border: 1px solid #888888;
+            border: 1px solid #5a5f66;
             """
         )
 

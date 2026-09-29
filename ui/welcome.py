@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.components.page_header import PageHeader
+from ui.theme import set_button_icon
 
 
 class WelcomePage(QWidget):
@@ -13,6 +14,7 @@ class WelcomePage(QWidget):
 
     def __init__(self):
         super().__init__()
+        self.setObjectName("welcomePage")
 
         layout = QVBoxLayout(self)
 
@@ -27,18 +29,16 @@ class WelcomePage(QWidget):
         )
 
         add_user_button = QPushButton("Add User")
+        add_user_button.setObjectName("primaryButton")
+        set_button_icon(
+            add_user_button,
+            "fa6s.user-plus",
+            color="#ffffff",
+            active_color="#ffffff",
+        )
 
         add_user_button.setFixedWidth(180)
         add_user_button.setFixedHeight(44)
-
-        add_user_button.setStyleSheet("""
-            QPushButton {
-                font-size: 15px;
-                font-weight: 600;
-                border-radius: 8px;
-                padding: 10px 18px;
-            }
-        """)
 
         add_user_button.clicked.connect(
             self.add_user_clicked.emit

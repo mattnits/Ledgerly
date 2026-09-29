@@ -9,11 +9,20 @@ from sqlalchemy import select
 
 from database.db import SessionLocal
 from database.finance_services import (
+    BudgetProgress,
     MonthlyFinancialSummary,
     combine_financial_summaries,
     summarize_transaction_rows,
 )
-from database.models import Account, Category, InvestmentSnapshot, Transaction
+from database.models import (
+    Account,
+    Category,
+    InvestmentSnapshot,
+    MonthlyCategoryBudget,
+    SavingsGoal,
+    SavingsSnapshot,
+    Transaction,
+)
 from utils.constants import TransactionType
 
 
@@ -41,6 +50,12 @@ class CategorySpending:
 
 
 @dataclass(frozen=True)
+class AccountSpending:
+    name: str
+    amount: Decimal
+
+
+@dataclass(frozen=True)
 class RecentTransaction:
     description: str
     account_name: str
@@ -64,7 +79,16 @@ class DashboardData:
     e_transfer_spending_adjustment: Decimal
     total_income: Decimal
     total_spending: Decimal
+    account_spending: tuple[AccountSpending, ...]
     investing_total: Decimal
+    savings_goal: Decimal | None
+    savings_actual: Decimal
+    savings_balance: Decimal | None
+    budget_progress: tuple[BudgetProgress, ...]
+    portfolio_value: Decimal
+    previous_portfolio_value: Decimal | None
+    investment_month_labels: tuple[str, ...]
+    investment_value_series: tuple[Decimal, ...]
     previous_income: Decimal | None
     previous_spending: Decimal | None
     income_series: tuple[ChartSeries, ...]
@@ -99,6 +123,7 @@ class _TransactionData:
     transaction_type: TransactionType
     account_id: int
     account_name: str
+    category_id: int | None
     category_name: str | None
     category_color: str | None
 
@@ -169,9 +194,18 @@ def get_dashboard_data(
         raise ValueError(f"Unsupported dashboard period: {period}")
 
     rows = []
-    investment_rows: list[tuple[date, Decimal]] = []
+    account_rows: list[tuple[int, str]] = []
+    investment_rows: list[tuple[date, str, Decimal, Decimal]] = []
+    savings_goal_rows: list[tuple[int, int, Decimal]] = []
+    savings_rows: list[tuple[date, Decimal, Decimal | None]] = []
+    budget_rows: list[tuple[int, str, int, int, Decimal]] = []
     if user_id is not None:
         with session_factory() as session:
+            account_rows = list(session.execute(
+                select(Account.id, Account.name)
+                .where(Account.user_id == user_id)
+                .order_by(Account.id)
+            ).all())
             rows = session.execute(
                 select(
                     Transaction.transaction_date,
@@ -180,6 +214,7 @@ def get_dashboard_data(
                     Transaction.transaction_type,
                     Account.id,
                     Account.name,
+                    Category.id,
                     Category.name,
                     Category.color,
                 )
@@ -194,8 +229,38 @@ def get_dashboard_data(
             investment_rows = list(session.execute(
                 select(
                     InvestmentSnapshot.snapshot_date,
+                    InvestmentSnapshot.account_name,
                     InvestmentSnapshot.monthly_contribution,
+                    InvestmentSnapshot.portfolio_value,
                 ).where(InvestmentSnapshot.user_id == user_id)
+            ).all())
+            savings_goal_rows = list(session.execute(
+                select(
+                    SavingsGoal.year,
+                    SavingsGoal.month,
+                    SavingsGoal.target_amount,
+                ).where(SavingsGoal.user_id == user_id)
+            ).all())
+            savings_rows = list(session.execute(
+                select(
+                    SavingsSnapshot.snapshot_date,
+                    SavingsSnapshot.amount_saved_this_month,
+                    SavingsSnapshot.total_savings_balance,
+                )
+                .where(SavingsSnapshot.user_id == user_id)
+                .order_by(SavingsSnapshot.snapshot_date)
+            ).all())
+            budget_rows = list(session.execute(
+                select(
+                    MonthlyCategoryBudget.category_id,
+                    Category.name,
+                    MonthlyCategoryBudget.year,
+                    MonthlyCategoryBudget.month,
+                    MonthlyCategoryBudget.target_amount,
+                )
+                .join(Category, MonthlyCategoryBudget.category_id == Category.id)
+                .where(MonthlyCategoryBudget.user_id == user_id)
+                .order_by(Category.name)
             ).all())
 
     transactions = [_TransactionData(*row) for row in rows]
@@ -211,10 +276,6 @@ def get_dashboard_data(
             transactions, _month_before(selected_month)
         )
         period_label = date(*selected_month, 1).strftime("%B %Y")
-        investment_rows = [
-            row for row in investment_rows
-            if (row[0].year, row[0].month) == selected_month
-        ]
     else:
         transaction_months = [
             (item.transaction_date.year, item.transaction_date.month)
@@ -300,17 +361,38 @@ def get_dashboard_data(
             if any(values)
         )
 
-    summary = _summarize(selected) if period == "monthly" else _summarize_by_month(selected)
+    summary = (
+        _summarize(selected)
+        if period == "monthly"
+        else _summarize_by_month(selected)
+    )
+
+    gross_spending_by_account: defaultdict[int, Decimal] = defaultdict(Decimal)
+    for item in selected:
+        if item.transaction_type == TransactionType.EXPENSE:
+            gross_spending_by_account[item.account_id] += abs(item.amount)
+    account_spending = tuple(
+        AccountSpending(
+            account_name,
+            gross_spending_by_account.get(account_id, Decimal()),
+        )
+        for account_id, account_name in account_rows
+    )
 
     category_totals: defaultdict[tuple[str, str], Decimal] = defaultdict(Decimal)
+    category_totals_by_id: defaultdict[int, Decimal] = defaultdict(Decimal)
     for item in selected:
         if item.category_name is None:
             continue
         key = (item.category_name, item.category_color or "#718096")
         if item.transaction_type == TransactionType.EXPENSE:
             category_totals[key] += abs(item.amount)
+            if item.category_id is not None:
+                category_totals_by_id[item.category_id] += abs(item.amount)
         elif item.transaction_type == TransactionType.REFUND_REIMBURSEMENT:
             category_totals[key] -= item.amount
+            if item.category_id is not None:
+                category_totals_by_id[item.category_id] -= item.amount
 
     category_spending = tuple(
         CategorySpending(name, color, amount)
@@ -320,6 +402,98 @@ def get_dashboard_data(
         )
         if amount > 0
     )
+
+    selected_budget_rows = [
+        row for row in budget_rows
+        if period == "all" or (row[2], row[3]) == selected_month
+    ]
+    budget_targets: dict[int, tuple[str, Decimal]] = {}
+    for category_id, name, _, _, target in selected_budget_rows:
+        previous_name, previous_target = budget_targets.get(
+            category_id, (name, Decimal())
+        )
+        budget_targets[category_id] = (previous_name, previous_target + target)
+    budget_progress = tuple(
+        BudgetProgress(
+            category_id,
+            name,
+            max(category_totals_by_id.get(category_id, Decimal()), Decimal()),
+            target,
+        )
+        for category_id, (name, target) in sorted(
+            budget_targets.items(), key=lambda item: item[1][0].casefold()
+        )
+    )
+
+    selected_goal_rows = [
+        row for row in savings_goal_rows
+        if period == "all" or (row[0], row[1]) == selected_month
+    ]
+    savings_goal = (
+        sum((row[2] for row in selected_goal_rows), Decimal())
+        if selected_goal_rows
+        else None
+    )
+    selected_savings_rows = [
+        row for row in savings_rows
+        if period == "all" or (row[0].year, row[0].month) == selected_month
+    ]
+    savings_actual = sum((row[1] for row in selected_savings_rows), Decimal())
+    balance_rows = [row for row in selected_savings_rows if row[2] is not None]
+    savings_balance = balance_rows[-1][2] if balance_rows else None
+
+    selected_investments = [
+        row for row in investment_rows
+        if period == "all" or (row[0].year, row[0].month) == selected_month
+    ]
+    investing_total = sum((row[2] for row in selected_investments), Decimal())
+    snapshot_months = sorted(
+        {(row[0].year, row[0].month) for row in investment_rows}
+    )
+
+    def portfolio_as_of(month: tuple[int, int]) -> Decimal:
+        latest_by_account: dict[str, tuple[date, Decimal]] = {}
+        for snapshot_date, account_name, _, value in investment_rows:
+            if (snapshot_date.year, snapshot_date.month) > month:
+                continue
+            previous = latest_by_account.get(account_name)
+            if previous is None or snapshot_date > previous[0]:
+                latest_by_account[account_name] = (snapshot_date, value)
+        return sum((value for _, value in latest_by_account.values()), Decimal())
+
+    portfolio_month = (
+        selected_month
+        if period == "monthly"
+        else (snapshot_months[-1] if snapshot_months else None)
+    )
+    portfolio_value = (
+        portfolio_as_of(portfolio_month) if portfolio_month else Decimal()
+    )
+    previous_portfolio_value = None
+    if portfolio_month:
+        previous_month = _month_before(portfolio_month)
+        if any(
+            (row[0].year, row[0].month) <= previous_month
+            for row in investment_rows
+        ):
+            previous_portfolio_value = portfolio_as_of(previous_month)
+
+    visible_investment_months = [
+        month for month in snapshot_months
+        if period == "all" or month <= selected_month
+    ][-12:]
+    investment_month_labels = tuple(
+        date(year, month, 1).strftime(
+            "%b"
+            if len({y for y, _ in visible_investment_months}) == 1
+            else "%b %y"
+        )
+        for year, month in visible_investment_months
+    )
+    investment_value_series = tuple(
+        portfolio_as_of(month) for month in visible_investment_months
+    )
+
     recent = tuple(
         RecentTransaction(
             item.description,
@@ -345,7 +519,16 @@ def get_dashboard_data(
         e_transfer_spending_adjustment=summary.e_transfer_spending_adjustment,
         total_income=summary.total_income,
         total_spending=summary.total_spending,
-        investing_total=sum((row[1] for row in investment_rows), Decimal()),
+        account_spending=account_spending,
+        investing_total=investing_total,
+        savings_goal=savings_goal,
+        savings_actual=savings_actual,
+        savings_balance=savings_balance,
+        budget_progress=budget_progress,
+        portfolio_value=portfolio_value,
+        previous_portfolio_value=previous_portfolio_value,
+        investment_month_labels=investment_month_labels,
+        investment_value_series=investment_value_series,
         previous_income=previous_income,
         previous_spending=previous_spending,
         income_series=make_series(income_accounts, INCOME_ACCOUNT_COLORS),

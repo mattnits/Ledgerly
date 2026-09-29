@@ -8,6 +8,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.theme import set_button_icon
+
 
 class GenericDialog(QDialog):
     submitted = Signal()
@@ -25,10 +27,14 @@ class GenericDialog(QDialog):
         self.setWindowTitle(title)
         self.setModal(True)
         self.resize(500, 350)
+        self.setObjectName("genericDialog")
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setSpacing(18)
 
         title_label = QLabel(title)
+        title_label.setObjectName("dialogTitle")
         layout.addWidget(title_label)
 
         layout.addWidget(content, 1)
@@ -38,6 +44,15 @@ class GenericDialog(QDialog):
 
         cancel_button = QPushButton("Cancel")
         submit_button = QPushButton(submit_label)
+        submit_button.setObjectName("primaryButton")
+        set_button_icon(cancel_button, "fa6s.xmark", size=15)
+        set_button_icon(
+            submit_button,
+            "fa6s.check",
+            color="#ffffff",
+            active_color="#ffffff",
+            size=15,
+        )
 
         button_layout.addWidget(cancel_button)
         button_layout.addWidget(submit_button)

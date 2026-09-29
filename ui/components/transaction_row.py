@@ -2,14 +2,24 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from PySide6.QtCore import QObject, QPoint, QSignalBlocker, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
     QMenu,
     QPushButton,
+    QSizePolicy,
     QWidget,
+)
+
+from ui.components.account_badge import AccountBadge
+from ui.theme import (
+    awesome_icon,
+    category_icon_name,
+    contrasting_text,
+    set_label_icon,
+    transaction_type_icon,
 )
 
 from utils.constants import (
@@ -18,6 +28,12 @@ from utils.constants import (
     TRANSACTION_TYPE_LABELS,
     TransactionType,
 )
+
+
+ROW_TRANSACTION_TYPE_LABELS = {
+    TransactionType.CREDIT_CARD_PAYMENT: "CC Payment",
+    TransactionType.REFUND_REIMBURSEMENT: "Refund / Reimb.",
+}
 
 
 class WheelSafeComboBox(QComboBox):
@@ -39,38 +55,11 @@ class SelectableTextLabel(QLabel):
         )
         self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.setCursor(Qt.CursorShape.IBeamCursor)
-        self.setContentsMargins(14, 0, 14, 0)
+        self.setContentsMargins(10, 0, 10, 0)
         self.setAlignment(
             (Qt.AlignmentFlag.AlignHCenter if centered else Qt.AlignmentFlag.AlignLeft)
             | Qt.AlignmentFlag.AlignVCenter
         )
-
-
-def _action_icon(restore: bool) -> QIcon:
-    pixmap = QPixmap(18, 18)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setPen(QPen(QColor("#dce6f3"), 1.6, Qt.PenStyle.SolidLine,
-                        Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-    if restore:
-        path = QPainterPath()
-        path.moveTo(4, 8)
-        path.cubicTo(5, 4, 10, 3, 13, 6)
-        path.cubicTo(16, 9, 14, 14, 9, 14)
-        painter.drawPath(path)
-        painter.drawLine(4, 8, 4, 4)
-        painter.drawLine(4, 8, 8, 8)
-    else:
-        painter.drawLine(4, 5, 14, 5)
-        painter.drawLine(7, 3, 11, 3)
-        painter.drawLine(5, 7, 6, 15)
-        painter.drawLine(13, 7, 12, 15)
-        painter.drawLine(6, 15, 12, 15)
-        painter.drawLine(8, 8, 8, 13)
-        painter.drawLine(10, 8, 10, 13)
-    painter.end()
-    return QIcon(pixmap)
 
 
 class TransactionRow(QObject):
@@ -89,6 +78,7 @@ class TransactionRow(QObject):
         imported_at: datetime,
         category_id: int | None,
         account_name: str,
+        institution: str,
         is_deleted: bool,
         categories: list[tuple[int, str, str]],
         parent=None,
@@ -110,7 +100,31 @@ class TransactionRow(QObject):
             f"{transaction_date:%b} {transaction_date.day}, {transaction_date.year}"
         )
         self.description_label = SelectableTextLabel(description)
+        self.description_label.setContentsMargins(0, 0, 0, 0)
         self.description_label.setToolTip(description)
+        self.description_cell = QWidget()
+        self.description_cell.setObjectName("tableCell")
+        description_layout = QHBoxLayout(self.description_cell)
+        description_layout.setContentsMargins(12, 0, 8, 0)
+        description_layout.setSpacing(10)
+        description_icon = QLabel()
+        category = next(
+            (
+                (name, color)
+                for available_id, name, color in categories
+                if available_id == category_id
+            ),
+            None,
+        )
+        if category is None:
+            icon_name = "fa6s.receipt"
+            icon_color = "#4aa3ff"
+        else:
+            icon_name = category_icon_name(category[0])
+            icon_color = category[1]
+        set_label_icon(description_icon, icon_name, color=icon_color, size=18)
+        description_layout.addWidget(description_icon)
+        description_layout.addWidget(self.description_label, 1)
         self.amount_label = SelectableTextLabel(
             f"-${abs(amount):,.2f}" if amount < 0 else f"${amount:,.2f}",
             centered=True,
@@ -118,17 +132,46 @@ class TransactionRow(QObject):
         self.amount_label.setStyleSheet(
             f"color: {'#fb7977' if amount < 0 else '#63dba0' if amount > 0 else '#cbd4e1'};"
         )
-        self.account_label = SelectableTextLabel(account_name)
+        self.account_cell = AccountBadge(account_name, institution, icon_size=22)
         self.imported_label = SelectableTextLabel(
             f"{imported_at:%b} {imported_at.day}, {imported_at:%I:%M %p}"
         )
-        self.imported_label.setStyleSheet("color: #9eabba;")
+        self.imported_label.setStyleSheet("color: #a8adb4;")
 
         self.transaction_type_combo = WheelSafeComboBox()
+        self.transaction_type_combo.setObjectName("transactionTypeCombo")
+        self.transaction_type_combo.setFixedHeight(34)
+        self.transaction_type_combo.setMinimumWidth(0)
+        self.transaction_type_combo.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         if transaction_type is None:
-            self.transaction_type_combo.addItem("Needs review", None)
+            self.transaction_type_combo.addItem(
+                awesome_icon("fa6s.circle-exclamation", color="#ffbd4a"),
+                "Needs review",
+                None,
+            )
         for available_type, label in TRANSACTION_TYPE_LABELS.items():
-            self.transaction_type_combo.addItem(label, available_type)
+            row_label = ROW_TRANSACTION_TYPE_LABELS.get(available_type, label)
+            self.transaction_type_combo.addItem(
+                transaction_type_icon(available_type), row_label, available_type
+            )
+            self.transaction_type_combo.setItemData(
+                self.transaction_type_combo.count() - 1,
+                label,
+                Qt.ItemDataRole.ToolTipRole,
+            )
+        longest_transaction_type = max(
+            (
+                self.transaction_type_combo.fontMetrics().horizontalAdvance(label)
+                for label in TRANSACTION_TYPE_LABELS.values()
+            ),
+            default=0,
+        )
+        self.transaction_type_combo.view().setMinimumWidth(
+            longest_transaction_type + 72
+        )
         self.transaction_type_combo.setCurrentIndex(
             self.transaction_type_combo.findData(transaction_type)
         )
@@ -137,6 +180,13 @@ class TransactionRow(QObject):
             self._transaction_type_selected
         )
 
+        self.transaction_type_cell = QWidget()
+        self.transaction_type_cell.setObjectName("tableCell")
+        transaction_type_layout = QHBoxLayout(self.transaction_type_cell)
+        transaction_type_layout.setContentsMargins(6, 0, 6, 0)
+        transaction_type_layout.setSpacing(0)
+        transaction_type_layout.addWidget(self.transaction_type_combo)
+
         self.category_combo = WheelSafeComboBox()
         self._set_category_options(transaction_type, category_id)
         self._style_category()
@@ -144,36 +194,34 @@ class TransactionRow(QObject):
 
         self.category_cell = QWidget()
         category_layout = QHBoxLayout(self.category_cell)
-        category_layout.setContentsMargins(14, 0, 0, 0)
+        category_layout.setContentsMargins(6, 0, 6, 0)
         category_layout.setSpacing(0)
-        category_layout.addWidget(self.category_combo, alignment=Qt.AlignmentFlag.AlignVCenter)
-        category_layout.addStretch()
+        category_layout.addWidget(self.category_combo)
 
         self.action_button = QPushButton()
         self.action_button.setObjectName("transactionActionButton")
-        if is_deleted:
-            self.action_button.setIcon(_action_icon(True))
-            self.action_button.setIconSize(QSize(18, 18))
-        else:
-            self.action_button.setText("⋯")
+        self.action_button.setIcon(
+            awesome_icon(
+                "fa6s.rotate-left" if is_deleted else "fa6s.ellipsis",
+                color="#b9bec5",
+            )
+        )
+        self.action_button.setIconSize(QSize(18, 18))
         self.action_button.setAccessibleName(
             "Restore transaction" if is_deleted else "Transaction actions"
         )
         self.action_button.setToolTip(
             "Restore this transaction" if is_deleted else "Transaction actions"
         )
-        self.action_button.setFixedSize(28, 28)
+        self.action_button.setFixedSize(34, 34)
         self.action_button.setStyleSheet("""
             QPushButton#transactionActionButton {
-                color: #cbd4e1;
-                background: #303945;
-                border: 1px solid #465263;
-                border-radius: 6px;
+                background: #20242a;
+                border: 1px solid #3a414a;
+                border-radius: 8px;
+                padding: 0;
             }
-            QPushButton#transactionActionButton:hover {
-                color: #ffffff;
-                background: #465263;
-            }
+            QPushButton#transactionActionButton:hover { background: #2b3036; }
         """)
         self.action_button.clicked.connect(self._show_actions)
         self.action_cell = QWidget()
@@ -183,10 +231,10 @@ class TransactionRow(QObject):
 
         self.cells = (
             self.date_label,
-            self.description_label,
+            self.description_cell,
             self.amount_label,
-            self.account_label,
-            self.transaction_type_combo,
+            self.account_cell,
+            self.transaction_type_cell,
             self.category_cell,
             self.imported_label,
             self.action_cell,
@@ -197,8 +245,14 @@ class TransactionRow(QObject):
             self.deletion_changed.emit(self.transaction_id, False)
             return
         menu = QMenu(self.action_button)
-        create_rule = menu.addAction("Create Rule From Transaction")
-        remove = menu.addAction("Remove Transaction")
+        create_rule = menu.addAction(
+            awesome_icon("fa6s.wand-magic-sparkles", color="#b9bec5"),
+            "Create Rule From Transaction",
+        )
+        remove = menu.addAction(
+            awesome_icon("fa6s.trash", color="#ff8587"),
+            "Remove Transaction",
+        )
         selected = menu.exec(
             self.action_button.mapToGlobal(QPoint(0, self.action_button.height()))
         )
@@ -221,9 +275,11 @@ class TransactionRow(QObject):
         with QSignalBlocker(self.category_combo):
             self.category_combo.clear()
             self.category_combo.addItem(
-                self._empty_category_label(transaction_type), None
+                awesome_icon("fa6s.minus", color="#a9afb6"),
+                self._empty_category_label(transaction_type),
+                None,
             )
-            for available_id, name, _ in self.categories:
+            for available_id, name, color in self.categories:
                 if transaction_type in CATEGORY_FREE_TRANSACTION_TYPES:
                     continue
                 if (
@@ -236,7 +292,14 @@ class TransactionRow(QObject):
                     and name in INCOME_CATEGORY_NAMES
                 ):
                     continue
-                self.category_combo.addItem(name, available_id)
+                self.category_combo.addItem(
+                    awesome_icon(
+                        category_icon_name(name),
+                        color=contrasting_text(color),
+                    ),
+                    name,
+                    available_id,
+                )
             selected = self.category_combo.findData(category_id)
             self.category_combo.setCurrentIndex(max(0, selected))
         self.category_combo.setEnabled(
@@ -248,40 +311,34 @@ class TransactionRow(QObject):
     def _style_category(self) -> None:
         name = self.category_combo.currentText()
         category_id = self.category_combo.currentData()
-        color = QColor(self.category_colors.get(category_id, "#303b4b"))
+        color = QColor(self.category_colors.get(category_id, "#34383e"))
         background = color.name()
-        border = color.darker(125).name() if category_id is not None else "#4a5a70"
-        channels = (color.redF(), color.greenF(), color.blueF())
-        linear = tuple(
-            channel / 12.92 if channel <= 0.04045
-            else ((channel + 0.055) / 1.055) ** 2.4
-            for channel in channels
+        border = color.darker(125).name() if category_id is not None else "#545a62"
+        foreground = contrasting_text(background)
+        self.category_combo.setMinimumWidth(110)
+        self.category_combo.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
         )
-        luminance = sum(weight * channel for weight, channel in zip(
-            (0.2126, 0.7152, 0.0722), linear
-        ))
-        foreground = "#10151c" if luminance > 0.179 else "#f8fafc"
-        self.category_combo.setFixedWidth(
-            min(152, max(90, self.category_combo.fontMetrics().horizontalAdvance(name) + 30))
-        )
-        self.category_combo.setFixedHeight(26)
+        self.category_combo.setFixedHeight(34)
+        self.category_combo.setToolTip(name)
         self.category_combo.setStyleSheet(f"""
             QComboBox {{
                 color: {foreground};
                 background: {background};
                 border: 1px solid {border};
-                border-radius: 13px;
-                padding: 2px 10px;
+                border-radius: 10px;
+                padding: 4px 10px;
                 font-size: 12px;
             }}
-            QComboBox:hover {{ border-color: #657183; }}
+            QComboBox:hover {{ border-color: #737980; }}
             QComboBox:focus {{ border: 1px solid #4c99f3; }}
             QComboBox::drop-down {{ border: none; width: 0px; }}
             QComboBox QAbstractItemView {{
-                color: #d6deea;
-                background: #23282f;
-                border: 1px solid #414955;
-                selection-background-color: #304b6b;
+                color: #e0e2e5;
+                background: #22262b;
+                border: 1px solid #40464e;
+                selection-background-color: #3b4858;
                 selection-color: #ffffff;
             }}
         """)

@@ -272,6 +272,10 @@ class CategoryRule(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=True,
+    )
     description_key: Mapped[str] = mapped_column(String(512), nullable=False)
     description_example: Mapped[str] = mapped_column(String(255), nullable=False)
     match_type: Mapped[MatchType] = mapped_column(
@@ -293,10 +297,16 @@ class CategoryRule(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     user: Mapped["User"] = relationship(back_populates="category_rules")
+    account: Mapped["Account | None"] = relationship()
     category: Mapped["Category | None"] = relationship(back_populates="category_rules")
 
     __table_args__ = (
-        UniqueConstraint("user_id", "description_key", name="uq_category_rule_user_description"),
+        UniqueConstraint(
+            "user_id",
+            "description_key",
+            "account_id",
+            name="uq_category_rule_user_description_account",
+        ),
     )
 
 
