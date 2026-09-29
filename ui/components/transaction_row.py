@@ -30,6 +30,12 @@ from utils.constants import (
 )
 
 
+ROW_TRANSACTION_TYPE_LABELS = {
+    TransactionType.CREDIT_CARD_PAYMENT: "CC Payment",
+    TransactionType.REFUND_REIMBURSEMENT: "Refund / Reimb.",
+}
+
+
 class WheelSafeComboBox(QComboBox):
     """An inline editor that lets wheel events continue to the table."""
 
@@ -135,7 +141,7 @@ class TransactionRow(QObject):
         self.transaction_type_combo = WheelSafeComboBox()
         self.transaction_type_combo.setObjectName("transactionTypeCombo")
         self.transaction_type_combo.setFixedHeight(34)
-        self.transaction_type_combo.setMinimumWidth(200)
+        self.transaction_type_combo.setMinimumWidth(0)
         self.transaction_type_combo.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Fixed,
@@ -147,8 +153,9 @@ class TransactionRow(QObject):
                 None,
             )
         for available_type, label in TRANSACTION_TYPE_LABELS.items():
+            row_label = ROW_TRANSACTION_TYPE_LABELS.get(available_type, label)
             self.transaction_type_combo.addItem(
-                transaction_type_icon(available_type), label, available_type
+                transaction_type_icon(available_type), row_label, available_type
             )
             self.transaction_type_combo.setItemData(
                 self.transaction_type_combo.count() - 1,

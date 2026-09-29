@@ -52,14 +52,24 @@ class StatementsTable(QWidget):
         "Category", "Imported At", "Action",
     )
     DESCRIPTION_COLUMN = 1
-    MINIMUM_DESCRIPTION_WIDTH = 340
-    BASE_COLUMN_WIDTHS = {
+    MINIMUM_COLUMN_WIDTHS = {
+        0: 100,
+        1: 220,
+        2: 90,
+        3: 130,
+        4: 190,
+        5: 145,
+        6: 120,
+        7: 56,
+    }
+    MAXIMUM_COLUMN_WIDTHS = {
         0: 124,
-        2: 108,
-        3: 168,
+        1: 320,
+        2: 112,
+        3: 190,
         4: 232,
-        5: 174,
-        6: 150,
+        5: 200,
+        6: 160,
         7: 76,
     }
 
@@ -162,6 +172,7 @@ class StatementsTable(QWidget):
             )
         transaction_filter_width = max(
             230,
+            self.transaction_type_selector.sizeHint().width() + 8,
             max(
                 self.transaction_type_selector.fontMetrics().horizontalAdvance(label)
                 for label in (
@@ -225,17 +236,11 @@ class StatementsTable(QWidget):
         self.table.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
-        for column, width in self.BASE_COLUMN_WIDTHS.items():
+        for column, width in self.MAXIMUM_COLUMN_WIDTHS.items():
             table_header.setSectionResizeMode(
                 column, QHeaderView.ResizeMode.Interactive
             )
             self.table.setColumnWidth(column, width)
-        table_header.setSectionResizeMode(
-            self.DESCRIPTION_COLUMN, QHeaderView.ResizeMode.Interactive
-        )
-        self.table.setColumnWidth(
-            self.DESCRIPTION_COLUMN, self.MINIMUM_DESCRIPTION_WIDTH
-        )
         self.table.horizontalHeaderItem(2).setTextAlignment(
             Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter
         )
@@ -363,50 +368,24 @@ class StatementsTable(QWidget):
             QTimer.singleShot(0, self._fit_table_columns)
 
     def _fit_table_columns(self) -> None:
-        """Give Description the surplus width without squeezing other fields."""
+        """Scale all columns while keeping every field within readable bounds."""
         if self.table.viewport().width() <= 0:
             return
 
-        for column, minimum in self.BASE_COLUMN_WIDTHS.items():
-            if self.table.columnWidth(column) < minimum:
-                self.table.setColumnWidth(column, minimum)
-
-        fixed_width = sum(
-            self.table.columnWidth(column)
-            for column in range(self.table.columnCount())
-            if column != self.DESCRIPTION_COLUMN
-        )
-        available = self.table.viewport().width() - fixed_width - 2
-        self.table.setColumnWidth(
-            self.DESCRIPTION_COLUMN,
-            max(self.MINIMUM_DESCRIPTION_WIDTH, available),
-        )
-
-    def _fit_content_columns(
-        self,
-        accounts: list[tuple[int, str, str]],
-    ) -> None:
-        metrics = self.table.fontMetrics()
-        account_width = max(
-            self.BASE_COLUMN_WIDTHS[3],
+        available = self.table.viewport().width() - 2
+        minimum_total = sum(self.MINIMUM_COLUMN_WIDTHS.values())
+        maximum_total = sum(self.MAXIMUM_COLUMN_WIDTHS.values())
+        scale = min(
+            1.0,
             max(
-                (metrics.horizontalAdvance(name) + 54 for _, name, _ in accounts),
-                default=0,
+                0.0,
+                (available - minimum_total) / (maximum_total - minimum_total),
             ),
         )
-        category_width = max(
-            self.BASE_COLUMN_WIDTHS[5],
-            max(
-                (
-                    metrics.horizontalAdvance(name) + 58
-                    for _, name, _ in self.category_options
-                ),
-                default=0,
-            ),
-        )
-        self.table.setColumnWidth(3, min(account_width, 240))
-        self.table.setColumnWidth(5, min(category_width, 220))
-        self._fit_table_columns()
+        for column, minimum in self.MINIMUM_COLUMN_WIDTHS.items():
+            maximum = self.MAXIMUM_COLUMN_WIDTHS[column]
+            width = round(minimum + (maximum - minimum) * scale)
+            self.table.setColumnWidth(column, width)
 
     def _month_range_key(self) -> str:
         today = date.today()
@@ -537,7 +516,6 @@ class StatementsTable(QWidget):
                 self.category_options = list(session.execute(
                     select(Category.id, Category.name, Category.color).order_by(Category.name)
                 ).all())
-        self._fit_content_columns(accounts)
         self.available_months = get_transaction_months(
             self.user_id, self.session_factory, include_deleted=True
         )

@@ -74,14 +74,19 @@ class Stage2TransactionUiTest(unittest.TestCase):
         table.show()
         table.set_user_id("test-user")
         app.processEvents()
-        self.assertGreaterEqual(table.table.columnWidth(7), 76)
+        self.assertGreaterEqual(
+            table.table.columnWidth(7),
+            StatementsTable.MINIMUM_COLUMN_WIDTHS[7],
+        )
         self.assertGreaterEqual(
             table.table.columnWidth(StatementsTable.DESCRIPTION_COLUMN),
-            StatementsTable.MINIMUM_DESCRIPTION_WIDTH,
+            StatementsTable.MINIMUM_COLUMN_WIDTHS[
+                StatementsTable.DESCRIPTION_COLUMN
+            ],
         )
         self.assertGreaterEqual(
             table.table.columnWidth(4),
-            StatementsTable.BASE_COLUMN_WIDTHS[4],
+            StatementsTable.MINIMUM_COLUMN_WIDTHS[4],
         )
         self.assertGreaterEqual(
             table.transaction_type_selector.width(),
