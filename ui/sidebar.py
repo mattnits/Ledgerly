@@ -30,33 +30,54 @@ class Sidebar(QFrame):
     page_changed = Signal(str)
     user_changed = Signal(str)
     create_user_clicked = Signal()
+    collapsed_changed = Signal(bool)
+
+    EXPANDED_WIDTH = 238
+    COLLAPSED_WIDTH = 72
 
     def __init__(self):
         super().__init__()
 
+        self.is_collapsed = False
         self.setObjectName("sidebar")
-        self.setFixedWidth(238)
+        self.setFixedWidth(self.EXPANDED_WIDTH)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 18, 12, 18)
-        layout.setSpacing(7)
+        self.sidebar_layout = QVBoxLayout(self)
+        self.sidebar_layout.setContentsMargins(12, 18, 12, 18)
+        self.sidebar_layout.setSpacing(7)
 
-        brand = QWidget()
-        brand.setObjectName("brand")
-        brand_layout = QHBoxLayout(brand)
-        brand_layout.setContentsMargins(8, 0, 8, 14)
-        brand_layout.setSpacing(10)
-        brand_icon = QLabel()
-        brand_icon.setPixmap(
+        self.brand = QWidget()
+        self.brand.setObjectName("brand")
+        self.brand_layout = QHBoxLayout(self.brand)
+        self.brand_layout.setContentsMargins(8, 0, 8, 14)
+        self.brand_layout.setSpacing(10)
+        self.brand_icon = QLabel()
+        self.brand_icon.setPixmap(
             awesome_icon("fa6s.wallet", color="#55a8ff").pixmap(20, 20)
         )
-        brand_icon.setFixedSize(20, 20)
-        brand_title = QLabel("Finance")
-        brand_title.setObjectName("brandTitle")
-        brand_layout.addWidget(brand_icon)
-        brand_layout.addWidget(brand_title)
-        brand_layout.addStretch()
-        layout.addWidget(brand)
+        self.brand_icon.setFixedSize(20, 20)
+        self.brand_title = QLabel("Finance")
+        self.brand_title.setObjectName("brandTitle")
+
+        self.collapse_button = QToolButton()
+        self.collapse_button.setObjectName("sidebarToggle")
+        self.collapse_button.setFixedSize(28, 28)
+        self.collapse_button.setToolTip("Collapse sidebar")
+        self.collapse_button.setAccessibleName("Collapse sidebar")
+        set_button_icon(
+            self.collapse_button,
+            "fa6s.angles-left",
+            color="#aeb4bc",
+            active_color="#ffffff",
+            size=14,
+        )
+        self.collapse_button.clicked.connect(self.toggle_collapsed)
+
+        self.brand_layout.addWidget(self.brand_icon)
+        self.brand_layout.addWidget(self.brand_title)
+        self.brand_layout.addStretch()
+        self.brand_layout.addWidget(self.collapse_button)
+        self.sidebar_layout.addWidget(self.brand)
 
         self.users = []
         self.current_user_id = None
@@ -82,6 +103,8 @@ class Sidebar(QFrame):
 
         self.create_user_button = QPushButton("Create User")
         self.create_user_button.setObjectName("createUserButton")
+        self.create_user_button.setToolTip("Create User")
+        self.create_user_button.setAccessibleName("Create User")
         set_button_icon(
             self.create_user_button,
             "fa6s.plus",
@@ -93,9 +116,9 @@ class Sidebar(QFrame):
             self.create_user_clicked.emit
         )
 
-        layout.addWidget(self.current_user_button)
-        layout.addWidget(self.user_dropdown)
-        layout.addWidget(self.create_user_button)
+        self.sidebar_layout.addWidget(self.current_user_button)
+        self.sidebar_layout.addWidget(self.user_dropdown)
+        self.sidebar_layout.addWidget(self.create_user_button)
 
         self.dashboard_button = self.create_button(
             DASHBOARD_LABEL,
@@ -127,18 +150,26 @@ class Sidebar(QFrame):
             "fa6s.gear",
         )
 
-        layout.addSpacing(22)
+        self.navigation_buttons = (
+            self.dashboard_button,
+            self.transactions_button,
+            self.accounts_button,
+            self.categories_button,
+            self.settings_button,
+        )
 
-        layout.addWidget(self.dashboard_button)
-        layout.addWidget(self.transactions_button)
-        layout.addWidget(self.accounts_button)
-        layout.addWidget(self.categories_button)
+        self.sidebar_layout.addSpacing(22)
+
+        self.sidebar_layout.addWidget(self.dashboard_button)
+        self.sidebar_layout.addWidget(self.transactions_button)
+        self.sidebar_layout.addWidget(self.accounts_button)
+        self.sidebar_layout.addWidget(self.categories_button)
 
 
         # Pushes settings to bottom
-        layout.addStretch()
+        self.sidebar_layout.addStretch()
 
-        layout.addWidget(self.settings_button)
+        self.sidebar_layout.addWidget(self.settings_button)
 
         self.setStyleSheet("""
             QFrame#sidebar {
@@ -151,6 +182,18 @@ class Sidebar(QFrame):
                 color: #f2f4f7;
                 font-size: 16px;
                 font-weight: 650;
+            }
+
+            QToolButton#sidebarToggle {
+                background-color: transparent;
+                color: #bfc4ca;
+                border: none;
+                border-radius: 7px;
+                padding: 4px;
+            }
+
+            QToolButton#sidebarToggle:hover {
+                background-color: #252a31;
             }
 
             QToolButton#currentUserButton {
@@ -218,6 +261,67 @@ class Sidebar(QFrame):
 
         self.dashboard_button.setChecked(True)
 
+    def toggle_collapsed(self):
+        self.set_collapsed(not self.is_collapsed)
+
+    def set_collapsed(self, collapsed: bool):
+        """Switch between the full sidebar and its icon-only form."""
+        collapsed = bool(collapsed)
+        if collapsed == self.is_collapsed:
+            return
+
+        self.is_collapsed = collapsed
+        self.user_dropdown.hide()
+        self.setFixedWidth(
+            self.COLLAPSED_WIDTH if collapsed else self.EXPANDED_WIDTH
+        )
+        side_margin = 8 if collapsed else 12
+        self.sidebar_layout.setContentsMargins(
+            side_margin,
+            18,
+            side_margin,
+            18,
+        )
+        self.brand_layout.setContentsMargins(
+            0 if collapsed else 8,
+            0,
+            0 if collapsed else 8,
+            14,
+        )
+        self.brand_layout.setSpacing(4 if collapsed else 10)
+        self.brand_title.setVisible(not collapsed)
+
+        toggle_label = "Expand sidebar" if collapsed else "Collapse sidebar"
+        self.collapse_button.setToolTip(toggle_label)
+        self.collapse_button.setAccessibleName(toggle_label)
+        set_button_icon(
+            self.collapse_button,
+            "fa6s.angles-right" if collapsed else "fa6s.angles-left",
+            color="#aeb4bc",
+            active_color="#ffffff",
+            size=14,
+        )
+
+        for button in self.navigation_buttons:
+            label = button.property("sidebarLabel")
+            button.setText("" if collapsed else label)
+            button.setMaximumWidth(48 if collapsed else 16777215)
+
+        self.create_user_button.setText("" if collapsed else "Create User")
+        self.create_user_button.setMaximumWidth(
+            48 if collapsed else 16777215
+        )
+        self.current_user_button.setMaximumWidth(
+            48 if collapsed else 16777215
+        )
+        self.current_user_button.setToolButtonStyle(
+            Qt.ToolButtonIconOnly
+            if collapsed
+            else Qt.ToolButtonTextBesideIcon
+        )
+        self.refresh_user_selector()
+        self.collapsed_changed.emit(collapsed)
+
     @staticmethod
     def color_icon(color: str) -> QIcon:
         pixmap = QPixmap(16, 16)
@@ -263,8 +367,15 @@ class Sidebar(QFrame):
             self.clear_user_dropdown()
             return
 
+        user_name = current_user["name"]
         self.current_user_button.setText(
-            f'{current_user["name"]}  ▾'
+            ""
+            if self.is_collapsed
+            else f"{user_name}  \N{BLACK DOWN-POINTING SMALL TRIANGLE}"
+        )
+        self.current_user_button.setToolTip(f"Current user: {user_name}")
+        self.current_user_button.setAccessibleName(
+            f"Current user: {user_name}"
         )
         self.current_user_button.setIcon(
             self.color_icon(current_user["color"])
@@ -308,6 +419,11 @@ class Sidebar(QFrame):
                 widget.deleteLater()
 
     def toggle_user_dropdown(self):
+        if self.is_collapsed:
+            self.set_collapsed(False)
+            self.user_dropdown.show()
+            return
+
         self.user_dropdown.setVisible(
             not self.user_dropdown.isVisible()
         )
@@ -327,6 +443,9 @@ class Sidebar(QFrame):
     def create_button(self, text: str, page_name: str, icon_name: str):
         button = QPushButton(text)
         button.setObjectName("navButton")
+        button.setProperty("sidebarLabel", text)
+        button.setToolTip(text)
+        button.setAccessibleName(text)
         button.setCheckable(True)
         set_button_icon(
             button,
