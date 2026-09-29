@@ -44,9 +44,16 @@ class TransactionClassificationTest(unittest.TestCase):
                 institution="Test",
                 account_type="debit",
             )
-            session.add(account)
+            second_account = Account(
+                user_id=user.id,
+                name="Credit Card",
+                institution="Test",
+                account_type="credit",
+            )
+            session.add_all((account, second_account))
             session.flush()
             self.account_id = account.id
+            self.second_account_id = second_account.id
             self.food_id = food.id
             self.salary_id = salary.id
 
@@ -61,6 +68,7 @@ class TransactionClassificationTest(unittest.TestCase):
         *,
         priority=0,
         match_type=MatchType.CONTAINS,
+        account_id=None,
     ):
         with self.sessions.begin() as session:
             save_category_rule(
@@ -71,12 +79,77 @@ class TransactionClassificationTest(unittest.TestCase):
                 category_id,
                 priority=priority,
                 match_type=match_type,
+                account_id=account_id,
             )
 
-    def _classify(self, description):
+    def _classify(self, description, account_id=None):
         with self.sessions() as session:
             rules = category_rules_for_user(session, "test-user")
-            return classify_description(description, rules)
+            return classify_description(description, rules, account_id)
+
+    def test_account_specific_rule_only_applies_to_its_account(self):
+        self._save_rule(
+            "COFFEE",
+            TransactionType.EXPENSE,
+            self.food_id,
+            priority=10,
+        )
+        self._save_rule(
+            "COFFEE",
+            TransactionType.INCOME,
+            self.salary_id,
+            priority=10,
+            account_id=self.account_id,
+        )
+
+        checking = self._classify("COFFEE SHOP", self.account_id)
+        credit_card = self._classify("COFFEE SHOP", self.second_account_id)
+        without_account = self._classify("COFFEE SHOP")
+        self.assertEqual(checking.transaction_type, TransactionType.INCOME)
+        self.assertEqual(checking.category_id, self.salary_id)
+        self.assertEqual(credit_card.transaction_type, TransactionType.EXPENSE)
+        self.assertEqual(credit_card.category_id, self.food_id)
+        self.assertEqual(without_account.transaction_type, TransactionType.EXPENSE)
+
+        with self.sessions.begin() as session:
+            session.add_all((
+                Transaction(
+                    account_id=self.account_id,
+                    transaction_date=date.today(),
+                    description="COFFEE SHOP",
+                    amount=Decimal("5.00"),
+                    transaction_type=TransactionType.EXPENSE,
+                ),
+                Transaction(
+                    account_id=self.second_account_id,
+                    transaction_date=date.today(),
+                    description="COFFEE SHOP",
+                    amount=Decimal("-5.00"),
+                    transaction_type=TransactionType.EXPENSE,
+                ),
+            ))
+        with self.sessions.begin() as session:
+            scoped_rule = session.scalar(select(CategoryRule).where(
+                CategoryRule.account_id == self.account_id
+            ))
+            updated = apply_rule_to_existing_transactions(
+                session, "test-user", scoped_rule
+            )
+            self.assertEqual(updated, 1)
+
+        with self.sessions() as session:
+            rows = session.scalars(
+                select(Transaction).order_by(Transaction.account_id)
+            ).all()
+            by_account = {row.account_id: row for row in rows}
+            self.assertEqual(
+                by_account[self.account_id].transaction_type,
+                TransactionType.INCOME,
+            )
+            self.assertEqual(
+                by_account[self.second_account_id].transaction_type,
+                TransactionType.EXPENSE,
+            )
 
     def test_common_rules_assign_transaction_type_and_optional_category(self):
         self._save_rule("TIM HORTONS", TransactionType.EXPENSE, self.food_id)

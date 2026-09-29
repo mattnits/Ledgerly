@@ -26,9 +26,9 @@ from database.category_rules import (
     save_category_rule,
 )
 from database.db import SessionLocal
-from database.models import Category
+from database.models import Account, Category
 from ui.components.generic_dialog import GenericDialog
-from ui.theme import set_button_icon
+from ui.theme import brand_icon, set_button_icon
 from utils.constants import (
     CATEGORY_FREE_TRANSACTION_TYPES,
     INCOME_CATEGORY_NAMES,
@@ -60,7 +60,7 @@ class ClassificationRulesDialog(QDialog):
         self.session_factory = session_factory
         self.rules: list[RuleSummary] = []
         self.setWindowTitle("Classification Rules")
-        self.resize(920, 520)
+        self.resize(1080, 560)
         self.setObjectName("classificationRulesDialog")
 
         layout = QVBoxLayout(self)
@@ -68,18 +68,19 @@ class ClassificationRulesDialog(QDialog):
         layout.setSpacing(16)
         description = QLabel(
             "The highest-priority active matching rule assigns the transaction type "
-            "and optional category. Priority ties prefer Exact, then Starts with, "
-            "then Contains; longer patterns and older rules break remaining ties. "
+            "and optional category. At the same priority, account-specific rules win "
+            "over All Accounts rules; remaining ties prefer Exact, then Starts with, "
+            "then Contains. Longer patterns and older rules break remaining ties. "
             "Manual classifications are protected."
         )
         description.setObjectName("mutedLabel")
         description.setWordWrap(True)
         layout.addWidget(description)
 
-        self.table = QTableWidget(0, 6)
+        self.table = QTableWidget(0, 7)
         self.table.setObjectName("rulesTable")
         self.table.setHorizontalHeaderLabels((
-            "Keyword / Pattern", "Match Type", "Transaction Type",
+            "Keyword / Pattern", "Account", "Match Type", "Transaction Type",
             "Category", "Priority", "Active",
         ))
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -128,6 +129,7 @@ class ClassificationRulesDialog(QDialog):
             self.table.insertRow(row)
             values = (
                 rule.pattern,
+                rule.account_name or "All Accounts",
                 MATCH_TYPE_LABELS[rule.match_type],
                 (
                     TRANSACTION_TYPE_LABELS[rule.transaction_type]
@@ -186,6 +188,11 @@ class ClassificationRulesDialog(QDialog):
         prefill: RulePrefill | None = None,
     ) -> None:
         with self.session_factory() as session:
+            accounts = list(session.execute(
+                select(Account.id, Account.name, Account.institution)
+                .where(Account.user_id == self.user_id)
+                .order_by(Account.name, Account.id)
+            ))
             categories = list(session.execute(
                 select(Category.id, Category.name).order_by(Category.name)
             ))
@@ -197,6 +204,20 @@ class ClassificationRulesDialog(QDialog):
         pattern_input.setMaxLength(255)
         layout.addWidget(QLabel("Keyword / Pattern"))
         layout.addWidget(pattern_input)
+
+        account_input = QComboBox()
+        account_input.addItem("All Accounts", None)
+        for account_id, name, institution in accounts:
+            account_input.addItem(
+                brand_icon(institution),
+                f"{name} ({institution})",
+                account_id,
+            )
+        account_input.setCurrentIndex(
+            max(0, account_input.findData(rule.account_id if rule else None))
+        )
+        layout.addWidget(QLabel("Account"))
+        layout.addWidget(account_input)
 
         match_type_input = QComboBox()
         for match_type, label in MATCH_TYPE_LABELS.items():
@@ -288,6 +309,7 @@ class ClassificationRulesDialog(QDialog):
             content,
             self,
         )
+        dialog.resize(540, 620)
 
         def update_match_count() -> None:
             try:
@@ -297,6 +319,7 @@ class ClassificationRulesDialog(QDialog):
                         self.user_id,
                         pattern_input.text(),
                         match_type_input.currentData(),
+                        account_input.currentData(),
                     )
             except Exception:
                 apply_input.setText("Apply to existing matching transactions")
@@ -311,6 +334,9 @@ class ClassificationRulesDialog(QDialog):
         match_count_timer.timeout.connect(update_match_count)
         pattern_input.textChanged.connect(lambda *_args: match_count_timer.start())
         match_type_input.currentIndexChanged.connect(
+            lambda *_args: match_count_timer.start()
+        )
+        account_input.currentIndexChanged.connect(
             lambda *_args: match_count_timer.start()
         )
         update_match_count()
@@ -330,6 +356,7 @@ class ClassificationRulesDialog(QDialog):
                         pattern_input.text(),
                         transaction_type,
                         category_input.currentData(),
+                        account_id=account_input.currentData(),
                         match_type=match_type_input.currentData(),
                         priority=priority_input.value(),
                         is_active=active_input.isChecked(),

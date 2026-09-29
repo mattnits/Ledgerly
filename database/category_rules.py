@@ -32,6 +32,7 @@ class RuleSpec:
     transaction_type: TransactionType | None
     category_id: int | None
     priority: int = 0
+    account_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,8 @@ class RuleSummary:
     category_name: str | None
     priority: int
     is_active: bool
+    account_id: int | None = None
+    account_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -154,15 +157,22 @@ def _coerce_rules(
 def matching_rule(
     description: str,
     rules: Iterable[RuleSpec] | dict[str, RuleAssignment] | None,
+    account_id: int | None = None,
 ) -> RuleSpec | None:
     normalized = normalize_description(description)
-    matches = [rule for rule in _coerce_rules(rules) if _rule_matches(normalized, rule)]
+    matches = [
+        rule
+        for rule in _coerce_rules(rules)
+        if (rule.account_id is None or rule.account_id == account_id)
+        and _rule_matches(normalized, rule)
+    ]
     if not matches:
         return None
     return max(
         matches,
         key=lambda rule: (
             rule.priority,
+            rule.account_id is not None,
             rule.match_type == MatchType.EXACT,
             rule.match_type == MatchType.STARTS_WITH,
             len(normalize_description(rule.description_key)),
@@ -202,9 +212,10 @@ def _default_classification(description: str) -> RuleAssignment:
 def classify_description(
     description: str,
     rules: Iterable[RuleSpec] | dict[str, RuleAssignment] | None = None,
+    account_id: int | None = None,
 ) -> RuleAssignment:
     """Apply the highest-priority active rule, then existing local fallbacks."""
-    rule = matching_rule(description, rules)
+    rule = matching_rule(description, rules, account_id)
     fallback = _default_classification(description)
     if rule is None:
         return fallback
@@ -227,6 +238,7 @@ def category_rules_for_user(session: Session, user_id: str) -> list[RuleSpec]:
             CategoryRule.transaction_type,
             CategoryRule.category_id,
             CategoryRule.priority,
+            CategoryRule.account_id,
         )
         .where(
             CategoryRule.user_id == user_id,
@@ -248,8 +260,11 @@ def list_category_rules(session: Session, user_id: str) -> list[RuleSummary]:
             Category.name,
             CategoryRule.priority,
             CategoryRule.is_active,
+            CategoryRule.account_id,
+            Account.name,
         )
         .outerjoin(Category, CategoryRule.category_id == Category.id)
+        .outerjoin(Account, CategoryRule.account_id == Account.id)
         .where(CategoryRule.user_id == user_id)
         .order_by(CategoryRule.priority.desc(), CategoryRule.id)
     )
@@ -263,6 +278,7 @@ def save_category_rule(
     transaction_type: TransactionType | None,
     category_id: int | None,
     *,
+    account_id: int | None = None,
     match_type: MatchType = MatchType.EXACT,
     priority: int = 0,
     is_active: bool = True,
@@ -275,6 +291,15 @@ def save_category_rule(
     match_type = MatchType(match_type)
     if transaction_type in CATEGORY_FREE_TRANSACTION_TYPES:
         category_id = None
+    if account_id is not None:
+        valid_account = session.scalar(
+            select(Account.id).where(
+                Account.id == account_id,
+                Account.user_id == user_id,
+            )
+        )
+        if valid_account is None:
+            raise ValueError("Account is no longer available")
 
     if rule_id is not None:
         rule = session.get(CategoryRule, rule_id)
@@ -284,6 +309,7 @@ def save_category_rule(
         rule = session.scalar(select(CategoryRule).where(
             CategoryRule.user_id == user_id,
             CategoryRule.description_key == key,
+            CategoryRule.account_id == account_id,
         ))
     if rule is None:
         rule = CategoryRule(user_id=user_id, description_key=key, description_example=pattern)
@@ -291,6 +317,7 @@ def save_category_rule(
 
     rule.description_key = key
     rule.description_example = pattern.strip()
+    rule.account_id = account_id
     rule.match_type = match_type
     rule.transaction_type = transaction_type
     rule.category_id = category_id
@@ -325,7 +352,10 @@ def apply_rule_to_transaction(
         rule.transaction_type,
         rule.category_id,
         rule.priority,
+        rule.account_id,
     )
+    if spec.account_id is not None and transaction.account_id != spec.account_id:
+        return False
     if not _rule_matches(normalize_description(transaction.description), spec):
         return False
 
@@ -357,6 +387,7 @@ def apply_rule_to_existing_transactions(
         rule.transaction_type,
         rule.category_id,
         rule.priority,
+        rule.account_id,
     )
     transactions = session.scalars(
         select(Transaction)
@@ -368,10 +399,19 @@ def apply_rule_to_existing_transactions(
     )
     updated = 0
     for transaction in transactions:
+        if (
+            selected_rule.account_id is not None
+            and transaction.account_id != selected_rule.account_id
+        ):
+            continue
         normalized = normalize_description(transaction.description)
         if not _rule_matches(normalized, selected_rule):
             continue
-        winner = matching_rule(transaction.description, active_rules)
+        winner = matching_rule(
+            transaction.description,
+            active_rules,
+            transaction.account_id,
+        )
         if winner is not None:
             updated += apply_rule_to_transaction(
                 transaction,
@@ -386,6 +426,7 @@ def count_transactions_matching_rule(
     user_id: str,
     pattern: str,
     match_type: MatchType,
+    account_id: int | None = None,
 ) -> int:
     """Count active, non-manual transactions matching a prospective rule."""
     spec = RuleSpec(
@@ -394,11 +435,12 @@ def count_transactions_matching_rule(
         match_type=MatchType(match_type),
         transaction_type=None,
         category_id=None,
+        account_id=account_id,
     )
     if not normalize_description(pattern):
         return 0
 
-    rows = session.execute(
+    statement = (
         select(Transaction.description, Transaction.classification_source)
         .join(Account, Transaction.account_id == Account.id)
         .where(
@@ -406,6 +448,9 @@ def count_transactions_matching_rule(
             Transaction.is_deleted.is_(False),
         )
     )
+    if account_id is not None:
+        statement = statement.where(Account.id == account_id)
+    rows = session.execute(statement)
     return sum(
         source != ClassificationSource.MANUAL.value
         and _rule_matches(normalize_description(description), spec)
