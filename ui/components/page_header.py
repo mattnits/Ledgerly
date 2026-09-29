@@ -15,10 +15,10 @@ class PageHeader(QWidget):
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(20)
+        layout.setSpacing(24)
 
         heading = QVBoxLayout()
-        heading.setSpacing(6)
+        heading.setSpacing(4)
         self.title_label = QLabel(title)
         self.title_label.setObjectName("pageTitle")
         heading.addWidget(self.title_label)
@@ -42,26 +42,8 @@ class PageHeader(QWidget):
             layout.addStretch()
 
         if action_button is not None:
-            action_button.setObjectName("pageActionButton")
-            layout.addWidget(action_button, alignment=Qt.AlignmentFlag.AlignTop)
+            layout.addWidget(action_button, alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        self.setStyleSheet("""
-            QLabel#pageTitle {
-                color: #f5f7fb;
-                font-size: 28px;
-                font-weight: 700;
-            }
-            QLabel#pageSubtitle {
-                color: #aeb9c8;
-                font-size: 14px;
-            }
-            QPushButton#pageActionButton {
-                color: #ffffff;
-                background: #5265f4;
-                border: 1px solid #6678ff;
-                border-radius: 10px;
-                padding: 10px 20px;
-                font-weight: 600;
-            }
-            QPushButton#pageActionButton:hover { background: #6678ff; }
-        """)
+    def set_subtitle(self, subtitle: str) -> None:
+        if hasattr(self, "subtitle_label"):
+            self.subtitle_label.setText(subtitle)

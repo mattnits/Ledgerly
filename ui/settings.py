@@ -1,6 +1,7 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
+    QFrame,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -10,6 +11,7 @@ from PySide6.QtWidgets import (
 
 from database.reset import reset_financial_data
 from ui.components.page_header import PageHeader
+from ui.theme import set_button_icon
 
 
 class SettingsPage(QWidget):
@@ -17,11 +19,22 @@ class SettingsPage(QWidget):
 
     def __init__(self):
         super().__init__()
+        self.setObjectName("settingsPage")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(32, 32, 32, 32)
+        layout.setContentsMargins(28, 24, 28, 20)
+        layout.setSpacing(18)
 
-        layout.addWidget(PageHeader("Settings"))
+        layout.addWidget(PageHeader("Settings", "Manage application data and preferences"))
+
+        card = QFrame()
+        card.setObjectName("settingsCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(20, 18, 20, 18)
+        card_layout.setSpacing(8)
+        title = QLabel("Financial data")
+        title.setObjectName("sectionTitle")
+        card_layout.addWidget(title)
 
         reset_row = QHBoxLayout()
         description = QLabel(
@@ -29,24 +42,16 @@ class SettingsPage(QWidget):
             "Categories and category rules will be kept."
         )
         description.setWordWrap(True)
-        description.setStyleSheet("color: #aeb9c8; font-size: 14px;")
+        description.setObjectName("mutedLabel")
         reset_row.addWidget(description, 1)
 
         reset_button = QPushButton("Reset")
-        reset_button.setFixedWidth(80)
-        reset_button.setStyleSheet("""
-            QPushButton {
-                color: #ffffff;
-                background: #8b3541;
-                border: 1px solid #b44b5a;
-                border-radius: 8px;
-                padding: 7px 10px;
-            }
-            QPushButton:hover { background: #a6404e; }
-        """)
+        reset_button.setObjectName("dangerButton")
+        set_button_icon(reset_button, "fa6s.trash", color="#ff9da0", size=15)
         reset_button.clicked.connect(self.confirm_reset)
         reset_row.addWidget(reset_button)
-        layout.addLayout(reset_row)
+        card_layout.addLayout(reset_row)
+        layout.addWidget(card)
 
         layout.addStretch()
 

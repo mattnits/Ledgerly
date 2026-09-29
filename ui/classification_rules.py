@@ -28,6 +28,7 @@ from database.category_rules import (
 from database.db import SessionLocal
 from database.models import Category
 from ui.components.generic_dialog import GenericDialog
+from ui.theme import set_button_icon
 from utils.constants import (
     CATEGORY_FREE_TRANSACTION_TYPES,
     INCOME_CATEGORY_NAMES,
@@ -60,18 +61,23 @@ class ClassificationRulesDialog(QDialog):
         self.rules: list[RuleSummary] = []
         self.setWindowTitle("Classification Rules")
         self.resize(920, 520)
+        self.setObjectName("classificationRulesDialog")
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setSpacing(16)
         description = QLabel(
             "The highest-priority active matching rule assigns the transaction type "
             "and optional category. Priority ties prefer Exact, then Starts with, "
             "then Contains; longer patterns and older rules break remaining ties. "
             "Manual classifications are protected."
         )
+        description.setObjectName("mutedLabel")
         description.setWordWrap(True)
         layout.addWidget(description)
 
         self.table = QTableWidget(0, 6)
+        self.table.setObjectName("rulesTable")
         self.table.setHorizontalHeaderLabels((
             "Keyword / Pattern", "Match Type", "Transaction Type",
             "Category", "Priority", "Active",
@@ -80,14 +86,25 @@ class ClassificationRulesDialog(QDialog):
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.horizontalHeader().setFixedHeight(46)
+        self.table.verticalHeader().setDefaultSectionSize(44)
         self.table.doubleClicked.connect(self._edit_selected)
         layout.addWidget(self.table, 1)
 
         buttons = QHBoxLayout()
         add_button = QPushButton("Add Rule")
+        add_button.setObjectName("primaryButton")
         edit_button = QPushButton("Edit Selected")
+        edit_button.setObjectName("secondaryActionButton")
         delete_button = QPushButton("Delete Selected")
+        delete_button.setObjectName("dangerButton")
         close_button = QPushButton("Close")
+        set_button_icon(
+            add_button, "fa6s.plus", color="#ffffff", active_color="#ffffff"
+        )
+        set_button_icon(edit_button, "fa6s.pen", color="#b9bec5")
+        set_button_icon(delete_button, "fa6s.trash", color="#ff9da0")
+        set_button_icon(close_button, "fa6s.xmark", size=15)
         add_button.clicked.connect(lambda: self._open_editor())
         edit_button.clicked.connect(self._edit_selected)
         delete_button.clicked.connect(self._delete_selected)

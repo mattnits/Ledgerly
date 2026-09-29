@@ -1,31 +1,38 @@
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
 from sqlalchemy import select
 
 from database.db import SessionLocal
 from database.models import Account, Group, User
 from ui.components.generic_table import GenericTable
 from ui.components.page_header import PageHeader
+from ui.components.account_badge import AccountBadge
 
 
 class AccountsPage(QWidget):
     def __init__(self, session_factory=SessionLocal):
         super().__init__()
+        self.setObjectName("accountsPage")
         self.session_factory = session_factory
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(32, 32, 32, 32)
-        layout.setSpacing(20)
+        layout.setContentsMargins(28, 24, 28, 20)
+        layout.setSpacing(18)
 
         layout.addWidget(PageHeader("Accounts"))
 
         self.empty_label = QLabel("No accounts yet")
-        self.empty_label.setStyleSheet("color: #aeb9c8; font-size: 14px;")
+        self.empty_label.setObjectName("emptyLabel")
         layout.addWidget(self.empty_label)
 
         self.table = GenericTable((
-            "Name", "Institution", "Type", "Owner", "Balance", "Balance as of",
+            "Account", "Institution", "Type", "Owner", "Balance", "Balance as of",
         ))
-        layout.addWidget(self.table, 1)
+        card = QFrame()
+        card.setObjectName("contentCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(0, 0, 0, 0)
+        card_layout.addWidget(self.table)
+        layout.addWidget(card, 1)
 
     def reload(self) -> None:
         with self.session_factory() as session:
@@ -54,7 +61,7 @@ class AccountsPage(QWidget):
                 balance_text = f"${balance:,.2f}"
             owner = f"User: {user_name}" if user_name else f"Group: {group_name}"
             rows.append((
-                name,
+                AccountBadge(name, institution),
                 institution,
                 account_type.title(),
                 owner,

@@ -1,6 +1,7 @@
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QColorDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -15,21 +16,32 @@ from ui.components.generic_dialog import GenericDialog
 from ui.components.generic_table import GenericTable
 from ui.components.page_header import PageHeader
 from utils.constants import CATEGORIES_LABEL
+from ui.theme import set_button_icon
 
 
 class CategoriesPage(QWidget):
     def __init__(self):
         super().__init__()
+        self.setObjectName("categoriesPage")
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(32, 32, 32, 32)
-        layout.setSpacing(20)
+        layout.setContentsMargins(28, 24, 28, 20)
+        layout.setSpacing(18)
 
         add_button = QPushButton("Add Category")
+        add_button.setObjectName("primaryButton")
+        set_button_icon(
+            add_button, "fa6s.plus", color="#ffffff", active_color="#ffffff"
+        )
         add_button.clicked.connect(self.open_add_dialog)
         layout.addWidget(PageHeader(CATEGORIES_LABEL, action_button=add_button))
 
         self.table = GenericTable(("Name", "Color", "Type", "Action"))
-        layout.addWidget(self.table)
+        card = QFrame()
+        card.setObjectName("contentCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(0, 0, 0, 0)
+        card_layout.addWidget(self.table)
+        layout.addWidget(card, 1)
         self.reload()
 
     def reload(self):
@@ -41,6 +53,8 @@ class CategoriesPage(QWidget):
                 action = "Protected"
             else:
                 action = QPushButton("Delete")
+                action.setObjectName("dangerButton")
+                set_button_icon(action, "fa6s.trash", color="#ff9da0", size=15)
                 action.clicked.connect(
                     lambda checked=False, item_id=category_id, item_name=name:
                     self.confirm_delete(item_id, item_name)

@@ -75,6 +75,30 @@ class Stage2TransactionUiTest(unittest.TestCase):
         table.set_user_id("test-user")
         app.processEvents()
         self.assertGreaterEqual(table.table.columnWidth(7), 76)
+        self.assertGreaterEqual(
+            table.table.columnWidth(StatementsTable.DESCRIPTION_COLUMN),
+            StatementsTable.MINIMUM_DESCRIPTION_WIDTH,
+        )
+        self.assertGreaterEqual(
+            table.table.columnWidth(4),
+            StatementsTable.BASE_COLUMN_WIDTHS[4],
+        )
+        self.assertGreaterEqual(
+            table.transaction_type_selector.width(),
+            table.transaction_type_selector.fontMetrics().horizontalAdvance(
+                "All Transaction Types"
+            ) + 60,
+        )
+
+        narrow_description_width = table.table.columnWidth(
+            StatementsTable.DESCRIPTION_COLUMN
+        )
+        table.resize(1500, 520)
+        app.processEvents()
+        self.assertGreater(
+            table.table.columnWidth(StatementsTable.DESCRIPTION_COLUMN),
+            narrow_description_width,
+        )
 
         table.needs_review_checkbox.setChecked(True)
         app.processEvents()

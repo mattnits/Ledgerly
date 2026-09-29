@@ -2,11 +2,15 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
+    QHBoxLayout,
     QLabel,
     QPushButton,
     QToolButton,
     QVBoxLayout,
+    QWidget,
 )
+
+from ui.theme import awesome_icon, set_button_icon
 
 from utils.constants import (
     ACCOUNTS_LABEL,
@@ -31,11 +35,28 @@ class Sidebar(QFrame):
         super().__init__()
 
         self.setObjectName("sidebar")
-        self.setFixedWidth(220)
+        self.setFixedWidth(238)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 24, 16, 24)
-        layout.setSpacing(8)
+        layout.setContentsMargins(12, 18, 12, 18)
+        layout.setSpacing(7)
+
+        brand = QWidget()
+        brand.setObjectName("brand")
+        brand_layout = QHBoxLayout(brand)
+        brand_layout.setContentsMargins(8, 0, 8, 14)
+        brand_layout.setSpacing(10)
+        brand_icon = QLabel()
+        brand_icon.setPixmap(
+            awesome_icon("fa6s.wallet", color="#55a8ff").pixmap(20, 20)
+        )
+        brand_icon.setFixedSize(20, 20)
+        brand_title = QLabel("Finance")
+        brand_title.setObjectName("brandTitle")
+        brand_layout.addWidget(brand_icon)
+        brand_layout.addWidget(brand_title)
+        brand_layout.addStretch()
+        layout.addWidget(brand)
 
         self.users = []
         self.current_user_id = None
@@ -59,8 +80,15 @@ class Sidebar(QFrame):
         self.user_dropdown_layout.setSpacing(2)
         self.user_dropdown.hide()
 
-        self.create_user_button = QPushButton("+  Create User")
+        self.create_user_button = QPushButton("Create User")
         self.create_user_button.setObjectName("createUserButton")
+        set_button_icon(
+            self.create_user_button,
+            "fa6s.plus",
+            color="#aeb4bc",
+            active_color="#ffffff",
+            size=16,
+        )
         self.create_user_button.clicked.connect(
             self.create_user_clicked.emit
         )
@@ -72,29 +100,34 @@ class Sidebar(QFrame):
         self.dashboard_button = self.create_button(
             DASHBOARD_LABEL,
             DASHBOARD_PAGE,
+            "fa6s.house",
         )
 
         self.transactions_button = self.create_button(
             TRANSACTIONS_LABEL,
             TRANSACTIONS_PAGE,
+            "fa6s.right-left",
         )
 
         self.accounts_button = self.create_button(
             ACCOUNTS_LABEL,
             ACCOUNTS_PAGE,
+            "fa6s.wallet",
         )
 
         self.categories_button = self.create_button(
             CATEGORIES_LABEL,
             CATEGORIES_PAGE,
+            "fa6s.tags",
         )
 
         self.settings_button = self.create_button(
             SETTINGS_LABEL,
             SETTINGS_PAGE,
+            "fa6s.gear",
         )
 
-        layout.addSpacing(24)
+        layout.addSpacing(22)
 
         layout.addWidget(self.dashboard_button)
         layout.addWidget(self.transactions_button)
@@ -109,27 +142,37 @@ class Sidebar(QFrame):
 
         self.setStyleSheet("""
             QFrame#sidebar {
-                background-color: #171717;
+                background-color: #101318;
                 border: none;
+                border-right: 1px solid #2b3037;
+            }
+
+            QLabel#brandTitle {
+                color: #f2f4f7;
+                font-size: 16px;
+                font-weight: 650;
             }
 
             QToolButton#currentUserButton {
-                background-color: #262626;
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 12px 10px;
-                font-size: 16px;
-                font-weight: 700;
+                background-color: #1b1f24;
+                color: #f2f4f7;
+                border: 1px solid #343a42;
+                border-radius: 10px;
+                min-height: 36px;
+                padding: 10px 12px;
+                font-size: 14px;
+                font-weight: 600;
                 text-align: left;
             }
 
             QToolButton#currentUserButton:hover {
-                background-color: #303030;
+                background-color: #252a31;
+                border-color: #4a515a;
             }
 
             QFrame#userDropdown {
-                background-color: #202020;
+                background-color: #181b20;
+                border: 1px solid #333941;
                 border-radius: 8px;
             }
 
@@ -140,31 +183,35 @@ class Sidebar(QFrame):
             }
 
             QPushButton#createUserButton {
-                color: #d6d6d6;
+                color: #cdd1d6;
+                margin-top: 2px;
             }
 
-            QPushButton {
+            QPushButton#navButton,
+            QPushButton#createUserButton,
+            QPushButton#userOptionButton,
+            QPushButton#showMoreButton {
                 background-color: transparent;
-                color: #b5b5b5;
-
+                color: #bfc4ca;
                 border: none;
-                border-radius: 8px;
-
+                border-radius: 9px;
                 text-align: left;
-
-                padding: 12px 14px;
-
+                padding: 11px 14px;
                 font-size: 14px;
             }
 
-            QPushButton:hover {
-                background-color: #262626;
-                color: white;
+            QPushButton#navButton:hover,
+            QPushButton#createUserButton:hover,
+            QPushButton#userOptionButton:hover,
+            QPushButton#showMoreButton:hover {
+                background-color: #1d2127;
+                color: #ffffff;
             }
 
-            QPushButton:checked {
-                background-color: #303030;
-                color: white;
+            QPushButton#navButton:checked {
+                background-color: #1c2d4f;
+                border-left: 3px solid #2587ff;
+                color: #ffffff;
                 font-weight: 600;
             }
         """)
@@ -277,10 +324,17 @@ class Sidebar(QFrame):
         self.refresh_user_selector()
         self.user_changed.emit(user_id)
 
-    def create_button(self, text: str, page_name: str):
+    def create_button(self, text: str, page_name: str, icon_name: str):
         button = QPushButton(text)
-
+        button.setObjectName("navButton")
         button.setCheckable(True)
+        set_button_icon(
+            button,
+            icon_name,
+            color="#b2b8c1",
+            active_color="#4aa3ff",
+            size=20,
+        )
 
         button.clicked.connect(
             lambda: self.handle_navigation(

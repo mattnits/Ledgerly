@@ -31,12 +31,14 @@ class ShellWindow(QMainWindow):
 
         self.setWindowTitle("Finance")
         self.resize(1400, 850)
+        self.setMinimumSize(1100, 700)
 
         # -------------------------
         # Root widget
         # -------------------------
 
         root = QWidget()
+        root.setObjectName("appRoot")
         self.setCentralWidget(root)
 
         root_layout = QHBoxLayout(root)
@@ -64,6 +66,7 @@ class ShellWindow(QMainWindow):
         # -------------------------
 
         self.pages = QStackedWidget()
+        self.pages.setObjectName("pageStack")
 
         self.welcome_page = WelcomePage()
         self.add_user_page = AddUserPage()
