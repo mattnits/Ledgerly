@@ -1,31 +1,43 @@
 from datetime import date
 
-from PySide6.QtCore import Qt, QSignalBlocker, QTimer
-from PySide6.QtGui import QColor
+from PySide6.QtCore import Qt, QSignalBlocker, QTimer, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFrame,
     QHBoxLayout,
     QHeaderView,
     QComboBox,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
-from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy import String, and_, cast, func, or_, select
 
 from database.db import SessionLocal
-from database.category_rules import categorize_matching_transactions, save_category_rule
+from database.category_rules import (
+    needs_review_expression,
+    normalize_description,
+    rule_prefill_from_transaction,
+)
 from database.models import Account, Category, Transaction
 from database.transactions import get_transaction_months, set_transaction_deleted
 from ui.components.generic_table import GenericTable
 from ui.components.period_selector import PeriodSelector
 from ui.components.transaction_row import TransactionRow
-from utils.constants import TRANSACTION_TYPE_LABELS, TransactionType
+from utils.constants import (
+    CATEGORY_FREE_TRANSACTION_TYPES,
+    ClassificationSource,
+    TRANSACTION_TYPE_LABELS,
+    TransactionType,
+)
 
 
 class StatementsTable(QWidget):
+    create_rule_requested = Signal(object)
+
     PAGE_SIZE = 200
     COLUMN_HEADERS = (
         "Date", "Description", "Amount", "Account", "Transaction Type",
@@ -48,6 +60,7 @@ class StatementsTable(QWidget):
         self.category_filter: int | str | None = "all"
         self.transaction_type_filter: TransactionType | str = "all"
         self.account_filter: int | str = "all"
+        self.needs_review_filter = False
         self.period_filter = "monthly"
         self.date_range_filter = "this_month"
         today = date.today()
@@ -74,6 +87,10 @@ class StatementsTable(QWidget):
         self.count_label = QLabel("0 transactions")
         self.count_label.setObjectName("transactionsCount")
         toolbar_layout.addWidget(self.count_label)
+        self.review_mode_label = QLabel("Needs Review mode")
+        self.review_mode_label.setObjectName("reviewModeLabel")
+        self.review_mode_label.hide()
+        toolbar_layout.addWidget(self.review_mode_label)
         toolbar_layout.addStretch()
 
         self.search = QLineEdit()
@@ -113,6 +130,11 @@ class StatementsTable(QWidget):
             filter_layout, "Transaction Type", self.transaction_type_selector
         )
 
+        self.needs_review_checkbox = QCheckBox("Needs Review only")
+        self.needs_review_checkbox.setObjectName("needsReviewFilter")
+        self.needs_review_checkbox.toggled.connect(self._select_needs_review)
+        filter_layout.addWidget(self.needs_review_checkbox)
+
         self.date_range_selector = QComboBox()
         for label, value in (
             ("This Month", "this_month"),
@@ -145,15 +167,22 @@ class StatementsTable(QWidget):
         self.table = GenericTable(self.COLUMN_HEADERS)
         table_header = self.table.horizontalHeader()
         table_header.setSectionsClickable(True)
-        table_header.setMinimumSectionSize(68)
+        table_header.setMinimumSectionSize(48)
         table_header.sectionClicked.connect(self._sort_by_column)
         table_header.setSortIndicatorShown(False)
         self.table.verticalScrollBar().valueChanged.connect(self._on_scroll)
         for column, width in (
-            (0, 150), (2, 125), (3, 130), (4, 175), (5, 190), (6, 165), (7, 68)
+            (0, 118),
+            (2, 100),
+            (3, 115),
+            (4, 155),
+            (5, 170),
+            (6, 138),
+            (7, 76),
         ):
             table_header.setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
             self.table.setColumnWidth(column, width)
+        table_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeaderItem(2).setTextAlignment(
             Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter
         )
@@ -194,6 +223,13 @@ class StatementsTable(QWidget):
                 font-size: 13px;
             }
             QLabel#transactionsCount { padding-left: 10px; }
+            QLabel#reviewModeLabel {
+                color: #ffd68a;
+                background: #4a3517;
+                border: 1px solid #7b5822;
+                border-radius: 8px;
+                padding: 4px 9px;
+            }
             QLabel#transactionsMessage { padding: 10px 24px; }
             QLineEdit#transactionSearch {
                 color: #e3eaf4;
@@ -235,6 +271,11 @@ class StatementsTable(QWidget):
                 selection-background-color: #304b6b;
             }
             QFrame#filterDivider { color: #38414d; }
+            QCheckBox#needsReviewFilter {
+                color: #d7e0ec;
+                spacing: 7px;
+                padding: 8px;
+            }
             QPushButton#clearFiltersButton {
                 color: #8ba8ff;
                 background: transparent;
@@ -309,6 +350,10 @@ class StatementsTable(QWidget):
             self.transaction_type_filter = value
             self._apply_filters()
 
+    def _select_needs_review(self, checked: bool) -> None:
+        self.needs_review_filter = checked
+        self._apply_filters()
+
     def _select_date_range(self, index: int) -> None:
         value = self.date_range_selector.itemData(index)
         if value is None:
@@ -335,16 +380,19 @@ class StatementsTable(QWidget):
         self.account_filter = "all"
         self.category_filter = "all"
         self.transaction_type_filter = "all"
+        self.needs_review_filter = False
         self.period_selector.reset(emit=False)
         with (
             QSignalBlocker(self.account_selector),
             QSignalBlocker(self.category_selector),
             QSignalBlocker(self.transaction_type_selector),
+            QSignalBlocker(self.needs_review_checkbox),
             QSignalBlocker(self.search),
         ):
             self.account_selector.setCurrentIndex(0)
             self.category_selector.setCurrentIndex(0)
             self.transaction_type_selector.setCurrentIndex(0)
+            self.needs_review_checkbox.setChecked(False)
             self.search.clear()
         self._set_date_range_choice()
         self._apply_filters()
@@ -358,10 +406,12 @@ class StatementsTable(QWidget):
         self.account_filter = "all"
         self.category_filter = "all"
         self.transaction_type_filter = "all"
+        self.needs_review_filter = False
         self.period_selector.reset(emit=False)
         self._set_date_range_choice()
-        with QSignalBlocker(self.search):
+        with QSignalBlocker(self.search), QSignalBlocker(self.needs_review_checkbox):
             self.search.clear()
+            self.needs_review_checkbox.setChecked(False)
         self.reload()
 
     def reload(self) -> None:
@@ -501,6 +551,8 @@ class StatementsTable(QWidget):
             if self.account_filter != "all":
                 base = base.where(Account.id == self.account_filter)
 
+            if self.needs_review_filter:
+                base = base.where(needs_review_expression())
             if self.category_filter not in ("all", "deleted"):
                 base = base.where(Transaction.category_id == self.category_filter)
 
@@ -512,14 +564,21 @@ class StatementsTable(QWidget):
             query = self.search.text().strip()
             if query:
                 pattern = f"%{query}%"
-                base = base.where(or_(
+                description_tokens = normalize_description(query).split()
+                search_terms = [
                     Transaction.description.ilike(pattern),
                     Account.name.ilike(pattern),
                     Category.name.ilike(pattern),
                     cast(Transaction.transaction_type, String).ilike(pattern),
                     cast(Transaction.transaction_date, String).ilike(pattern),
                     cast(Transaction.amount, String).ilike(pattern),
-                ))
+                ]
+                if description_tokens:
+                    search_terms.append(and_(*(
+                        Transaction.description.ilike(f"%{token}%")
+                        for token in description_tokens
+                    )))
+                base = base.where(or_(*search_terms))
 
             sort_expressions = (
                 Transaction.transaction_date,
@@ -545,6 +604,7 @@ class StatementsTable(QWidget):
         self.count_label.setText(
             f"{self.total_count:,} transaction{'s' if self.total_count != 1 else ''}"
         )
+        self.review_mode_label.setVisible(self.needs_review_filter)
         for row in self.rows:
             row.deleteLater()
         self.rows = []
@@ -555,7 +615,10 @@ class StatementsTable(QWidget):
         if self.filtered_count:
             self.message.hide()
             self._load_more()
-            while self.loaded_count < previously_loaded and self.loaded_count < self.filtered_count:
+            while (
+                self.loaded_count < previously_loaded
+                and self.loaded_count < self.filtered_count
+            ):
                 self._load_more()
             if preserve_scroll:
                 vertical_scrollbar.setValue(min(scroll_position, vertical_scrollbar.maximum()))
@@ -609,24 +672,27 @@ class StatementsTable(QWidget):
                 self._save_assignment(row, transaction_id)
             )
             row.deletion_changed.connect(self._set_deleted)
+            row.create_rule_requested.connect(self._request_rule)
             new_rows.append(row)
 
-        first_row = self.table.rowCount()
         self.table.setUpdatesEnabled(False)
         try:
             self.table.append_rows([row.cells for row in new_rows])
-            for row_number, row in enumerate(new_rows, first_row):
-                amount_item = self.table.item(row_number, 2)
-                amount_item.setTextAlignment(
-                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter
-                )
-                amount_item.setForeground(QColor(
-                    "#fb7977" if row.amount < 0 else "#63dba0" if row.amount > 0 else "#cbd4e1"
-                ))
-                self.table.item(row_number, 6).setForeground(QColor("#9eabba"))
         finally:
             self.table.setUpdatesEnabled(True)
         self.rows.extend(new_rows)
+
+    def _request_rule(self, transaction_id: int) -> None:
+        try:
+            with self.session_factory() as session:
+                transaction = session.get(Transaction, transaction_id)
+                if transaction is None or transaction.account.user_id != self.user_id:
+                    raise ValueError("Transaction is no longer available")
+                prefill = rule_prefill_from_transaction(transaction)
+        except Exception as exc:
+            QMessageBox.critical(self, "Error", f"Could not create rule:\n{exc}")
+            return
+        self.create_rule_requested.emit(prefill)
 
     def _save_assignment(
         self,
@@ -635,13 +701,7 @@ class StatementsTable(QWidget):
     ) -> None:
         transaction_type = row.transaction_type_combo.currentData()
         category_id = row.category_combo.currentData()
-        if transaction_type in (
-            TransactionType.E_TRANSFER,
-            TransactionType.TRANSFER,
-            TransactionType.CREDIT_CARD_PAYMENT,
-            TransactionType.SAVINGS,
-            TransactionType.INVESTMENT,
-        ):
+        if transaction_type in CATEGORY_FREE_TRANSACTION_TYPES:
             category_id = None
             with QSignalBlocker(row.category_combo):
                 row.category_combo.setCurrentIndex(0)
@@ -655,20 +715,7 @@ class StatementsTable(QWidget):
                     raise ValueError("Category is no longer available")
                 transaction.transaction_type = transaction_type
                 transaction.category_id = category_id
-                save_category_rule(
-                    session,
-                    self.user_id,
-                    transaction.description,
-                    transaction_type,
-                    category_id,
-                )
-                categorize_matching_transactions(
-                    session,
-                    self.user_id,
-                    transaction.description,
-                    transaction_type,
-                    category_id,
-                )
+                transaction.classification_source = ClassificationSource.MANUAL.value
         except Exception as exc:
             row.restore_assignment()
             self.message.setText(f"Could not save transaction assignment: {exc}")

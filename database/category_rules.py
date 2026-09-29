@@ -1,24 +1,61 @@
 import re
 import unicodedata
 from dataclasses import dataclass
+from typing import Iterable
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
-from database.models import Account, CategoryRule, Transaction
-from utils.constants import TransactionType
+from database.models import Account, Category, CategoryRule, Transaction
+from utils.constants import (
+    CATEGORY_FREE_TRANSACTION_TYPES,
+    CATEGORY_OPTIONAL_TRANSACTION_TYPES,
+    ClassificationSource,
+    MatchType,
+    TransactionType,
+)
 
 
 @dataclass(frozen=True)
 class RuleAssignment:
-    transaction_type: TransactionType
+    transaction_type: TransactionType | None
     category_id: int | None
+    classification_source: str = ClassificationSource.DEFAULT.value
+    matched_rule_id: int | None = None
+
+
+@dataclass(frozen=True)
+class RuleSpec:
+    id: int | None
+    description_key: str
+    match_type: MatchType
+    transaction_type: TransactionType | None
+    category_id: int | None
+    priority: int = 0
+
+
+@dataclass(frozen=True)
+class RuleSummary:
+    id: int
+    pattern: str
+    match_type: MatchType
+    transaction_type: TransactionType | None
+    category_id: int | None
+    category_name: str | None
+    priority: int
+    is_active: bool
+
+
+@dataclass(frozen=True)
+class RulePrefill:
+    pattern: str
+    transaction_type: TransactionType | None
+    category_id: int | None
+    match_type: MatchType = MatchType.CONTAINS
 
 
 _E_TRANSFER_PATTERN = re.compile(r"\be\s+(?:transfer|tr|tfr)\b")
-_INTERNAL_TRANSFER_CONTEXT = re.compile(
-    r"\b(?:transfer|tfr|chequing|checking)\b"
-)
+_INTERNAL_TRANSFER_CONTEXT = re.compile(r"\b(?:transfer|tfr|chequing|checking)\b")
 _CREDIT_CARD_PAYMENT_PATTERNS = (
     re.compile(r"\b(?:amex|visa|mastercard|credit card)\s+payment\b"),
     re.compile(r"\bpayment\s+(?:to\s+)?(?:amex|visa|mastercard|credit card)\b"),
@@ -34,58 +71,120 @@ _INTERNAL_TRANSFER_TERMS = (
 
 
 def normalize_description(description: str) -> str:
+    """Return a deterministic matching form without changing the stored text."""
     text = unicodedata.normalize("NFKC", description).casefold()
-    text = re.sub(r"['’]", "", text)
+    text = re.sub(r"['\u2019]", "", text)
     text = re.sub(r"[^\w]+", " ", text)
     return " ".join(text.split())
+
+
+def rule_prefill_from_transaction(transaction: Transaction) -> RulePrefill:
+    return RulePrefill(
+        pattern=normalize_description(transaction.description),
+        transaction_type=transaction.transaction_type,
+        category_id=transaction.category_id,
+    )
 
 
 def is_e_transfer_description(description: str) -> bool:
     return bool(_E_TRANSFER_PATTERN.search(normalize_description(description)))
 
 
-def _matching_rules(
-    normalized: str,
-    rules: dict[str, RuleAssignment],
-) -> list[tuple[str, RuleAssignment]]:
-    padded = f" {normalized} "
-    return sorted(
-        (
-            (key, assignment)
-            for key, assignment in rules.items()
-            if key == normalized or (len(key) >= 4 and f" {key} " in padded)
+def transaction_type_requires_category(
+    transaction_type: TransactionType | None,
+) -> bool:
+    return (
+        transaction_type is not None
+        and transaction_type not in CATEGORY_OPTIONAL_TRANSACTION_TYPES
+    )
+
+
+def transaction_needs_review(transaction: Transaction) -> bool:
+    return transaction.transaction_type is None or (
+        transaction_type_requires_category(transaction.transaction_type)
+        and transaction.category_id is None
+    )
+
+
+def needs_review_expression():
+    required_values = [
+        item.value
+        for item in TransactionType
+        if item not in CATEGORY_OPTIONAL_TRANSACTION_TYPES
+    ]
+    return or_(
+        Transaction.transaction_type.is_(None),
+        and_(
+            Transaction.transaction_type.in_(required_values),
+            Transaction.category_id.is_(None),
         ),
-        key=lambda item: len(item[0]),
-        reverse=True,
+    )
+
+
+def _rule_matches(normalized: str, rule: RuleSpec) -> bool:
+    rule_key = normalize_description(rule.description_key)
+    if not rule_key:
+        return False
+    if rule.match_type == MatchType.EXACT:
+        return normalized == rule_key
+    if rule.match_type == MatchType.STARTS_WITH:
+        return normalized.startswith(rule_key)
+    return rule_key in normalized
+
+
+def _coerce_rules(
+    rules: Iterable[RuleSpec] | dict[str, RuleAssignment] | None,
+) -> list[RuleSpec]:
+    if not rules:
+        return []
+    if isinstance(rules, dict):
+        return [
+            RuleSpec(
+                id=None,
+                description_key=key,
+                match_type=MatchType.CONTAINS,
+                transaction_type=assignment.transaction_type,
+                category_id=assignment.category_id,
+            )
+            for key, assignment in rules.items()
+        ]
+    return list(rules)
+
+
+def matching_rule(
+    description: str,
+    rules: Iterable[RuleSpec] | dict[str, RuleAssignment] | None,
+) -> RuleSpec | None:
+    normalized = normalize_description(description)
+    matches = [rule for rule in _coerce_rules(rules) if _rule_matches(normalized, rule)]
+    if not matches:
+        return None
+    return max(
+        matches,
+        key=lambda rule: (
+            rule.priority,
+            rule.match_type == MatchType.EXACT,
+            rule.match_type == MatchType.STARTS_WITH,
+            len(normalize_description(rule.description_key)),
+            -(rule.id or 0),
+        ),
     )
 
 
 def _without_operational_category(assignment: RuleAssignment) -> RuleAssignment:
-    if assignment.transaction_type in (
-        TransactionType.E_TRANSFER,
-        TransactionType.TRANSFER,
-        TransactionType.CREDIT_CARD_PAYMENT,
-    ):
-        return RuleAssignment(assignment.transaction_type, None)
+    if assignment.transaction_type in CATEGORY_FREE_TRANSACTION_TYPES:
+        return RuleAssignment(
+            assignment.transaction_type,
+            None,
+            assignment.classification_source,
+            assignment.matched_rule_id,
+        )
     return assignment
 
 
-def classify_description(
-    description: str,
-    rules: dict[str, RuleAssignment] | None = None,
-) -> RuleAssignment:
-    """Classify one description using specific rules before generic patterns."""
+def _default_classification(description: str) -> RuleAssignment:
+    """Preserve the app's existing non-ML fallback classification behavior."""
     normalized = normalize_description(description)
-    matching = _matching_rules(normalized, rules or {})
-
-    for priority_type in (
-        TransactionType.CREDIT_CARD_PAYMENT,
-        TransactionType.TRANSFER,
-    ):
-        for _, assignment in matching:
-            if assignment.transaction_type == priority_type:
-                return _without_operational_category(assignment)
-
     if any(pattern.search(normalized) for pattern in _CREDIT_CARD_PAYMENT_PATTERNS):
         return RuleAssignment(TransactionType.CREDIT_CARD_PAYMENT, None)
 
@@ -95,97 +194,220 @@ def classify_description(
         and (e_transfer or _INTERNAL_TRANSFER_CONTEXT.search(normalized))
     ):
         return RuleAssignment(TransactionType.TRANSFER, None)
-
-    for _, assignment in matching:
-        if assignment.transaction_type == TransactionType.E_TRANSFER:
-            return RuleAssignment(TransactionType.E_TRANSFER, None)
-
     if e_transfer:
         return RuleAssignment(TransactionType.E_TRANSFER, None)
-
-    if matching:
-        return _without_operational_category(matching[0][1])
     return RuleAssignment(TransactionType.EXPENSE, None)
 
 
-def category_rules_for_user(
-    session: Session,
-    user_id: str,
-) -> dict[str, RuleAssignment]:
-    return {
-        key: RuleAssignment(transaction_type, category_id)
-        for key, transaction_type, category_id in session.execute(
-            select(
-                CategoryRule.description_key,
-                CategoryRule.transaction_type,
-                CategoryRule.category_id,
-            ).where(CategoryRule.user_id == user_id)
+def classify_description(
+    description: str,
+    rules: Iterable[RuleSpec] | dict[str, RuleAssignment] | None = None,
+) -> RuleAssignment:
+    """Apply the highest-priority active rule, then existing local fallbacks."""
+    rule = matching_rule(description, rules)
+    fallback = _default_classification(description)
+    if rule is None:
+        return fallback
+
+    assignment = RuleAssignment(
+        rule.transaction_type or fallback.transaction_type,
+        rule.category_id,
+        ClassificationSource.RULE.value,
+        rule.id,
+    )
+    return _without_operational_category(assignment)
+
+
+def category_rules_for_user(session: Session, user_id: str) -> list[RuleSpec]:
+    rows = session.execute(
+        select(
+            CategoryRule.id,
+            CategoryRule.description_key,
+            CategoryRule.match_type,
+            CategoryRule.transaction_type,
+            CategoryRule.category_id,
+            CategoryRule.priority,
         )
-    }
+        .where(
+            CategoryRule.user_id == user_id,
+            CategoryRule.is_active.is_(True),
+        )
+        .order_by(CategoryRule.priority.desc(), CategoryRule.id)
+    )
+    return [RuleSpec(*row) for row in rows]
+
+
+def list_category_rules(session: Session, user_id: str) -> list[RuleSummary]:
+    rows = session.execute(
+        select(
+            CategoryRule.id,
+            CategoryRule.description_example,
+            CategoryRule.match_type,
+            CategoryRule.transaction_type,
+            CategoryRule.category_id,
+            Category.name,
+            CategoryRule.priority,
+            CategoryRule.is_active,
+        )
+        .outerjoin(Category, CategoryRule.category_id == Category.id)
+        .where(CategoryRule.user_id == user_id)
+        .order_by(CategoryRule.priority.desc(), CategoryRule.id)
+    )
+    return [RuleSummary(*row) for row in rows]
 
 
 def save_category_rule(
     session: Session,
     user_id: str,
-    description: str,
-    transaction_type: TransactionType,
+    pattern: str,
+    transaction_type: TransactionType | None,
     category_id: int | None,
-) -> None:
-    key = normalize_description(description)
+    *,
+    match_type: MatchType = MatchType.EXACT,
+    priority: int = 0,
+    is_active: bool = True,
+    rule_id: int | None = None,
+) -> CategoryRule:
+    key = normalize_description(pattern)
     if not key:
-        return
+        raise ValueError("Keyword / pattern is required")
 
-    rule = session.scalar(
-        select(CategoryRule).where(
+    match_type = MatchType(match_type)
+    if transaction_type in CATEGORY_FREE_TRANSACTION_TYPES:
+        category_id = None
+
+    if rule_id is not None:
+        rule = session.get(CategoryRule, rule_id)
+        if rule is None or rule.user_id != user_id:
+            raise ValueError("Classification rule is no longer available")
+    else:
+        rule = session.scalar(select(CategoryRule).where(
             CategoryRule.user_id == user_id,
             CategoryRule.description_key == key,
-        )
-    )
-    if rule is None:
-        session.add(CategoryRule(
-            user_id=user_id,
-            description_key=key,
-            description_example=description,
-            transaction_type=transaction_type,
-            category_id=category_id,
         ))
-    else:
-        rule.transaction_type = transaction_type
-        rule.category_id = category_id
-        rule.description_example = description
+    if rule is None:
+        rule = CategoryRule(user_id=user_id, description_key=key, description_example=pattern)
+        session.add(rule)
+
+    rule.description_key = key
+    rule.description_example = pattern.strip()
+    rule.match_type = match_type
+    rule.transaction_type = transaction_type
+    rule.category_id = category_id
+    rule.priority = int(priority)
+    rule.is_active = bool(is_active)
+    session.flush()
+    return rule
 
 
-def categorize_matching_transactions(
+def delete_category_rule(session: Session, user_id: str, rule_id: int) -> None:
+    rule = session.get(CategoryRule, rule_id)
+    if rule is None or rule.user_id != user_id:
+        raise ValueError("Classification rule is no longer available")
+    session.delete(rule)
+
+
+def apply_rule_to_transaction(
+    transaction: Transaction,
+    rule: RuleSpec | CategoryRule,
+    *,
+    overwrite_manual: bool = False,
+) -> bool:
+    if (
+        transaction.classification_source == ClassificationSource.MANUAL.value
+        and not overwrite_manual
+    ):
+        return False
+    spec = RuleSpec(
+        rule.id,
+        rule.description_key,
+        MatchType(rule.match_type),
+        rule.transaction_type,
+        rule.category_id,
+        rule.priority,
+    )
+    if not _rule_matches(normalize_description(transaction.description), spec):
+        return False
+
+    if rule.transaction_type is not None:
+        transaction.transaction_type = rule.transaction_type
+    transaction.category_id = (
+        None
+        if transaction.transaction_type in CATEGORY_FREE_TRANSACTION_TYPES
+        else rule.category_id
+    )
+    transaction.classification_source = ClassificationSource.RULE.value
+    return True
+
+
+def apply_rule_to_existing_transactions(
     session: Session,
     user_id: str,
-    description: str,
-    transaction_type: TransactionType,
-    category_id: int | None,
-) -> None:
-    key = normalize_description(description)
-    if not key:
-        return
-
-    descriptions = session.scalars(
-        select(Transaction.description)
-        .join(Account, Transaction.account_id == Account.id)
-        .where(Account.user_id == user_id)
-        .distinct()
+    rule: CategoryRule,
+    *,
+    overwrite_manual: bool = False,
+) -> int:
+    if not rule.is_active:
+        return 0
+    active_rules = category_rules_for_user(session, user_id)
+    selected_rule = RuleSpec(
+        rule.id,
+        rule.description_key,
+        MatchType(rule.match_type),
+        rule.transaction_type,
+        rule.category_id,
+        rule.priority,
     )
-    matches = [value for value in descriptions if normalize_description(value) == key]
-    account_ids = select(Account.id).where(Account.user_id == user_id)
-    for start in range(0, len(matches), 500):
-        statement = (
-            update(Transaction)
-            .where(
-                Transaction.account_id.in_(account_ids),
-                Transaction.description.in_(matches[start:start + 500]),
-                Transaction.is_deleted.is_(False),
-            )
-            .values(
-                transaction_type=transaction_type,
-                category_id=category_id,
-            )
-            .execution_options(synchronize_session=False)
+    transactions = session.scalars(
+        select(Transaction)
+        .join(Account, Transaction.account_id == Account.id)
+        .where(
+            Account.user_id == user_id,
+            Transaction.is_deleted.is_(False),
         )
-        session.execute(statement)
+    )
+    updated = 0
+    for transaction in transactions:
+        normalized = normalize_description(transaction.description)
+        if not _rule_matches(normalized, selected_rule):
+            continue
+        winner = matching_rule(transaction.description, active_rules)
+        if winner is not None:
+            updated += apply_rule_to_transaction(
+                transaction,
+                winner,
+                overwrite_manual=overwrite_manual,
+            )
+    return updated
+
+
+def count_transactions_matching_rule(
+    session: Session,
+    user_id: str,
+    pattern: str,
+    match_type: MatchType,
+) -> int:
+    """Count active, non-manual transactions matching a prospective rule."""
+    spec = RuleSpec(
+        id=None,
+        description_key=pattern,
+        match_type=MatchType(match_type),
+        transaction_type=None,
+        category_id=None,
+    )
+    if not normalize_description(pattern):
+        return 0
+
+    rows = session.execute(
+        select(Transaction.description, Transaction.classification_source)
+        .join(Account, Transaction.account_id == Account.id)
+        .where(
+            Account.user_id == user_id,
+            Transaction.is_deleted.is_(False),
+        )
+    )
+    return sum(
+        source != ClassificationSource.MANUAL.value
+        and _rule_matches(normalize_description(description), spec)
+        for description, source in rows
+    )

@@ -19,7 +19,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database.db import Base
-from utils.constants import TransactionType
+from utils.constants import ClassificationSource, MatchType, TransactionType
 
 
 def _transaction_type_column(nullable: bool = False):
@@ -88,6 +88,9 @@ class User(Base):
         back_populates="user", cascade="all, delete-orphan"
     )
     savings_snapshots: Mapped[list["SavingsSnapshot"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    category_rules: Mapped[list["CategoryRule"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
 
@@ -259,6 +262,9 @@ class Category(Base):
         back_populates="category",
         foreign_keys="Transaction.category_id",
     )
+    category_rules: Mapped[list["CategoryRule"]] = relationship(
+        back_populates="category",
+    )
 
 
 class CategoryRule(Base):
@@ -268,8 +274,26 @@ class CategoryRule(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
     description_key: Mapped[str] = mapped_column(String(512), nullable=False)
     description_example: Mapped[str] = mapped_column(String(255), nullable=False)
-    transaction_type: Mapped[TransactionType] = _transaction_type_column()
+    match_type: Mapped[MatchType] = mapped_column(
+        SqlEnum(
+            MatchType,
+            name="rule_match_type",
+            native_enum=False,
+            length=16,
+            create_constraint=False,
+            validate_strings=True,
+            values_callable=lambda enum: [item.value for item in enum],
+        ),
+        nullable=False,
+        default=MatchType.EXACT,
+    )
+    transaction_type: Mapped[TransactionType | None] = _transaction_type_column(nullable=True)
     category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id"), nullable=True)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    user: Mapped["User"] = relationship(back_populates="category_rules")
+    category: Mapped["Category | None"] = relationship(back_populates="category_rules")
 
     __table_args__ = (
         UniqueConstraint("user_id", "description_key", name="uq_category_rule_user_description"),
@@ -329,7 +353,12 @@ class Transaction(Base):
         ForeignKey("categories.id"),
         nullable=True,
     )
-    transaction_type: Mapped[TransactionType] = _transaction_type_column()
+    transaction_type: Mapped[TransactionType | None] = _transaction_type_column(nullable=True)
+    classification_source: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=ClassificationSource.DEFAULT.value,
+    )
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     import_id: Mapped[int | None] = mapped_column(

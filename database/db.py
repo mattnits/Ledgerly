@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from sqlalchemy import create_engine, inspect, select
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from utils.constants import DEFAULT_CATEGORY_COLORS
@@ -32,55 +32,6 @@ def init_db(db_engine=engine):
     from database import models
 
     Base.metadata.create_all(bind=db_engine)
-    ensure_account_balance_columns(db_engine)
-    ensure_category_columns(db_engine)
-    ensure_import_hash_column(db_engine)
-
-
-def ensure_account_balance_columns(db_engine=engine) -> None:
-    inspector = inspect(db_engine)
-    if not inspector.has_table("accounts"):
-        return
-
-    existing = {column["name"] for column in inspector.get_columns("accounts")}
-    with db_engine.begin() as connection:
-        if "balance" not in existing:
-            connection.exec_driver_sql(
-                "ALTER TABLE accounts ADD COLUMN balance NUMERIC(12, 2)"
-            )
-        if "balance_as_of" not in existing:
-            connection.exec_driver_sql(
-                "ALTER TABLE accounts ADD COLUMN balance_as_of DATE"
-            )
-
-
-def ensure_category_columns(db_engine=engine) -> None:
-    inspector = inspect(db_engine)
-    if not inspector.has_table("categories"):
-        return
-
-    existing = {column["name"] for column in inspector.get_columns("categories")}
-    with db_engine.begin() as connection:
-        if "color" not in existing:
-            connection.exec_driver_sql(
-                "ALTER TABLE categories ADD COLUMN color VARCHAR(7) NOT NULL DEFAULT '#64748b'"
-            )
-        if "is_default" not in existing:
-            connection.exec_driver_sql(
-                "ALTER TABLE categories ADD COLUMN is_default BOOLEAN NOT NULL DEFAULT 0"
-            )
-
-
-def ensure_import_hash_column(db_engine=engine) -> None:
-    inspector = inspect(db_engine)
-    if not inspector.has_table("imports"):
-        return
-    existing = {column["name"] for column in inspector.get_columns("imports")}
-    if "content_hash" not in existing:
-        with db_engine.begin() as connection:
-            connection.exec_driver_sql(
-                "ALTER TABLE imports ADD COLUMN content_hash VARCHAR(64)"
-            )
 
 
 def ensure_categories(db_engine=engine) -> None:
