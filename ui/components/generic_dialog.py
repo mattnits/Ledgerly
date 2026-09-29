@@ -12,7 +12,14 @@ from PySide6.QtWidgets import (
 class GenericDialog(QDialog):
     submitted = Signal()
 
-    def __init__(self, title: str, content: QWidget, parent=None):
+    def __init__(
+        self,
+        title: str,
+        content: QWidget,
+        parent=None,
+        *,
+        submit_label: str = "Submit",
+    ):
         super().__init__(parent)
 
         self.setWindowTitle(title)
@@ -30,7 +37,7 @@ class GenericDialog(QDialog):
         button_layout.addStretch()
 
         cancel_button = QPushButton("Cancel")
-        submit_button = QPushButton("Submit")
+        submit_button = QPushButton(submit_label)
 
         button_layout.addWidget(cancel_button)
         button_layout.addWidget(submit_button)

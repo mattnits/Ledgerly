@@ -42,7 +42,8 @@ def delete_category(category_id: int) -> None:
             .values(category_id=None)
         )
         session.execute(
-            delete(CategoryRule).where(CategoryRule.category_id == category_id)
+            update(CategoryRule).where(CategoryRule.category_id == category_id)
+            .values(category_id=None)
         )
         session.execute(
             delete(MonthlyCategoryBudget).where(

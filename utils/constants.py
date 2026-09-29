@@ -31,6 +31,18 @@ class TransactionType(StrEnum):
     INVESTMENT = "INVESTMENT"
 
 
+class MatchType(StrEnum):
+    CONTAINS = "contains"
+    STARTS_WITH = "starts_with"
+    EXACT = "exact"
+
+
+class ClassificationSource(StrEnum):
+    MANUAL = "manual"
+    RULE = "rule"
+    DEFAULT = "default"
+
+
 TRANSACTION_TYPE_LABELS = {
     TransactionType.EXPENSE: "Expense",
     TransactionType.INCOME: "Income",
@@ -41,6 +53,25 @@ TRANSACTION_TYPE_LABELS = {
     TransactionType.SAVINGS: "Savings",
     TransactionType.INVESTMENT: "Investment",
 }
+
+CATEGORY_OPTIONAL_TRANSACTION_TYPES = frozenset({
+    TransactionType.E_TRANSFER,
+    TransactionType.TRANSFER,
+    TransactionType.CREDIT_CARD_PAYMENT,
+    TransactionType.REFUND_REIMBURSEMENT,
+    TransactionType.SAVINGS,
+    TransactionType.INVESTMENT,
+})
+
+CATEGORY_FREE_TRANSACTION_TYPES = frozenset({
+    TransactionType.E_TRANSFER,
+    TransactionType.TRANSFER,
+    TransactionType.CREDIT_CARD_PAYMENT,
+    TransactionType.SAVINGS,
+    TransactionType.INVESTMENT,
+})
+
+INCOME_CATEGORY_NAMES = frozenset({"Salary", "Other Income"})
 
 DEFAULT_CATEGORY_COLORS = {
     "Food": "#f97316",

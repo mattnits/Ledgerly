@@ -157,6 +157,7 @@ class GenericParser:
                     amount=amount,
                     transaction_type=assignment.transaction_type,
                     category_id=assignment.category_id,
+                    classification_source=assignment.classification_source,
                 ))
                 row_count += 1
                 if balance is not None and (
@@ -249,6 +250,7 @@ class GenericParser:
                     amount=amount,
                     transaction_type=assignment.transaction_type,
                     category_id=assignment.category_id,
+                    classification_source=assignment.classification_source,
                 ))
                 row_count += 1
 

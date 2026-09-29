@@ -13,7 +13,7 @@ from sqlalchemy.pool import StaticPool
 from database.db import Base
 from database.models import Account, Category, Transaction, User
 from ui.components.statements_table import StatementsTable
-from utils.constants import TransactionType
+from utils.constants import ClassificationSource, TransactionType
 
 
 class TransactionScrollTest(unittest.TestCase):
@@ -69,7 +69,12 @@ class TransactionScrollTest(unittest.TestCase):
         self.assertEqual(table.loaded_count, 250)
         self.assertEqual(scrollbar.value(), original_position)
         with sessions() as session:
-            self.assertEqual(session.get(Transaction, transaction_id).category_id, category_id)
+            transaction = session.get(Transaction, transaction_id)
+            self.assertEqual(transaction.category_id, category_id)
+            self.assertEqual(
+                transaction.classification_source,
+                ClassificationSource.MANUAL.value,
+            )
 
         table.close()
         engine.dispose()
