@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 
 from database.reset import reset_financial_data
 from ui.components.page_header import PageHeader
-from ui.theme import set_button_icon
+from ui.theme import set_button_icon, set_delete_button_icon
 
 
 class SettingsPage(QWidget):
@@ -32,22 +32,23 @@ class SettingsPage(QWidget):
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(20, 18, 20, 18)
         card_layout.setSpacing(8)
-        title = QLabel("Financial data")
+        title = QLabel("Transaction data")
         title.setObjectName("sectionTitle")
         card_layout.addWidget(title)
 
         reset_row = QHBoxLayout()
         description = QLabel(
-            "Clear all transactions, accounts, and import history. "
-            "Categories and category rules will be kept."
+            "Delete all transactions and statement import history. Accounts, "
+            "investments, categories, and categorization rules will be kept."
         )
         description.setWordWrap(True)
         description.setObjectName("mutedLabel")
         reset_row.addWidget(description, 1)
 
-        reset_button = QPushButton("Reset")
+        reset_button = QPushButton("Delete Data")
         reset_button.setObjectName("dangerButton")
-        set_button_icon(reset_button, "fa6s.trash", color="#ff9da0", size=15)
+        reset_button.setToolTip("Delete all transaction and statement import data")
+        set_delete_button_icon(reset_button)
         reset_button.clicked.connect(self.confirm_reset)
         reset_row.addWidget(reset_button)
         card_layout.addLayout(reset_row)
@@ -58,9 +59,10 @@ class SettingsPage(QWidget):
     def confirm_reset(self) -> None:
         answer = QMessageBox.question(
             self,
-            "Reset financial data",
-            "Delete all transactions, accounts, and import history for every user? "
-            "This cannot be undone. Categories and category rules will be kept.",
+            "Delete transaction data",
+            "Delete all transactions and statement import history for every user? "
+            "This cannot be undone. Accounts, investments, categories, and "
+            "categorization rules will be kept.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )
@@ -70,7 +72,11 @@ class SettingsPage(QWidget):
         try:
             reset_financial_data()
         except Exception as exc:
-            QMessageBox.critical(self, "Reset failed", f"Could not reset financial data:\n{exc}")
+            QMessageBox.critical(
+                self,
+                "Delete failed",
+                f"Could not delete transaction data:\n{exc}",
+            )
             return
 
         self.data_reset.emit()

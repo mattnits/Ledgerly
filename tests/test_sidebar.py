@@ -61,6 +61,13 @@ class SidebarTest(unittest.TestCase):
         self.assertFalse(self.sidebar.is_collapsed)
         self.assertTrue(self.sidebar.user_dropdown.isVisible())
 
+    def test_user_selector_fills_expanded_sidebar_width(self):
+        margins = self.sidebar.sidebar_layout.contentsMargins()
+        expected_width = (
+            self.sidebar.width() - margins.left() - margins.right()
+        )
+        self.assertEqual(self.sidebar.current_user_button.width(), expected_width)
+
 
 if __name__ == "__main__":
     unittest.main()

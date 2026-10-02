@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -19,6 +20,8 @@ from utils.constants import (
     CATEGORIES_PAGE,
     DASHBOARD_LABEL,
     DASHBOARD_PAGE,
+    INVESTMENTS_LABEL,
+    INVESTMENTS_PAGE,
     SETTINGS_LABEL,
     SETTINGS_PAGE,
     TRANSACTIONS_LABEL,
@@ -85,6 +88,13 @@ class Sidebar(QFrame):
 
         self.current_user_button = QToolButton()
         self.current_user_button.setObjectName("currentUserButton")
+        self.current_user_button.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        self.current_user_button.setFixedWidth(
+            self.EXPANDED_WIDTH - 24
+        )
         self.current_user_button.setToolButtonStyle(
             Qt.ToolButtonTextBesideIcon
         )
@@ -132,6 +142,12 @@ class Sidebar(QFrame):
             "fa6s.right-left",
         )
 
+        self.investments_button = self.create_button(
+            INVESTMENTS_LABEL,
+            INVESTMENTS_PAGE,
+            "fa6s.arrow-trend-up",
+        )
+
         self.accounts_button = self.create_button(
             ACCOUNTS_LABEL,
             ACCOUNTS_PAGE,
@@ -153,6 +169,7 @@ class Sidebar(QFrame):
         self.navigation_buttons = (
             self.dashboard_button,
             self.transactions_button,
+            self.investments_button,
             self.accounts_button,
             self.categories_button,
             self.settings_button,
@@ -162,6 +179,7 @@ class Sidebar(QFrame):
 
         self.sidebar_layout.addWidget(self.dashboard_button)
         self.sidebar_layout.addWidget(self.transactions_button)
+        self.sidebar_layout.addWidget(self.investments_button)
         self.sidebar_layout.addWidget(self.accounts_button)
         self.sidebar_layout.addWidget(self.categories_button)
 
@@ -311,8 +329,8 @@ class Sidebar(QFrame):
         self.create_user_button.setMaximumWidth(
             48 if collapsed else 16777215
         )
-        self.current_user_button.setMaximumWidth(
-            48 if collapsed else 16777215
+        self.current_user_button.setFixedWidth(
+            48 if collapsed else self.EXPANDED_WIDTH - 24
         )
         self.current_user_button.setToolButtonStyle(
             Qt.ToolButtonIconOnly
@@ -473,6 +491,7 @@ class Sidebar(QFrame):
             self.dashboard_button,
             self.transactions_button,
             self.accounts_button,
+            self.investments_button,
             self.categories_button,
             self.settings_button,
         ]

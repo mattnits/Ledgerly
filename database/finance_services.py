@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Iterable
 
@@ -12,6 +12,7 @@ from database.models import (
     Account,
     Category,
     GroupMembership,
+    InvestmentAccount,
     InvestmentSnapshot,
     MonthlyCategoryBudget,
     SavingsGoal,
@@ -293,15 +294,15 @@ def investment_contribution_totals(
     group_id: int | None = None,
     session_factory=SessionLocal,
 ) -> Decimal:
-    start, end = _month_bounds(year, month)
-    with session_factory() as session:
-        return sum(session.scalars(
-            select(InvestmentSnapshot.monthly_contribution).where(
-                _owner_scope(InvestmentSnapshot, user_id, group_id),
-                InvestmentSnapshot.snapshot_date >= start,
-                InvestmentSnapshot.snapshot_date < end,
-            )
-        ), Decimal())
+    from database.investments import get_monthly_contributions
+
+    return get_monthly_contributions(
+        year,
+        month,
+        user_id=user_id,
+        group_id=group_id,
+        session_factory=session_factory,
+    )
 
 
 def investment_value_history(
@@ -310,16 +311,23 @@ def investment_value_history(
     group_id: int | None = None,
     session_factory=SessionLocal,
 ) -> tuple[tuple[date, str, Decimal], ...]:
+    from database.investments import _visible_account_scope
+
     with session_factory() as session:
-        return tuple(session.execute(
+        rows = session.execute(
             select(
-                InvestmentSnapshot.snapshot_date,
-                InvestmentSnapshot.account_name,
-                InvestmentSnapshot.portfolio_value,
+                InvestmentSnapshot.snapshot_datetime,
+                InvestmentAccount.account_name,
+                InvestmentSnapshot.total_value,
             )
-            .where(_owner_scope(InvestmentSnapshot, user_id, group_id))
-            .order_by(InvestmentSnapshot.snapshot_date, InvestmentSnapshot.account_name)
-        ).all())
+            .join(InvestmentAccount)
+            .where(_visible_account_scope(user_id, group_id))
+            .order_by(
+                InvestmentSnapshot.snapshot_datetime,
+                InvestmentAccount.account_name,
+            )
+        ).all()
+    return tuple((recorded_at.date(), name, value) for recorded_at, name, value in rows)
 
 
 def set_savings_goal(
@@ -391,27 +399,42 @@ def record_investment_snapshot(
     group_id: int | None = None,
     session_factory=SessionLocal,
 ) -> None:
+    """Backward-compatible helper for the original account-name API."""
     account_name = account_name.strip()
     if not account_name:
         raise ValueError("account_name is required")
-    with session_factory.begin() as session:
+    _validate_owner(user_id, group_id)
+    with session_factory() as session, session.begin():
+        account = session.scalar(select(InvestmentAccount).where(
+            _owner_scope(InvestmentAccount, user_id, group_id),
+            InvestmentAccount.account_name == account_name,
+        ))
+        if account is None:
+            account = InvestmentAccount(
+                user_id=user_id,
+                group_id=group_id,
+                institution="Manual",
+                account_name=account_name,
+                account_number_last7=None,
+                is_active=True,
+            )
+            session.add(account)
+            session.flush()
+        recorded_at = datetime.combine(snapshot_date, time.min)
         snapshot = session.scalar(select(InvestmentSnapshot).where(
-            _owner_scope(InvestmentSnapshot, user_id, group_id),
-            InvestmentSnapshot.account_name == account_name,
-            InvestmentSnapshot.snapshot_date == snapshot_date,
+            InvestmentSnapshot.investment_account_id == account.id,
+            InvestmentSnapshot.snapshot_datetime == recorded_at,
         ))
         if snapshot is None:
             session.add(InvestmentSnapshot(
-                user_id=user_id,
-                group_id=group_id,
-                account_name=account_name,
-                snapshot_date=snapshot_date,
-                monthly_contribution=monthly_contribution,
-                portfolio_value=portfolio_value,
+                investment_account_id=account.id,
+                snapshot_datetime=recorded_at,
+                contribution_amount=monthly_contribution,
+                total_value=portfolio_value,
             ))
         else:
-            snapshot.monthly_contribution = monthly_contribution
-            snapshot.portfolio_value = portfolio_value
+            snapshot.contribution_amount = monthly_contribution
+            snapshot.total_value = portfolio_value
 
 
 def record_savings_snapshot(

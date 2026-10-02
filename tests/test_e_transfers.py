@@ -137,6 +137,16 @@ class ETransferSummaryTest(unittest.TestCase):
         self.assertEqual(negative.total_income, Decimal("0"))
         self.assertEqual(negative.e_transfer_spending_adjustment, Decimal("300"))
         self.assertEqual(negative.total_spending, Decimal("300"))
+        negative_dashboard = get_dashboard_data(
+            "test-user", "monthly", (2026, 10), self.sessions
+        )
+        self.assertEqual(
+            {
+                item.name: item.amount
+                for item in negative_dashboard.category_spending
+            },
+            {"Net negative e-transfers": Decimal("300")},
+        )
 
         self._add(11, "200", TransactionType.E_TRANSFER)
         self._add(11, "-200", TransactionType.E_TRANSFER)
@@ -153,6 +163,16 @@ class ETransferSummaryTest(unittest.TestCase):
         self.assertEqual(all_time.e_transfer_spending_adjustment, Decimal("300"))
         self.assertEqual(all_time.total_income, Decimal("1250"))
         self.assertEqual(all_time.total_spending, Decimal("340"))
+        self.assertEqual(
+            {
+                item.name: item.amount
+                for item in all_time.category_spending
+            },
+            {
+                "Net negative e-transfers": Decimal("300"),
+                "Food": Decimal("40"),
+            },
+        )
 
 if __name__ == "__main__":
     unittest.main()

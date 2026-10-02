@@ -170,7 +170,7 @@ class DashboardPage(QWidget):
             data.period_label,
             data.investing_total,
             data.portfolio_value,
-            data.previous_portfolio_value,
+            data.portfolio_baseline_value,
             data.investment_month_labels,
             data.investment_value_series,
         )
@@ -183,10 +183,21 @@ class DashboardPage(QWidget):
     def _parse_selected_files(self, dialog: FileUploadDialog) -> None:
         file_data = dialog.get_file_parse_types()
         if not file_data:
-            dialog.file_selection.label.setText("Select at least one file")
+            dialog.file_selection.show_general_error("Select at least one file")
             return
 
-        parser = GenericParser(file_data, self.window().sidebar.current_user_id)
+        try:
+            start_date, end_date = dialog.get_date_range()
+        except ValueError as exc:
+            dialog.file_selection.show_general_error(str(exc))
+            return
+
+        parser = GenericParser(
+            file_data,
+            self.window().sidebar.current_user_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
         parser.parse()
         errors = parser.get_results()
 
