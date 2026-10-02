@@ -3,6 +3,7 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtTest import QSignalSpy
 from PySide6.QtWidgets import QApplication
 
 from ui.sidebar import Sidebar
@@ -32,8 +33,9 @@ class SidebarTest(unittest.TestCase):
         self.assertTrue(self.sidebar.is_collapsed)
         self.assertEqual(self.sidebar.width(), Sidebar.COLLAPSED_WIDTH)
         self.assertTrue(self.sidebar.brand_title.isHidden())
-        self.assertEqual(self.sidebar.current_user_button.text(), "")
-        self.assertEqual(self.sidebar.create_user_button.text(), "")
+        self.assertTrue(self.sidebar.current_user_name.isHidden())
+        self.assertTrue(self.sidebar.add_user_button.isHidden())
+        self.assertTrue(self.sidebar.switch_user_button.isHidden())
         self.assertTrue(self.sidebar.transactions_button.isChecked())
         for button in self.sidebar.navigation_buttons:
             self.assertEqual(button.text(), "")
@@ -45,28 +47,46 @@ class SidebarTest(unittest.TestCase):
         self.assertFalse(self.sidebar.is_collapsed)
         self.assertEqual(self.sidebar.width(), Sidebar.EXPANDED_WIDTH)
         self.assertFalse(self.sidebar.brand_title.isHidden())
-        self.assertIn("Matt", self.sidebar.current_user_button.text())
-        self.assertEqual(self.sidebar.create_user_button.text(), "Create User")
+        self.assertFalse(self.sidebar.current_user_name.isHidden())
+        self.assertEqual(self.sidebar.current_user_name.fullText(), "Matt")
+        self.assertFalse(self.sidebar.add_user_button.isHidden())
+        self.assertFalse(self.sidebar.switch_user_button.isHidden())
         self.assertEqual(
             self.sidebar.transactions_button.text(),
             self.sidebar.transactions_button.property("sidebarLabel"),
         )
         self.assertTrue(self.sidebar.transactions_button.isChecked())
 
-    def test_user_icon_expands_sidebar_before_opening_selector(self):
+    def test_user_icon_expands_sidebar_before_opening_switch_dialog(self):
+        switched = QSignalSpy(self.sidebar.switch_user_clicked)
         self.sidebar.set_collapsed(True)
         self.sidebar.toggle_user_dropdown()
         self.app.processEvents()
 
         self.assertFalse(self.sidebar.is_collapsed)
-        self.assertTrue(self.sidebar.user_dropdown.isVisible())
+        self.assertEqual(switched.count(), 1)
 
-    def test_user_selector_fills_expanded_sidebar_width(self):
+    def test_user_bar_fills_expanded_sidebar_width(self):
         margins = self.sidebar.sidebar_layout.contentsMargins()
         expected_width = (
             self.sidebar.width() - margins.left() - margins.right()
         )
-        self.assertEqual(self.sidebar.current_user_button.width(), expected_width)
+        self.assertLessEqual(abs(self.sidebar.user_bar.width() - expected_width), 1)
+
+    def test_long_user_name_is_elided_and_has_tooltip(self):
+        long_name = "A very long profile name that cannot fit in the sidebar"
+        self.sidebar.set_users(
+            [{"id": "user-1", "name": long_name, "color": "#3b9de2"}],
+            "user-1",
+        )
+        self.app.processEvents()
+
+        self.assertIn("…", self.sidebar.current_user_name.text())
+        self.assertEqual(self.sidebar.current_user_name.toolTip(), long_name)
+
+    def test_user_display_has_no_dropdown_indicator(self):
+        self.assertNotIn("▼", self.sidebar.current_user_name.text())
+        self.assertEqual(self.sidebar.current_user_name.fullText(), "Matt")
 
 
 if __name__ == "__main__":

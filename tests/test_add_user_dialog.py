@@ -109,6 +109,19 @@ class AddUserDialogTest(unittest.TestCase):
         self.assertEqual(dialog.add_user_button.height(), 40)
         dialog.close()
 
+    def test_palette_and_live_preview_track_name_and_colour(self):
+        dialog = AddUserDialog(session_factory=self.sessions)
+        dialog.name_input.setText("Alex")
+        dialog.color_swatches[4].click()
+
+        self.assertEqual(dialog.preview_name.fullText(), "Alex")
+        self.assertEqual(dialog.selected_color.name(), "#ff8a34")
+        self.assertEqual(dialog.color_preview.toolTip(), "#FF8A34")
+        self.assertEqual(
+            sum(bool(swatch.property("selected")) for swatch in dialog.color_swatches),
+            1,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

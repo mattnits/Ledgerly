@@ -1,10 +1,12 @@
 import os
+import time
 import unittest
 from datetime import date
 from decimal import Decimal
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -17,6 +19,16 @@ from utils.constants import ClassificationSource, TransactionType
 
 
 class TransactionScrollTest(unittest.TestCase):
+    @staticmethod
+    def _wait_for(predicate, timeout=3.0):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            QApplication.processEvents()
+            if predicate():
+                return
+            QTest.qWait(10)
+        raise AssertionError("Timed out waiting for background transaction query")
+
     def test_category_change_keeps_scroll_after_paginated_reload(self):
         engine = create_engine(
             "sqlite://",
@@ -53,8 +65,9 @@ class TransactionScrollTest(unittest.TestCase):
         table.resize(1150, 520)
         table.show()
         table.set_user_id("test-user")
-        app.processEvents()
+        self._wait_for(lambda: not table._loading and table.loaded_count == 200)
         table._load_more()
+        self._wait_for(lambda: not table._loading and table.loaded_count == 250)
         self.assertEqual(table.loaded_count, 250)
 
         scrollbar = table.table.verticalScrollBar()
@@ -63,8 +76,13 @@ class TransactionScrollTest(unittest.TestCase):
         original_position = scrollbar.value()
         row = table.rows[160]
         transaction_id = row.transaction_id
+        generation = table._query_generation
         row.category_combo.setCurrentIndex(row.category_combo.findData(category_id))
-        app.processEvents()
+        self._wait_for(
+            lambda: table._query_generation > generation
+            and not table._loading
+            and table.loaded_count == 250
+        )
 
         self.assertEqual(table.loaded_count, 250)
         self.assertEqual(scrollbar.value(), original_position)
