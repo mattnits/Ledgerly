@@ -404,6 +404,13 @@ class StatementsTable(QWidget):
 
     def _refresh_month_choices(self) -> None:
         self.period_selector.set_available_months(self.available_months)
+        self.selected_month = self.period_selector.selected_month
+        self.period_filter = self.period_selector.period
+        if self.period_filter == "monthly":
+            self.date_range_filter = self._month_range_key()
+        else:
+            self.date_range_filter = "all"
+        self._set_date_range_choice()
 
     def _set_period_filter(self, period: str) -> None:
         self.period_selector.set_period(period)

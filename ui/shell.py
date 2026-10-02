@@ -11,14 +11,16 @@ from ui.categories import CategoriesPage
 from ui.sidebar import Sidebar
 
 from ui.welcome import WelcomePage
-from ui.add_user import AddUserPage
+from ui.add_user import AddUserDialog
 from ui.dashboard import DashboardPage
+from ui.investments import InvestmentsPage
 from ui.transactions import TransactionsPage
 from ui.settings import SettingsPage
 from utils.constants import (
     ACCOUNTS_PAGE,
     CATEGORIES_PAGE,
     DASHBOARD_PAGE,
+    INVESTMENTS_PAGE,
     SETTINGS_PAGE,
     TRANSACTIONS_PAGE,
 )
@@ -69,20 +71,16 @@ class ShellWindow(QMainWindow):
         self.pages.setObjectName("pageStack")
 
         self.welcome_page = WelcomePage()
-        self.add_user_page = AddUserPage()
 
         self.dashboard_page = DashboardPage()
         self.transactions_page = TransactionsPage()
         self.settings_page = SettingsPage()
         self.accounts_page = AccountsPage()
+        self.investments_page = InvestmentsPage()
         self.categories_page = CategoriesPage()
 
         self.pages.addWidget(
             self.welcome_page
-        )
-
-        self.pages.addWidget(
-            self.add_user_page
         )
 
         self.pages.addWidget(
@@ -96,6 +94,8 @@ class ShellWindow(QMainWindow):
         self.pages.addWidget(
             self.accounts_page
         )
+
+        self.pages.addWidget(self.investments_page)
 
         self.pages.addWidget(self.categories_page)
 
@@ -136,10 +136,6 @@ class ShellWindow(QMainWindow):
             self.show_add_user
         )
 
-        self.add_user_page.user_created.connect(
-            self.handle_user_created
-        )
-
         self.settings_page.data_reset.connect(self.handle_data_reset)
 
         # -------------------------
@@ -153,6 +149,7 @@ class ShellWindow(QMainWindow):
         self.sidebar.set_users(users, current_user_id)
         self.dashboard_page.set_user_id(self.sidebar.current_user_id)
         self.transactions_page.set_user_id(self.sidebar.current_user_id)
+        self.investments_page.set_user_id(self.sidebar.current_user_id)
 
         if users:
             self.sidebar.show()
@@ -163,9 +160,10 @@ class ShellWindow(QMainWindow):
 
     def show_add_user(self):
         self.sidebar.user_dropdown.hide()
-        self.pages.setCurrentWidget(
-            self.add_user_page
-        )
+        dialog = AddUserDialog(self)
+        dialog.user_created.connect(self.handle_user_created)
+        dialog.exec()
+        dialog.deleteLater()
 
     def handle_user_created(self, user_id: str):
         self.load_users(user_id)
@@ -173,12 +171,14 @@ class ShellWindow(QMainWindow):
     def handle_user_changed(self, user_id: str):
         self.dashboard_page.set_user_id(user_id)
         self.transactions_page.set_user_id(user_id)
+        self.investments_page.set_user_id(user_id)
         self.pages.setCurrentWidget(self.dashboard_page)
 
     def handle_data_reset(self) -> None:
         self.dashboard_page.reload()
         self.transactions_page.reload()
         self.accounts_page.reload()
+        self.investments_page.reload()
 
     def change_page(self, page_name: str):
 
@@ -186,6 +186,7 @@ class ShellWindow(QMainWindow):
             DASHBOARD_PAGE: self.dashboard_page,
             TRANSACTIONS_PAGE: self.transactions_page,
             ACCOUNTS_PAGE: self.accounts_page,
+            INVESTMENTS_PAGE: self.investments_page,
             CATEGORIES_PAGE: self.categories_page,
             SETTINGS_PAGE: self.settings_page,
         }
@@ -199,6 +200,8 @@ class ShellWindow(QMainWindow):
                 self.dashboard_page.reload()
             if page is self.accounts_page:
                 self.accounts_page.reload()
+            if page is self.investments_page:
+                self.investments_page.reload()
             if page is self.categories_page:
                 self.categories_page.reload()
             self.pages.setCurrentWidget(page)

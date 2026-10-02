@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import create_engine, inspect, select, text
@@ -32,7 +33,134 @@ def init_db(db_engine=engine):
     from database import models
 
     Base.metadata.create_all(bind=db_engine)
+    _migrate_investment_account_number_last7(db_engine)
+    _migrate_investment_snapshots(db_engine)
     _migrate_category_rule_account_scope(db_engine)
+
+
+def _migrate_investment_account_number_last7(db_engine) -> None:
+    """Add the seven-character account field while preserving old last-four values."""
+    inspector = inspect(db_engine)
+    if "investment_accounts" not in inspector.get_table_names():
+        return
+    columns = {
+        column["name"]
+        for column in inspector.get_columns("investment_accounts")
+    }
+    if "account_number_last7" in columns:
+        return
+    if "account_number_last4" not in columns:
+        raise RuntimeError(
+            "The investment_accounts table has an unsupported account-number schema."
+        )
+    if db_engine.dialect.name != "sqlite":
+        raise RuntimeError(
+            "The investment account-number migration currently supports SQLite only."
+        )
+    with db_engine.begin() as connection:
+        connection.execute(text(
+            "ALTER TABLE investment_accounts "
+            "ADD COLUMN account_number_last7 VARCHAR(7)"
+        ))
+        connection.execute(text(
+            "UPDATE investment_accounts "
+            "SET account_number_last7 = account_number_last4 "
+            "WHERE account_number_last4 IS NOT NULL"
+        ))
+
+
+def _migrate_investment_snapshots(db_engine) -> None:
+    """Normalize legacy owner/account-name snapshots without dropping data."""
+    inspector = inspect(db_engine)
+    if "investment_snapshots" not in inspector.get_table_names():
+        return
+
+    columns = {
+        column["name"]
+        for column in inspector.get_columns("investment_snapshots")
+    }
+    current_columns = {
+        "investment_account_id",
+        "snapshot_datetime",
+        "total_value",
+        "contribution_amount",
+        "created_at",
+    }
+    if current_columns.issubset(columns):
+        return
+
+    legacy_columns = {
+        "id",
+        "user_id",
+        "group_id",
+        "account_name",
+        "snapshot_date",
+        "monthly_contribution",
+        "portfolio_value",
+    }
+    if not legacy_columns.issubset(columns):
+        raise RuntimeError(
+            "The investment_snapshots table has an unsupported schema. "
+            "Back up the database and migrate it manually."
+        )
+    if db_engine.dialect.name != "sqlite":
+        raise RuntimeError(
+            "The investment snapshot migration currently supports SQLite only."
+        )
+
+    from database.models import InvestmentAccount, InvestmentSnapshot
+
+    with db_engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE investment_snapshots RENAME TO investment_snapshots_legacy")
+        )
+        InvestmentAccount.__table__.create(bind=connection, checkfirst=True)
+        InvestmentSnapshot.__table__.create(bind=connection)
+
+        legacy_rows = connection.execute(text("""
+            SELECT id, user_id, group_id, account_name, snapshot_date,
+                   monthly_contribution, portfolio_value
+            FROM investment_snapshots_legacy
+            ORDER BY id
+        """)).mappings().all()
+
+        account_ids: dict[tuple[str | None, int | None, str], int] = {}
+        for row in legacy_rows:
+            key = (row["user_id"], row["group_id"], row["account_name"])
+            if key not in account_ids:
+                existing_id = connection.scalar(
+                    select(InvestmentAccount.id).where(
+                        InvestmentAccount.user_id == row["user_id"],
+                        InvestmentAccount.group_id == row["group_id"],
+                        InvestmentAccount.account_name == row["account_name"],
+                    )
+                )
+                if existing_id is None:
+                    result = connection.execute(
+                        InvestmentAccount.__table__.insert().values(
+                            user_id=row["user_id"],
+                            group_id=row["group_id"],
+                            institution="Imported legacy data",
+                            account_name=row["account_name"],
+                            account_number_last7=None,
+                            account_type=None,
+                            is_active=True,
+                        )
+                    )
+                    existing_id = result.inserted_primary_key[0]
+                account_ids[key] = existing_id
+
+            connection.execute(
+                InvestmentSnapshot.__table__.insert().values(
+                    id=row["id"],
+                    investment_account_id=account_ids[key],
+                    snapshot_datetime=datetime.fromisoformat(str(row["snapshot_date"])),
+                    total_value=row["portfolio_value"],
+                    contribution_amount=row["monthly_contribution"],
+                )
+            )
+
+        connection.execute(text("DROP TABLE investment_snapshots_legacy"))
 
 
 def _migrate_category_rule_account_scope(db_engine) -> None:

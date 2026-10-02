@@ -16,7 +16,7 @@ from ui.components.generic_dialog import GenericDialog
 from ui.components.generic_table import GenericTable
 from ui.components.page_header import PageHeader
 from utils.constants import CATEGORIES_LABEL
-from ui.theme import set_button_icon
+from ui.theme import set_button_icon, set_delete_button_icon
 
 
 class CategoriesPage(QWidget):
@@ -54,7 +54,8 @@ class CategoriesPage(QWidget):
             else:
                 action = QPushButton("Delete")
                 action.setObjectName("dangerButton")
-                set_button_icon(action, "fa6s.trash", color="#ff9da0", size=15)
+                action.setToolTip(f"Delete {name}")
+                set_delete_button_icon(action)
                 action.clicked.connect(
                     lambda checked=False, item_id=category_id, item_name=name:
                     self.confirm_delete(item_id, item_name)

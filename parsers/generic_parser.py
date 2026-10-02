@@ -1,7 +1,9 @@
 import csv
 import hashlib
+import html
 import sys
 import traceback
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from io import StringIO
 from pathlib import Path
@@ -25,6 +27,38 @@ AMEX_COLUMNS = (
 TD_QUOTE_TRANSLATION = str.maketrans("", "", "\"'“”‘’")
 
 
+AMEX_SHORT_COLUMNS = (
+    "Date", "Date Processed", "Description", "Amount",
+)
+
+
+def detect_amex_format(fieldnames: list[str] | None) -> str:
+    normalized = normalize_amex_fieldnames(fieldnames)
+    column_count = len(normalized)
+
+    # Amex's compact export has four columns. Detailed exports contain those
+    # same transaction fields plus additional metadata, so the header width is
+    # enough to select the variant before validating its required columns.
+    if column_count == len(AMEX_SHORT_COLUMNS):
+        if normalized == list(AMEX_SHORT_COLUMNS):
+            return "short"
+    elif column_count > len(AMEX_SHORT_COLUMNS):
+        if set(AMEX_SHORT_COLUMNS).issubset(normalized):
+            return "full"
+    raise ValueError(
+        "Amex CSV columns do not match the full or short expected format"
+    )
+
+
+def normalize_amex_fieldnames(fieldnames: list[str] | None) -> list[str]:
+    if not fieldnames:
+        return []
+    normalized = [html.unescape(name).strip().lstrip("\ufeff") for name in fieldnames]
+    if len(normalized) != len(set(normalized)):
+        raise ValueError("Amex CSV contains duplicate column names")
+    return normalized
+
+
 def parse_money(value: str) -> Decimal:
     text = value.strip().replace(",", "").replace("$", "")
     if text.startswith("(") and text.endswith(")"):
@@ -36,11 +70,33 @@ def parse_money(value: str) -> Decimal:
 
 
 class GenericParser:
-    def __init__(self, file_data: list[tuple[str, str]], user_id: str | None = None) -> None:
+    def __init__(
+        self,
+        file_data: list[tuple[str, str]],
+        user_id: str | None = None,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> None:
+        if start_date is not None and end_date is not None and start_date > end_date:
+            raise ValueError("The import start date must be on or before the end date")
         self.file_data = file_data
         self.user_id = user_id
+        self.start_date = start_date
+        self.end_date = end_date
         self._errors: list[tuple[str, str]] = []
         self._skipped_lines: list[tuple[str, int, str]] = []
+
+    def _date_is_selected(self, transaction_date: date) -> bool:
+        return not (
+            (self.start_date is not None and transaction_date < self.start_date)
+            or (self.end_date is not None and transaction_date > self.end_date)
+        )
+
+    def _empty_import_message(self, statement_name: str) -> str:
+        if self.start_date is not None or self.end_date is not None:
+            return f"{statement_name} contains no transactions in the selected date range"
+        return f"{statement_name} contains no transactions"
 
     def parse(self) -> None:
         self._errors = []
@@ -132,6 +188,8 @@ class GenericParser:
                             "or date, description, withdrawal, deposit, balance"
                         )
                     transaction_date = parse_transaction_date(row[0], month_first=month_first)
+                    if not self._date_is_selected(transaction_date):
+                        continue
                     description = row[1].strip()
                     if not description or len(description) > 255:
                         raise ValueError("Description must be 1 to 255 characters")
@@ -171,7 +229,7 @@ class GenericParser:
                     latest_balance = balance
 
             if row_count == 0:
-                raise ValueError("TD CSV contains no transactions")
+                raise ValueError(self._empty_import_message("TD CSV"))
             if latest_balance_date is not None and (
                 account.balance_as_of is None or latest_balance_date >= account.balance_as_of
             ):
@@ -182,10 +240,19 @@ class GenericParser:
     def _parse_amex(self, filepath: str) -> None:
         raw = self._open_file_contents(filepath)
         content_hash = hashlib.sha256(raw).hexdigest()
-        contents = raw.decode("utf-8-sig")
+        try:
+            contents = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            contents = raw.decode("cp1252")
         reader = csv.DictReader(StringIO(contents, newline=""))
-        if reader.fieldnames != list(AMEX_COLUMNS):
-            raise ValueError("Amex CSV columns do not match the expected format")
+        normalized_fieldnames = normalize_amex_fieldnames(reader.fieldnames)
+        amex_format = detect_amex_format(normalized_fieldnames)
+        reader.fieldnames = normalized_fieldnames
+        rows = [(reader.line_num, row) for row in reader]
+        month_first = infer_slash_month_first(
+            (row["Date"] for _, row in rows if row.get("Date")),
+            default_month_first=False,
+        )
 
         if self.user_id is None:
             raise ValueError("Select a user before importing an Amex statement")
@@ -228,13 +295,18 @@ class GenericParser:
             session.flush()
 
             row_count = 0
-            for row in reader:
-                line_number = reader.line_num
+            for line_number, row in rows:
                 try:
                     if None in row or any(value is None for value in row.values()):
-                        raise ValueError("Wrong number of columns")
+                        raise ValueError(
+                            f"Wrong number of columns for {amex_format} Amex format"
+                        )
 
-                    transaction_date = parse_transaction_date(row["Date"])
+                    transaction_date = parse_transaction_date(
+                        row["Date"], month_first=month_first
+                    )
+                    if not self._date_is_selected(transaction_date):
+                        continue
 
                     description = row["Description"].strip()
                     if not description or len(description) > 255:
@@ -263,7 +335,7 @@ class GenericParser:
                 row_count += 1
 
             if row_count == 0:
-                raise ValueError("Amex CSV contains no transactions")
+                raise ValueError(self._empty_import_message("Amex CSV"))
             session.flush()
 
     def get_results(self) -> list[tuple[str, str]]:

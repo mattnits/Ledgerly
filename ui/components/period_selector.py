@@ -25,6 +25,7 @@ class PeriodSelector(QWidget):
         self.period = "monthly"
         self.selected_month: Month = (today.year, today.month)
         self.available_months: set[Month] = set()
+        self._empty_month_fallback = False
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -87,6 +88,16 @@ class PeriodSelector(QWidget):
 
     def set_available_months(self, months: Iterable[Month]) -> None:
         self.available_months = set(months)
+        if self.available_months:
+            if self.selected_month not in self.available_months:
+                self.selected_month = max(self.available_months)
+            if self._empty_month_fallback:
+                self.period = "monthly"
+                self._empty_month_fallback = False
+        elif self.period == "monthly":
+            self.period = "all"
+            self._empty_month_fallback = True
+        self._sync_period_controls()
         self._refresh_month_choices()
 
     def set_period(self, period: str, *, emit: bool = True) -> None:
@@ -95,9 +106,8 @@ class PeriodSelector(QWidget):
 
         changed = self.period != period
         self.period = period
-        self.monthly_button.setChecked(period == "monthly")
-        self.all_time_button.setChecked(period == "all")
-        self.month_selector.setVisible(period == "monthly")
+        self._empty_month_fallback = False
+        self._sync_period_controls()
         if emit and changed:
             self.selection_changed.emit(self.period, self.selected_month)
 
@@ -113,19 +123,14 @@ class PeriodSelector(QWidget):
         old_selection = (self.period, self.selected_month)
         self.period = "monthly"
         self.selected_month = (today.year, today.month)
-        self.monthly_button.setChecked(True)
-        self.all_time_button.setChecked(False)
-        self.month_selector.show()
+        self._empty_month_fallback = False
+        self._sync_period_controls()
         self._refresh_month_choices()
         if emit and old_selection != (self.period, self.selected_month):
             self.selection_changed.emit(self.period, self.selected_month)
 
     def _refresh_month_choices(self) -> None:
-        today = date.today()
-        months = self.available_months | {
-            self.selected_month,
-            (today.year, today.month),
-        }
+        months = self.available_months
         with QSignalBlocker(self.month_selector):
             self.month_selector.clear()
             for year, month in sorted(months, reverse=True):
@@ -135,11 +140,20 @@ class PeriodSelector(QWidget):
                     (year, month),
                 )
             selected_index = next(
-                index
-                for index in range(self.month_selector.count())
-                if self.month_selector.itemData(index) == self.selected_month
+                (
+                    index
+                    for index in range(self.month_selector.count())
+                    if self.month_selector.itemData(index) == self.selected_month
+                ),
+                -1,
             )
             self.month_selector.setCurrentIndex(selected_index)
+            self.month_selector.setEnabled(bool(months))
+
+    def _sync_period_controls(self) -> None:
+        self.monthly_button.setChecked(self.period == "monthly")
+        self.all_time_button.setChecked(self.period == "all")
+        self.month_selector.setVisible(self.period == "monthly")
 
     def _select_month(self, index: int) -> None:
         month = self.month_selector.itemData(index)

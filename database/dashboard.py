@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date
+import calendar
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -17,6 +18,7 @@ from database.finance_services import (
 from database.models import (
     Account,
     Category,
+    InvestmentAccount,
     InvestmentSnapshot,
     MonthlyCategoryBudget,
     SavingsGoal,
@@ -33,6 +35,7 @@ SPENDING_ACCOUNT_COLORS = (
     "#f16f88", "#e05b68", "#f2a84b", "#cf78dc",
     "#ef7aa8", "#bd6a80", "#a66bff", "#e8895c",
 )
+NET_E_TRANSFER_COLOR = "#a66bff"
 
 
 @dataclass(frozen=True)
@@ -86,7 +89,7 @@ class DashboardData:
     savings_balance: Decimal | None
     budget_progress: tuple[BudgetProgress, ...]
     portfolio_value: Decimal
-    previous_portfolio_value: Decimal | None
+    portfolio_baseline_value: Decimal | None
     investment_month_labels: tuple[str, ...]
     investment_value_series: tuple[Decimal, ...]
     previous_income: Decimal | None
@@ -114,6 +117,11 @@ class DashboardData:
     def spending_total(self) -> Decimal:
         return self.total_spending
 
+    @property
+    def previous_portfolio_value(self) -> Decimal | None:
+        """Backward-compatible alias for the portfolio comparison baseline."""
+        return self.portfolio_baseline_value
+
 
 @dataclass(frozen=True)
 class _TransactionData:
@@ -126,6 +134,16 @@ class _TransactionData:
     category_id: int | None
     category_name: str | None
     category_color: str | None
+
+
+@dataclass(frozen=True)
+class _InvestmentData:
+    account_id: int
+    snapshot_datetime: datetime
+    account_name: str
+    institution: str
+    contribution_amount: Decimal | None
+    total_value: Decimal
 
 
 def _month_before(month: tuple[int, int]) -> tuple[int, int]:
@@ -195,7 +213,7 @@ def get_dashboard_data(
 
     rows = []
     account_rows: list[tuple[int, str]] = []
-    investment_rows: list[tuple[date, str, Decimal, Decimal]] = []
+    investment_rows: list[_InvestmentData] = []
     savings_goal_rows: list[tuple[int, int, Decimal]] = []
     savings_rows: list[tuple[date, Decimal, Decimal | None]] = []
     budget_rows: list[tuple[int, str, int, int, Decimal]] = []
@@ -226,14 +244,24 @@ def get_dashboard_data(
                 )
                 .order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
             ).all()
-            investment_rows = list(session.execute(
-                select(
-                    InvestmentSnapshot.snapshot_date,
-                    InvestmentSnapshot.account_name,
-                    InvestmentSnapshot.monthly_contribution,
-                    InvestmentSnapshot.portfolio_value,
-                ).where(InvestmentSnapshot.user_id == user_id)
-            ).all())
+            investment_rows = [
+                _InvestmentData(*row)
+                for row in session.execute(
+                    select(
+                        InvestmentAccount.id,
+                        InvestmentSnapshot.snapshot_datetime,
+                        InvestmentAccount.account_name,
+                        InvestmentAccount.institution,
+                        InvestmentSnapshot.contribution_amount,
+                        InvestmentSnapshot.total_value,
+                    )
+                    .join(InvestmentAccount)
+                    .where(
+                        InvestmentAccount.user_id == user_id,
+                        InvestmentAccount.is_active.is_(True),
+                    )
+                ).all()
+            ]
             savings_goal_rows = list(session.execute(
                 select(
                     SavingsGoal.year,
@@ -394,6 +422,11 @@ def get_dashboard_data(
             if item.category_id is not None:
                 category_totals_by_id[item.category_id] -= item.amount
 
+    if summary.e_transfer_spending_adjustment > 0:
+        category_totals[
+            ("Net negative e-transfers", NET_E_TRANSFER_COLOR)
+        ] += summary.e_transfer_spending_adjustment
+
     category_spending = tuple(
         CategorySpending(name, color, amount)
         for (name, color), amount in sorted(
@@ -442,41 +475,61 @@ def get_dashboard_data(
     balance_rows = [row for row in selected_savings_rows if row[2] is not None]
     savings_balance = balance_rows[-1][2] if balance_rows else None
 
-    selected_investments = [
-        row for row in investment_rows
-        if period == "all" or (row[0].year, row[0].month) == selected_month
-    ]
-    investing_total = sum((row[2] for row in selected_investments), Decimal())
-    snapshot_months = sorted(
-        {(row[0].year, row[0].month) for row in investment_rows}
+    cutoff_date = (
+        date(
+            selected_month[0],
+            selected_month[1],
+            calendar.monthrange(*selected_month)[1],
+        )
+        if period == "monthly"
+        else today
     )
+    eligible_investments = [
+        item
+        for item in investment_rows
+        if item.snapshot_datetime.date() <= cutoff_date
+    ]
+    selected_investments = [
+        item
+        for item in eligible_investments
+        if period == "all"
+        or (
+            item.snapshot_datetime.year,
+            item.snapshot_datetime.month,
+        ) == selected_month
+    ]
+    investing_total = sum(
+        (item.contribution_amount or Decimal() for item in selected_investments),
+        Decimal(),
+    )
+    snapshot_months = sorted({
+        (item.snapshot_datetime.year, item.snapshot_datetime.month)
+        for item in eligible_investments
+    })
 
-    def portfolio_as_of(month: tuple[int, int]) -> Decimal:
-        latest_by_account: dict[str, tuple[date, Decimal]] = {}
-        for snapshot_date, account_name, _, value in investment_rows:
-            if (snapshot_date.year, snapshot_date.month) > month:
+    def portfolio_as_of(cutoff: date) -> Decimal:
+        latest_by_account: dict[int, tuple[datetime, Decimal]] = {}
+        for item in investment_rows:
+            if item.snapshot_datetime.date() > cutoff:
                 continue
-            previous = latest_by_account.get(account_name)
-            if previous is None or snapshot_date > previous[0]:
-                latest_by_account[account_name] = (snapshot_date, value)
+            previous = latest_by_account.get(item.account_id)
+            if previous is None or item.snapshot_datetime > previous[0]:
+                latest_by_account[item.account_id] = (
+                    item.snapshot_datetime,
+                    item.total_value,
+                )
         return sum((value for _, value in latest_by_account.values()), Decimal())
 
-    portfolio_month = (
-        selected_month
-        if period == "monthly"
-        else (snapshot_months[-1] if snapshot_months else None)
+    portfolio_value = portfolio_as_of(cutoff_date)
+    first_portfolio_date = min(
+        (item.snapshot_datetime.date() for item in eligible_investments),
+        default=None,
     )
-    portfolio_value = (
-        portfolio_as_of(portfolio_month) if portfolio_month else Decimal()
+    portfolio_baseline_value = (
+        portfolio_as_of(first_portfolio_date)
+        if first_portfolio_date is not None
+        else None
     )
-    previous_portfolio_value = None
-    if portfolio_month:
-        previous_month = _month_before(portfolio_month)
-        if any(
-            (row[0].year, row[0].month) <= previous_month
-            for row in investment_rows
-        ):
-            previous_portfolio_value = portfolio_as_of(previous_month)
 
     visible_investment_months = [
         month for month in snapshot_months
@@ -491,7 +544,10 @@ def get_dashboard_data(
         for year, month in visible_investment_months
     )
     investment_value_series = tuple(
-        portfolio_as_of(month) for month in visible_investment_months
+        portfolio_as_of(
+            date(year, month, calendar.monthrange(year, month)[1])
+        )
+        for year, month in visible_investment_months
     )
 
     recent = tuple(
@@ -526,7 +582,7 @@ def get_dashboard_data(
         savings_balance=savings_balance,
         budget_progress=budget_progress,
         portfolio_value=portfolio_value,
-        previous_portfolio_value=previous_portfolio_value,
+        portfolio_baseline_value=portfolio_baseline_value,
         investment_month_labels=investment_month_labels,
         investment_value_series=investment_value_series,
         previous_income=previous_income,

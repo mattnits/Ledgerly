@@ -28,7 +28,7 @@ from database.category_rules import (
 from database.db import SessionLocal
 from database.models import Account, Category
 from ui.components.generic_dialog import GenericDialog
-from ui.theme import brand_icon, set_button_icon
+from ui.theme import brand_icon, set_button_icon, set_delete_button_icon
 from utils.constants import (
     CATEGORY_FREE_TRANSACTION_TYPES,
     INCOME_CATEGORY_NAMES,
@@ -99,12 +99,13 @@ class ClassificationRulesDialog(QDialog):
         edit_button.setObjectName("secondaryActionButton")
         delete_button = QPushButton("Delete Selected")
         delete_button.setObjectName("dangerButton")
+        delete_button.setToolTip("Delete selected categorization rule")
         close_button = QPushButton("Close")
         set_button_icon(
             add_button, "fa6s.plus", color="#ffffff", active_color="#ffffff"
         )
         set_button_icon(edit_button, "fa6s.pen", color="#b9bec5")
-        set_button_icon(delete_button, "fa6s.trash", color="#ff9da0")
+        set_delete_button_icon(delete_button, size=18)
         set_button_icon(close_button, "fa6s.xmark", size=15)
         add_button.clicked.connect(lambda: self._open_editor())
         edit_button.clicked.connect(self._edit_selected)

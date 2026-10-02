@@ -1,5 +1,5 @@
 import unittest
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import create_engine
@@ -11,6 +11,7 @@ from database.db import Base
 from database.models import (
     Account,
     Category,
+    InvestmentAccount,
     InvestmentSnapshot,
     MonthlyCategoryBudget,
     SavingsGoal,
@@ -54,6 +55,13 @@ class DashboardTransactionTypesTest(unittest.TestCase):
             )
             session.add_all((account, unused_account))
             session.flush()
+            investment_account = InvestmentAccount(
+                user_id=user.id,
+                institution="Manual",
+                account_name="Brokerage",
+            )
+            session.add(investment_account)
+            session.flush()
 
             def add(
                 day,
@@ -96,18 +104,22 @@ class DashboardTransactionTypesTest(unittest.TestCase):
             )
             session.add_all((
                 InvestmentSnapshot(
-                    user_id=user.id,
-                    account_name="Brokerage",
-                    snapshot_date=date(2026, 7, 31),
-                    monthly_contribution=Decimal("20.00"),
-                    portfolio_value=Decimal("800.00"),
+                    investment_account_id=investment_account.id,
+                    snapshot_datetime=datetime(2026, 7, 31),
+                    contribution_amount=Decimal("20.00"),
+                    total_value=Decimal("800.00"),
                 ),
                 InvestmentSnapshot(
-                    user_id=user.id,
-                    account_name="Brokerage",
-                    snapshot_date=date(2026, 8, 31),
-                    monthly_contribution=Decimal("10.00"),
-                    portfolio_value=Decimal("1000.00"),
+                    investment_account_id=investment_account.id,
+                    snapshot_datetime=datetime(2026, 8, 31),
+                    contribution_amount=Decimal("10.00"),
+                    total_value=Decimal("1000.00"),
+                ),
+                InvestmentSnapshot(
+                    investment_account_id=investment_account.id,
+                    snapshot_datetime=datetime(date.today().year + 10, 1, 1),
+                    contribution_amount=Decimal("999.00"),
+                    total_value=Decimal("9999.00"),
                 ),
                 SavingsGoal(
                     user_id=user.id,
@@ -151,6 +163,7 @@ class DashboardTransactionTypesTest(unittest.TestCase):
         self.assertEqual(monthly.budget_progress[0].spent, Decimal("17.00"))
         self.assertEqual(monthly.budget_progress[0].target, Decimal("25.00"))
         self.assertEqual(monthly.portfolio_value, Decimal("1000.00"))
+        self.assertEqual(monthly.portfolio_baseline_value, Decimal("800.00"))
         self.assertEqual(monthly.previous_portfolio_value, Decimal("800.00"))
         self.assertEqual(
             monthly.investment_value_series,
@@ -172,6 +185,10 @@ class DashboardTransactionTypesTest(unittest.TestCase):
         self.assertEqual(all_time.income_total, Decimal("215.00"))
         self.assertEqual(all_time.spending_total, Decimal("25.00"))
         self.assertEqual(all_time.investing_total, Decimal("30.00"))
+        self.assertEqual(all_time.portfolio_value, Decimal("1000.00"))
+        self.assertEqual(
+            all_time.portfolio_baseline_value, Decimal("800.00")
+        )
         self.assertEqual(len(all_time.month_labels), 2)
         self.assertEqual(
             get_transaction_months("test-user", sessions),

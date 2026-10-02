@@ -84,7 +84,7 @@ class User(Base):
     category_budgets: Mapped[list["MonthlyCategoryBudget"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
-    investment_snapshots: Mapped[list["InvestmentSnapshot"]] = relationship(
+    investment_accounts: Mapped[list["InvestmentAccount"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
     savings_snapshots: Mapped[list["SavingsSnapshot"]] = relationship(
@@ -128,7 +128,7 @@ class Group(Base):
     category_budgets: Mapped[list["MonthlyCategoryBudget"]] = relationship(
         back_populates="group", cascade="all, delete-orphan"
     )
-    investment_snapshots: Mapped[list["InvestmentSnapshot"]] = relationship(
+    investment_accounts: Mapped[list["InvestmentAccount"]] = relationship(
         back_populates="group", cascade="all, delete-orphan"
     )
     savings_snapshots: Mapped[list["SavingsSnapshot"]] = relationship(
@@ -466,34 +466,107 @@ class MonthlyCategoryBudget(_OwnedMonthlyMixin, Base):
     )
 
 
-class InvestmentSnapshot(Base):
-    __tablename__ = "investment_snapshots"
+class InvestmentAccount(Base):
+    __tablename__ = "investment_accounts"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id"), nullable=True)
+    institution: Mapped[str] = mapped_column(String(100), nullable=False)
     account_name: Mapped[str] = mapped_column(String(100), nullable=False)
-    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
-    monthly_contribution: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
-    portfolio_value: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
-    user: Mapped["User | None"] = relationship(back_populates="investment_snapshots")
-    group: Mapped["Group | None"] = relationship(back_populates="investment_snapshots")
+    account_number_last7: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    account_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, nullable=False
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    user: Mapped["User | None"] = relationship(back_populates="investment_accounts")
+    group: Mapped["Group | None"] = relationship(back_populates="investment_accounts")
+    snapshots: Mapped[list["InvestmentSnapshot"]] = relationship(
+        back_populates="investment_account",
+        cascade="all, delete-orphan",
+        order_by="InvestmentSnapshot.snapshot_datetime",
+    )
 
     __table_args__ = (
         CheckConstraint(
             "(user_id IS NOT NULL AND group_id IS NULL) OR "
             "(user_id IS NULL AND group_id IS NOT NULL)",
-            name="ck_investment_snapshot_single_owner",
+            name="ck_investment_account_single_owner",
         ),
-        UniqueConstraint(
-            "user_id", "account_name", "snapshot_date",
-            name="uq_user_investment_snapshot",
-        ),
-        UniqueConstraint(
-            "group_id", "account_name", "snapshot_date",
-            name="uq_group_investment_snapshot",
+        CheckConstraint(
+            "account_number_last7 IS NULL OR "
+            "length(account_number_last7) BETWEEN 1 AND 7",
+            name="ck_investment_account_last7",
         ),
     )
+
+
+class InvestmentSnapshot(Base):
+    __tablename__ = "investment_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    investment_account_id: Mapped[int] = mapped_column(
+        ForeignKey("investment_accounts.id"), nullable=False
+    )
+    snapshot_datetime: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    total_value: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    contribution_amount: Mapped[Decimal | None] = mapped_column(
+        Numeric(12, 2), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, nullable=False
+    )
+
+    investment_account: Mapped["InvestmentAccount"] = relationship(
+        back_populates="snapshots"
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "investment_account_id",
+            "snapshot_datetime",
+            name="uq_investment_snapshot_account_datetime",
+        ),
+        CheckConstraint(
+            "total_value >= 0", name="ck_investment_snapshot_nonnegative_value"
+        ),
+    )
+
+    def __init__(self, **kwargs):
+        """Accept the pre-account snapshot keywords during the transition."""
+        legacy_keys = {
+            "user_id",
+            "group_id",
+            "account_name",
+            "snapshot_date",
+            "monthly_contribution",
+            "portfolio_value",
+        }
+        if legacy_keys.intersection(kwargs):
+            user_id = kwargs.pop("user_id", None)
+            group_id = kwargs.pop("group_id", None)
+            account_name = kwargs.pop("account_name")
+            snapshot_date = kwargs.pop("snapshot_date")
+            contribution = kwargs.pop("monthly_contribution", None)
+            portfolio_value = kwargs.pop("portfolio_value")
+            if kwargs:
+                unexpected = ", ".join(sorted(kwargs))
+                raise TypeError(f"Unexpected snapshot arguments: {unexpected}")
+            self.investment_account = InvestmentAccount(
+                user_id=user_id,
+                group_id=group_id,
+                institution="Manual",
+                account_name=account_name,
+                is_active=True,
+            )
+            self.snapshot_datetime = datetime.combine(snapshot_date, datetime.min.time())
+            self.contribution_amount = contribution
+            self.total_value = portfolio_value
+            return
+        for key, value in kwargs.items():
+            setattr(self, key, value)
 
 
 class SavingsSnapshot(Base):

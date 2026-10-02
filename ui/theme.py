@@ -73,6 +73,47 @@ def set_button_icon(
     button.setIconSize(QSize(size, size))
 
 
+def set_icon_only_button(
+    button: QAbstractButton,
+    name: str,
+    *,
+    tooltip: str | None = None,
+    color: str = COLORS["text_muted"],
+    active_color: str = COLORS["text"],
+    icon_size: int = 16,
+    button_size: int = 38,
+) -> None:
+    """Configure a compact accessible icon-only button."""
+    label = button.text().strip()
+    description = tooltip or button.toolTip() or label
+    if description:
+        button.setToolTip(description)
+        if not button.accessibleName():
+            button.setAccessibleName(description)
+    button.setText("")
+    button.setProperty("iconOnly", True)
+    button.setFixedSize(button_size, button_size)
+    set_button_icon(
+        button,
+        name,
+        color=color,
+        active_color=active_color,
+        size=icon_size,
+    )
+
+
+def set_delete_button_icon(button: QAbstractButton, *, size: int = 15) -> None:
+    """Turn a destructive button into a consistent trash-can control."""
+    set_icon_only_button(
+        button,
+        "fa6s.trash",
+        color="#ff9da0",
+        active_color=COLORS["negative"],
+        icon_size=size,
+        button_size=max(38, size + 22),
+    )
+
+
 def set_label_icon(
     label: QLabel,
     name: str,
@@ -183,6 +224,7 @@ QWidget {{
 }}
 QMainWindow, QWidget#appRoot, QStackedWidget#pageStack,
 QWidget#dashboardPage, QWidget#transactionsPage, QWidget#accountsPage,
+QWidget#investmentsPage, QWidget#investmentsContent,
 QWidget#categoriesPage, QWidget#settingsPage, QWidget#welcomePage,
 QWidget#addUserPage {{
     background: {COLORS['canvas']};
@@ -206,6 +248,10 @@ QLabel#dialogTitle {{
     color: {COLORS['text']};
     font-size: 20px;
     font-weight: 700;
+}}
+QLabel#dialogSubtitle {{
+    color: {COLORS['text_muted']};
+    font-size: 13px;
 }}
 QLabel#sectionTitle {{
     color: {COLORS['text']};
@@ -252,7 +298,30 @@ QPushButton#dangerButton {{
     border-color: #63303e;
 }}
 QPushButton#dangerButton:hover {{ background: #47202d; }}
-QLineEdit, QComboBox, QSpinBox {{
+QPushButton[iconOnly="true"] {{
+    min-width: 38px;
+    max-width: 38px;
+    min-height: 38px;
+    max-height: 38px;
+    padding: 0;
+}}
+QPushButton#dangerButton[iconOnly="true"] {{
+    background: transparent;
+    border-color: transparent;
+}}
+QPushButton#dangerButton[iconOnly="true"]:hover {{
+    background: #47202d;
+    border-color: #713543;
+}}
+QPushButton#tableIconButton {{
+    background: transparent;
+    border-color: transparent;
+}}
+QPushButton#tableIconButton:hover {{
+    background: {COLORS['surface_hover']};
+    border-color: {COLORS['border']};
+}}
+QLineEdit, QComboBox, QSpinBox, QDateEdit {{
     color: #e5e7ea;
     background: #15191e;
     border: 1px solid {COLORS['border']};
@@ -261,7 +330,7 @@ QLineEdit, QComboBox, QSpinBox {{
     padding: 8px 12px;
     selection-background-color: {COLORS['primary']};
 }}
-QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDateEdit:focus {{
     border-color: #398cff;
 }}
 QComboBox {{ padding-right: 30px; }}
@@ -304,6 +373,16 @@ QFrame#dashboardCard {{
     background: {COLORS['surface']};
     border: 1px solid {COLORS['border']};
     border-radius: 14px;
+}}
+QFrame#investmentSummaryCard {{
+    background: {COLORS['surface']};
+    border: 1px solid {COLORS['border']};
+    border-radius: 14px;
+}}
+QFrame#recentInvestmentEntry {{
+    background: {COLORS['surface_alt']};
+    border: 1px solid {COLORS['border_soft']};
+    border-radius: 9px;
 }}
 QTableWidget#genericTable, QTableWidget#rulesTable {{
     color: #dfe2e6;

@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QProgressBar,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -355,6 +356,10 @@ class DonutChart(QWidget):
         self.items: tuple[CategorySpending, ...] = ()
         self.total = Decimal()
         self.setMinimumSize(135, 135)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
 
     def set_data(self, items: tuple[CategorySpending, ...]) -> None:
         self.items = items
@@ -365,13 +370,8 @@ class DonutChart(QWidget):
         super().paintEvent(event)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        size = min(self.width(), self.height()) - 18
-        ring = QRectF(
-            (self.width() - size) / 2, (self.height() - size) / 2, size, size
-        )
-        pen = QPen(
-            QColor(COLORS["surface_hover"]), max(13, int(size * 0.16))
-        )
+        ring, pen_width = self._ring_geometry(self.width(), self.height())
+        pen = QPen(QColor(COLORS["surface_hover"]), pen_width)
         pen.setCapStyle(Qt.PenCapStyle.FlatCap)
         painter.setPen(pen)
         painter.drawArc(ring, 0, 360 * 16)
@@ -396,6 +396,23 @@ class DonutChart(QWidget):
             self.rect().adjusted(0, 20, 0, 0),
             Qt.AlignmentFlag.AlignCenter,
             "Total",
+        )
+
+    @staticmethod
+    def _ring_geometry(width: int, height: int) -> tuple[QRectF, int]:
+        """Keep the full antialiased stroke inside the chart's paint bounds."""
+        available = max(min(width, height), 1)
+        pen_width = max(13, min(46, int(available * 0.14)))
+        inset = pen_width / 2 + 3
+        diameter = max(1.0, available - inset * 2)
+        return (
+            QRectF(
+                (width - diameter) / 2,
+                (height - diameter) / 2,
+                diameter,
+                diameter,
+            ),
+            pen_width,
         )
 
 
@@ -606,15 +623,23 @@ class InvestingCard(DashboardCard):
             f"color: {COLORS['text']}; font-size: 29px; font-weight: 800;"
         )
         self.contribution_row = SummaryRow("Monthly contributions", "$0")
-        self.change_label = QLabel("No previous portfolio snapshot")
+        self.change_label = QLabel("No portfolio history")
         self.change_label.setStyleSheet(
-            f"color: {COLORS['text_dim']}; font-size: 10px;"
+            f"color: {COLORS['text_dim']}; font-size: 11px;"
         )
+        self.change_label.setToolTip(
+            "Change from the earliest recorded portfolio value"
+        )
+        value_row = QHBoxLayout()
+        value_row.setContentsMargins(0, 0, 0, 0)
+        value_row.setSpacing(10)
+        value_row.addWidget(self.portfolio_value)
+        value_row.addWidget(self.change_label)
+        value_row.addStretch()
         self.chart = MiniLineChart()
         self.layout.addWidget(self.portfolio_caption)
-        self.layout.addWidget(self.portfolio_value)
+        self.layout.addLayout(value_row)
         self.layout.addWidget(self.contribution_row)
-        self.layout.addWidget(self.change_label)
         self.layout.addWidget(self.chart, 1)
 
     def set_data(
@@ -622,11 +647,16 @@ class InvestingCard(DashboardCard):
         period_label: str,
         contribution: Decimal,
         portfolio_value: Decimal,
-        previous_value: Decimal | None,
+        baseline_value: Decimal | None,
         labels: tuple[str, ...],
         values: tuple[Decimal, ...],
     ) -> None:
         self.subtitle_label.setText(period_label)
+        self.portfolio_caption.setText(
+            "Current portfolio value"
+            if period_label == "All time"
+            else "Portfolio value at month end"
+        )
         self.portfolio_value.setText(format_currency(portfolio_value))
         caption = (
             "Total contributions"
@@ -634,24 +664,36 @@ class InvestingCard(DashboardCard):
             else "Monthly contributions"
         )
         self.contribution_row.set_values(caption, format_currency(contribution))
-        if previous_value is None:
-            self.change_label.setText("No previous portfolio snapshot")
+        if baseline_value is None:
+            self.change_label.setText("No portfolio history")
             color = COLORS["text_dim"]
             weight = 400
-        elif previous_value == 0:
-            self.change_label.setText("First recorded portfolio value")
-            color = COLORS["text_dim"]
-            weight = 400
-        else:
-            change = (portfolio_value - previous_value) / previous_value * 100
-            color = COLORS["positive"] if change >= 0 else COLORS["negative"]
-            weight = 650
-            direction = "up" if change >= 0 else "down"
+        elif baseline_value == 0:
+            difference = portfolio_value - baseline_value
+            sign = "+" if difference > 0 else ""
             self.change_label.setText(
-                f"{abs(change):.1f}% {direction} month over month"
+                f"{sign}{format_currency(difference)} (new)"
+            )
+            color = COLORS["positive"] if difference > 0 else COLORS["text_dim"]
+            weight = 650
+        else:
+            difference = portfolio_value - baseline_value
+            change = difference / baseline_value * 100
+            sign = "+" if difference > 0 else "-" if difference < 0 else ""
+            color = (
+                COLORS["positive"]
+                if difference > 0
+                else COLORS["negative"]
+                if difference < 0
+                else COLORS["text_dim"]
+            )
+            weight = 650
+            self.change_label.setText(
+                f"{sign}{format_currency(abs(difference))} "
+                f"({sign}{abs(change):.1f}%)"
             )
         self.change_label.setStyleSheet(
-            f"color: {color}; font-size: 10px; font-weight: {weight};"
+            f"color: {color}; font-size: 11px; font-weight: {weight};"
         )
         self.chart.set_data(labels, values)
 
