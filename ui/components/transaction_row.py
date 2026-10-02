@@ -17,7 +17,6 @@ from ui.components.account_badge import AccountBadge
 from ui.theme import (
     awesome_icon,
     category_icon_name,
-    contrasting_text,
     set_label_icon,
     transaction_type_icon,
 )
@@ -275,11 +274,11 @@ class TransactionRow(QObject):
         with QSignalBlocker(self.category_combo):
             self.category_combo.clear()
             self.category_combo.addItem(
-                awesome_icon("fa6s.minus", color="#a9afb6"),
+                awesome_icon("fa6s.minus", color="#ffffff"),
                 self._empty_category_label(transaction_type),
                 None,
             )
-            for available_id, name, color in self.categories:
+            for available_id, name, _color in self.categories:
                 if transaction_type in CATEGORY_FREE_TRANSACTION_TYPES:
                     continue
                 if (
@@ -295,11 +294,29 @@ class TransactionRow(QObject):
                 self.category_combo.addItem(
                     awesome_icon(
                         category_icon_name(name),
-                        color=contrasting_text(color),
+                        color="#ffffff",
                     ),
                     name,
                     available_id,
                 )
+            for index in range(self.category_combo.count()):
+                self.category_combo.setItemData(
+                    index,
+                    QColor("#ffffff"),
+                    Qt.ItemDataRole.ForegroundRole,
+                )
+            longest_label = max(
+                (
+                    self.category_combo.fontMetrics().horizontalAdvance(
+                        self.category_combo.itemText(index)
+                    )
+                    for index in range(self.category_combo.count())
+                ),
+                default=0,
+            )
+            self.category_combo.view().setMinimumWidth(
+                max(220, longest_label + 64)
+            )
             selected = self.category_combo.findData(category_id)
             self.category_combo.setCurrentIndex(max(0, selected))
         self.category_combo.setEnabled(
@@ -314,7 +331,6 @@ class TransactionRow(QObject):
         color = QColor(self.category_colors.get(category_id, "#34383e"))
         background = color.name()
         border = color.darker(125).name() if category_id is not None else "#545a62"
-        foreground = contrasting_text(background)
         self.category_combo.setMinimumWidth(110)
         self.category_combo.setSizePolicy(
             QSizePolicy.Policy.Expanding,
@@ -324,7 +340,7 @@ class TransactionRow(QObject):
         self.category_combo.setToolTip(name)
         self.category_combo.setStyleSheet(f"""
             QComboBox {{
-                color: {foreground};
+                color: #ffffff;
                 background: {background};
                 border: 1px solid {border};
                 border-radius: 10px;

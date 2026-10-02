@@ -1,6 +1,17 @@
+import logging
 from datetime import date
 
-from PySide6.QtCore import Qt, QSignalBlocker, QTimer, Signal
+from PySide6.QtCore import (
+    QObject,
+    QRunnable,
+    QSignalBlocker,
+    QThreadPool,
+    QTimer,
+    Qt,
+    Signal,
+    Slot,
+)
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -15,17 +26,17 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from sqlalchemy import String, and_, cast, func, or_, select
-
 from database.db import SessionLocal
-from database.category_rules import (
-    needs_review_expression,
-    normalize_description,
-    rule_prefill_from_transaction,
+from database.category_rules import rule_prefill_from_transaction
+from database.models import Category, Transaction
+from database.transactions import (
+    TransactionQueryParams,
+    TransactionQueryResult,
+    fetch_transactions,
+    set_transaction_deleted,
 )
-from database.models import Account, Category, Transaction
-from database.transactions import get_transaction_months, set_transaction_deleted
 from ui.components.generic_table import GenericTable
+from ui.components.loading_state import LoadingOverlay
 from ui.components.period_selector import PeriodSelector
 from ui.components.transaction_row import TransactionRow
 from ui.theme import (
@@ -40,6 +51,59 @@ from utils.constants import (
     TRANSACTION_TYPE_LABELS,
     TransactionType,
 )
+
+
+logger = logging.getLogger(__name__)
+
+
+class _QuerySignals(QObject):
+    succeeded = Signal(int, int, int, object)
+    failed = Signal(int, int, int, object)
+
+
+class _TransactionQueryWorker(QRunnable):
+    def __init__(
+        self,
+        generation: int,
+        request_id: int,
+        params: TransactionQueryParams,
+        query_loader,
+        session_factory,
+    ):
+        super().__init__()
+        self.generation = generation
+        self.request_id = request_id
+        self.params = params
+        self.query_loader = query_loader
+        self.session_factory = session_factory
+        self.signals = _QuerySignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            result = self.query_loader(
+                self.params,
+                session_factory=self.session_factory,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Transaction query failed (generation=%s, offset=%s)",
+                self.generation,
+                self.params.offset,
+            )
+            self.signals.failed.emit(
+                self.generation,
+                self.request_id,
+                self.params.offset,
+                exc,
+            )
+            return
+        self.signals.succeeded.emit(
+            self.generation,
+            self.request_id,
+            self.params.offset,
+            result,
+        )
 
 
 class StatementsTable(QWidget):
@@ -73,9 +137,22 @@ class StatementsTable(QWidget):
         7: 76,
     }
 
-    def __init__(self, parent=None, session_factory=SessionLocal):
+    def __init__(
+        self,
+        parent=None,
+        session_factory=SessionLocal,
+        query_loader=fetch_transactions,
+        thread_pool: QThreadPool | None = None,
+    ):
         super().__init__(parent)
         self.session_factory = session_factory
+        self.query_loader = query_loader
+        self._thread_pool = thread_pool or QThreadPool.globalInstance()
+        self._query_generation = 0
+        self._request_serial = 0
+        self._active_workers: dict[int, _TransactionQueryWorker] = {}
+        self._request_contexts: dict[int, dict] = {}
+        self._last_failed_context: dict | None = None
         self.user_id: str | None = None
         self.rows: list[TransactionRow] = []
         self.category_options: list[tuple[int, str, str]] = []
@@ -83,7 +160,6 @@ class StatementsTable(QWidget):
         self.filtered_count = 0
         self.loaded_count = 0
         self._loading = False
-        self._query = None
         self.sort_column = 0
         self.sort_order = Qt.SortOrder.DescendingOrder
         self.category_filter: int | str | None = "all"
@@ -95,6 +171,10 @@ class StatementsTable(QWidget):
         today = date.today()
         self.selected_month = (today.year, today.month)
         self.available_months: set[tuple[int, int]] = set()
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(300)
+        self._search_timer.timeout.connect(self._reset_and_apply)
 
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -130,7 +210,7 @@ class StatementsTable(QWidget):
             awesome_icon("fa6s.magnifying-glass", color="#a7adb5"),
             QLineEdit.ActionPosition.LeadingPosition,
         )
-        self.search.textChanged.connect(self._reset_and_apply)
+        self.search.textChanged.connect(self._schedule_search)
         toolbar_layout.addWidget(self.search)
 
         outer_layout.addWidget(toolbar)
@@ -152,10 +232,16 @@ class StatementsTable(QWidget):
 
         self.category_selector = QComboBox()
         self.category_selector.addItem(
-            awesome_icon("fa6s.tags", color="#b2b8c1"),
+            awesome_icon("fa6s.tags", color="#ffffff"),
             "All Categories",
             "all",
         )
+        self.category_selector.setItemData(
+            0,
+            QColor("#ffffff"),
+            Qt.ItemDataRole.ForegroundRole,
+        )
+        self._fit_category_popup()
         self.category_selector.currentIndexChanged.connect(self._select_category)
         self._add_filter_field(filter_layout, "Category", self.category_selector)
 
@@ -192,7 +278,15 @@ class StatementsTable(QWidget):
         self.needs_review_checkbox = QCheckBox("Needs Review only")
         self.needs_review_checkbox.setObjectName("needsReviewFilter")
         self.needs_review_checkbox.toggled.connect(self._select_needs_review)
-        filter_layout.addWidget(self.needs_review_checkbox)
+        review_field = QWidget()
+        review_field_layout = QVBoxLayout(review_field)
+        review_field_layout.setContentsMargins(0, 0, 0, 0)
+        review_field_layout.setSpacing(3)
+        review_spacer = QLabel(" ")
+        review_spacer.setObjectName("filterLabel")
+        review_field_layout.addWidget(review_spacer)
+        review_field_layout.addWidget(self.needs_review_checkbox)
+        filter_layout.addWidget(review_field)
 
         self.date_range_selector = QComboBox()
         for label, value in (
@@ -268,6 +362,9 @@ class StatementsTable(QWidget):
 
         card_layout.addWidget(footer)
 
+        self.loading_overlay = LoadingOverlay(card)
+        self.loading_overlay.retry_requested.connect(self._retry_failed_query)
+
         self.setStyleSheet("""
             QFrame#transactionsCard {
                 background: #171b20;
@@ -334,7 +431,7 @@ class StatementsTable(QWidget):
             }
             QFrame#filterDivider { color: #343a43; }
             QCheckBox#needsReviewFilter {
-                color: #dfe2e6;
+                color: #ffffff;
                 spacing: 7px;
                 padding: 8px;
             }
@@ -346,7 +443,10 @@ class StatementsTable(QWidget):
             }
             QPushButton#clearFiltersButton:hover { color: #8bc4ff; }
         """)
-        self._apply_filters()
+        self.needs_review_checkbox.setFixedHeight(
+            self.date_range_selector.sizeHint().height()
+        )
+        self._show_empty_table()
 
     @staticmethod
     def _add_filter_field(layout: QHBoxLayout, label: str, selector: QComboBox) -> None:
@@ -361,6 +461,20 @@ class StatementsTable(QWidget):
         field_layout.addWidget(title)
         field_layout.addWidget(selector)
         layout.addWidget(field, 1)
+
+    def _fit_category_popup(self) -> None:
+        longest_label = max(
+            (
+                self.category_selector.fontMetrics().horizontalAdvance(
+                    self.category_selector.itemText(index)
+                )
+                for index in range(self.category_selector.count())
+            ),
+            default=0,
+        )
+        self.category_selector.view().setMinimumWidth(
+            max(220, longest_label + 64)
+        )
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -510,22 +624,16 @@ class StatementsTable(QWidget):
         self.reload()
 
     def reload(self) -> None:
-        if self.user_id is None:
-            self.category_options = []
-            accounts = []
-        else:
-            with self.session_factory() as session:
-                accounts = session.execute(
-                    select(Account.id, Account.name, Account.institution)
-                    .where(Account.user_id == self.user_id)
-                    .order_by(Account.name, Account.id)
-                ).all()
-                self.category_options = list(session.execute(
-                    select(Category.id, Category.name, Category.color).order_by(Category.name)
-                ).all())
-        self.available_months = get_transaction_months(
-            self.user_id, self.session_factory, include_deleted=True
-        )
+        self._apply_filters()
+
+    def _update_filter_options(
+        self,
+        accounts: tuple[tuple[int, str, str], ...],
+        categories: tuple[tuple[int, str, str], ...],
+        available_months: frozenset[tuple[int, int]],
+    ) -> None:
+        self.category_options = list(categories)
+        self.available_months = set(available_months)
         self._refresh_month_choices()
         with QSignalBlocker(self.account_selector):
             self.account_selector.clear()
@@ -546,26 +654,33 @@ class StatementsTable(QWidget):
         with QSignalBlocker(self.category_selector):
             self.category_selector.clear()
             self.category_selector.addItem(
-                awesome_icon("fa6s.tags", color="#b2b8c1"),
+                awesome_icon("fa6s.tags", color="#ffffff"),
                 "All Categories",
                 "all",
             )
             self.category_selector.addItem(
-                awesome_icon("fa6s.trash", color="#ff8587"),
+                awesome_icon("fa6s.trash", color="#ffffff"),
                 "Removed Transactions",
                 "deleted",
             )
             self.category_selector.addItem(
-                awesome_icon("fa6s.tag", color="#969da6"),
+                awesome_icon("fa6s.tag", color="#ffffff"),
                 "Uncategorized",
                 None,
             )
-            for category_id, name, color in self.category_options:
+            for category_id, name, _color in self.category_options:
                 self.category_selector.addItem(
-                    awesome_icon(category_icon_name(name), color=color),
+                    awesome_icon(category_icon_name(name), color="#ffffff"),
                     name,
                     category_id,
                 )
+            for index in range(self.category_selector.count()):
+                self.category_selector.setItemData(
+                    index,
+                    QColor("#ffffff"),
+                    Qt.ItemDataRole.ForegroundRole,
+                )
+            self._fit_category_popup()
             selected = self.category_selector.findData(self.category_filter)
             if selected < 0:
                 self.category_filter = "all"
@@ -579,7 +694,12 @@ class StatementsTable(QWidget):
                 self.transaction_type_filter = "all"
                 selected = 0
             self.transaction_type_selector.setCurrentIndex(selected)
-        self._apply_filters()
+
+    def _schedule_search(self) -> None:
+        self._query_generation += 1
+        self._loading = True
+        self.loading_overlay.show_loading("Loading transactions...")
+        self._search_timer.start()
 
     def _reset_and_apply(self) -> None:
         self._apply_filters()
@@ -617,131 +737,158 @@ class StatementsTable(QWidget):
             self._load_more()
 
     def _apply_filters(self, preserve_scroll: bool = False) -> None:
+        self._search_timer.stop()
         vertical_scrollbar = self.table.verticalScrollBar()
         horizontal_scrollbar = self.table.horizontalScrollBar()
         scroll_position = vertical_scrollbar.value() if preserve_scroll else 0
         horizontal_position = horizontal_scrollbar.value() if preserve_scroll else 0
         previously_loaded = self.loaded_count if preserve_scroll else 0
-        self._query = None
-        self.total_count = 0
-        self.filtered_count = 0
-        if self.user_id is not None:
-            base = (
-                select(
-                    Transaction.id,
-                    Transaction.transaction_date,
-                    Transaction.description,
-                    Transaction.amount,
-                    Transaction.transaction_type,
-                    Transaction.imported_at,
-                    Transaction.category_id,
-                    Account.name,
-                    Account.institution,
-                    Transaction.is_deleted,
-                )
-                .join(Account, Transaction.account_id == Account.id)
-                .outerjoin(Category, Transaction.category_id == Category.id)
-                .where(Account.user_id == self.user_id)
+        self.review_mode_label.setVisible(self.needs_review_filter)
+        self._query_generation += 1
+        if self.user_id is None:
+            self._loading = False
+            self.loading_overlay.hide_loading()
+            self._update_filter_options((), (), frozenset())
+            self._show_empty_table()
+            return
+
+        limit = max(self.PAGE_SIZE, previously_loaded) if preserve_scroll else self.PAGE_SIZE
+        context = {
+            "kind": "replace",
+            "preserve_scroll": preserve_scroll,
+            "scroll_position": scroll_position,
+            "horizontal_position": horizontal_position,
+            "limit": limit,
+        }
+        self._start_query(offset=0, limit=limit, context=context)
+
+    def _load_more(self) -> None:
+        if (
+            self._loading
+            or self.user_id is None
+            or self.loaded_count >= self.filtered_count
+        ):
+            return
+        self._start_query(
+            offset=self.loaded_count,
+            limit=self.PAGE_SIZE,
+            context={"kind": "append", "limit": self.PAGE_SIZE},
+        )
+
+    def _query_params(self, offset: int, limit: int) -> TransactionQueryParams:
+        return TransactionQueryParams(
+            user_id=self.user_id,
+            period_filter=self.period_filter,
+            date_range_filter=self.date_range_filter,
+            selected_month=self.selected_month,
+            account_filter=self.account_filter,
+            category_filter=self.category_filter,
+            transaction_type_filter=self.transaction_type_filter,
+            needs_review_filter=self.needs_review_filter,
+            search=self.search.text(),
+            sort_column=self.sort_column,
+            sort_descending=self.sort_order == Qt.SortOrder.DescendingOrder,
+            offset=offset,
+            limit=limit,
+        )
+
+    def _start_query(self, offset: int, limit: int, context: dict) -> None:
+        self._request_serial += 1
+        request_id = self._request_serial
+        generation = self._query_generation
+        params = self._query_params(offset, limit)
+        worker = _TransactionQueryWorker(
+            generation,
+            request_id,
+            params,
+            self.query_loader,
+            self.session_factory,
+        )
+        worker.signals.succeeded.connect(self._query_succeeded)
+        worker.signals.failed.connect(self._query_failed)
+        self._active_workers[request_id] = worker
+        self._request_contexts[request_id] = context
+        self._loading = True
+        self._last_failed_context = None
+        self.loading_overlay.show_loading("Loading transactions...")
+        logger.debug(
+            "Transaction query started (generation=%s, offset=%s)",
+            generation,
+            offset,
+        )
+        self._thread_pool.start(worker)
+
+    @Slot(int, int, int, object)
+    def _query_succeeded(
+        self,
+        generation: int,
+        request_id: int,
+        offset: int,
+        result: TransactionQueryResult,
+    ) -> None:
+        self._active_workers.pop(request_id, None)
+        context = self._request_contexts.pop(request_id, {})
+        if generation != self._query_generation:
+            logger.debug(
+                "Transaction query ignored as stale (generation=%s, current=%s)",
+                generation,
+                self._query_generation,
             )
-            base = base.where(
-                Transaction.is_deleted.is_(self.category_filter == "deleted")
-            )
-            if self.period_filter == "monthly":
-                year, month = self.selected_month
-                first_day = date(year, month, 1)
-                next_month = date(year + (month == 12), month % 12 + 1, 1)
-                base = base.where(
-                    Transaction.transaction_date >= first_day,
-                    Transaction.transaction_date < next_month,
-                )
-            elif self.date_range_filter == "this_year":
-                year = date.today().year
-                base = base.where(
-                    Transaction.transaction_date >= date(year, 1, 1),
-                    Transaction.transaction_date < date(year + 1, 1, 1),
-                )
+            return
 
-            with self.session_factory() as session:
-                self.total_count = session.scalar(
-                    select(func.count()).select_from(base.order_by(None).subquery())
-                ) or 0
-
-            if self.account_filter != "all":
-                base = base.where(Account.id == self.account_filter)
-
-            if self.needs_review_filter:
-                base = base.where(needs_review_expression())
-            if self.category_filter not in ("all", "deleted"):
-                base = base.where(Transaction.category_id == self.category_filter)
-
-            if self.transaction_type_filter != "all":
-                base = base.where(
-                    Transaction.transaction_type == self.transaction_type_filter
-                )
-
-            query = self.search.text().strip()
-            if query:
-                pattern = f"%{query}%"
-                description_tokens = normalize_description(query).split()
-                search_terms = [
-                    Transaction.description.ilike(pattern),
-                    Account.name.ilike(pattern),
-                    Category.name.ilike(pattern),
-                    cast(Transaction.transaction_type, String).ilike(pattern),
-                    cast(Transaction.transaction_date, String).ilike(pattern),
-                    cast(Transaction.amount, String).ilike(pattern),
-                ]
-                if description_tokens:
-                    search_terms.append(and_(*(
-                        Transaction.description.ilike(f"%{token}%")
-                        for token in description_tokens
-                    )))
-                base = base.where(or_(*search_terms))
-
-            sort_expressions = (
-                Transaction.transaction_date,
-                Transaction.description,
-                Transaction.amount,
-                Account.name,
-                Transaction.transaction_type,
-                func.coalesce(Category.name, "Uncategorized"),
-                Transaction.imported_at,
-            )
-            expression = sort_expressions[self.sort_column]
-            ordering = (
-                expression.desc()
-                if self.sort_order == Qt.SortOrder.DescendingOrder
-                else expression.asc()
-            )
-            self._query = base.order_by(ordering, Transaction.id.desc())
-            with self.session_factory() as session:
-                self.filtered_count = session.scalar(
-                    select(func.count()).select_from(base.order_by(None).subquery())
-                ) or 0
-
+        logger.debug(
+            "Transaction query finished (generation=%s, offset=%s, rows=%s)",
+            generation,
+            offset,
+            len(result.rows),
+        )
+        self.total_count = result.total_count
+        self.filtered_count = result.filtered_count
         self.count_label.setText(
             f"{self.total_count:,} transaction{'s' if self.total_count != 1 else ''}"
         )
         self.count_changed.emit(self.total_count)
-        self.review_mode_label.setVisible(self.needs_review_filter)
+
+        if context.get("kind") == "append":
+            if offset != self.loaded_count:
+                logger.debug("Transaction page ignored because its offset is stale")
+                self._loading = False
+                self.loading_overlay.hide_loading()
+                return
+            self._append_rows(result.rows)
+            self.loaded_count += len(result.rows)
+            self.range_label.setText(
+                f"Showing {self.loaded_count:,} of {self.filtered_count:,} transactions"
+            )
+            self._loading = False
+            self.loading_overlay.hide_loading()
+            return
+
+        self._update_filter_options(
+            result.accounts,
+            result.categories,
+            result.available_months,
+        )
+        self._replace_rows(result, context)
+        self._loading = False
+        self.loading_overlay.hide_loading()
+
+    def _replace_rows(self, result: TransactionQueryResult, context: dict) -> None:
+        vertical_scrollbar = self.table.verticalScrollBar()
+        horizontal_scrollbar = self.table.horizontalScrollBar()
         for row in self.rows:
             row.deleteLater()
         self.rows = []
         self.loaded_count = 0
         self.table.setRowCount(0)
         vertical_scrollbar.setValue(0)
-        self.range_label.setText(f"Showing 0 of {self.filtered_count:,} transactions")
+        self._append_rows(result.rows)
+        self.loaded_count = len(result.rows)
+        self.range_label.setText(
+            f"Showing {self.loaded_count:,} of {self.filtered_count:,} transactions"
+        )
         if self.filtered_count:
             self.message.hide()
-            self._load_more()
-            while (
-                self.loaded_count < previously_loaded
-                and self.loaded_count < self.filtered_count
-            ):
-                self._load_more()
-            if preserve_scroll:
-                vertical_scrollbar.setValue(min(scroll_position, vertical_scrollbar.maximum()))
-                horizontal_scrollbar.setValue(horizontal_position)
         else:
             if self.total_count == 0:
                 empty_text = (
@@ -753,32 +900,76 @@ class StatementsTable(QWidget):
                 empty_text = "No transactions match your search or filter"
             self.message.setText(empty_text)
             self.message.show()
+        if context.get("preserve_scroll"):
+            vertical_scrollbar.setValue(min(
+                context.get("scroll_position", 0),
+                vertical_scrollbar.maximum(),
+            ))
+            horizontal_scrollbar.setValue(context.get("horizontal_position", 0))
 
-    def _load_more(self) -> None:
-        if self._loading or self._query is None or self.loaded_count >= self.filtered_count:
-            return
-        self._loading = True
-        try:
-            with self.session_factory() as session:
-                transactions = session.execute(
-                    self._query.limit(self.PAGE_SIZE).offset(self.loaded_count)
-                ).all()
-            if not transactions:
-                self.filtered_count = self.loaded_count
-                return
-            self._append_rows(transactions)
-            self.loaded_count += len(transactions)
-            self.range_label.setText(
-                f"Showing {self.loaded_count:,} of {self.filtered_count:,} transactions"
+    @Slot(int, int, int, object)
+    def _query_failed(
+        self,
+        generation: int,
+        request_id: int,
+        offset: int,
+        _exception: Exception,
+    ) -> None:
+        self._active_workers.pop(request_id, None)
+        context = self._request_contexts.pop(request_id, {})
+        if generation != self._query_generation:
+            logger.debug(
+                "Failed transaction query ignored as stale (generation=%s, current=%s)",
+                generation,
+                self._query_generation,
             )
-        finally:
-            self._loading = False
+            return
+        self._loading = False
+        self._last_failed_context = {**context, "offset": offset}
+        self.loading_overlay.show_error("Could not load transactions.")
+
+    def _retry_failed_query(self) -> None:
+        context = self._last_failed_context
+        if context is None or self.user_id is None:
+            return
+        self._last_failed_context = None
+        if context.get("kind") == "append":
+            self._start_query(
+                offset=context.get("offset", self.loaded_count),
+                limit=context.get("limit", self.PAGE_SIZE),
+                context=context,
+            )
+        else:
+            self._apply_filters(bool(context.get("preserve_scroll")))
+
+    def _show_empty_table(self) -> None:
+        self.total_count = 0
+        self.filtered_count = 0
+        self.loaded_count = 0
+        for row in self.rows:
+            row.deleteLater()
+        self.rows = []
+        self.table.setRowCount(0)
+        self.count_label.setText("0 transactions")
+        self.count_changed.emit(0)
+        self.range_label.setText("Showing 0 transactions")
+        self.message.setText("No transactions yet")
+        self.message.show()
 
     def _append_rows(self, transactions) -> None:
         new_rows = []
         for transaction in transactions:
             row = TransactionRow(
-                *transaction,
+                transaction.id,
+                transaction.transaction_date,
+                transaction.description,
+                transaction.amount,
+                transaction.transaction_type,
+                transaction.imported_at,
+                transaction.category_id,
+                transaction.account_name,
+                transaction.institution,
+                transaction.is_deleted,
                 self.category_options,
                 parent=self,
             )

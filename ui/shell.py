@@ -1,4 +1,5 @@
 from PySide6.QtWidgets import (
+    QDialog,
     QMainWindow,
     QWidget,
     QHBoxLayout,
@@ -12,6 +13,7 @@ from ui.sidebar import Sidebar
 
 from ui.welcome import WelcomePage
 from ui.add_user import AddUserDialog
+from ui.switch_user import SwitchUserDialog
 from ui.dashboard import DashboardPage
 from ui.investments import InvestmentsPage
 from ui.transactions import TransactionsPage
@@ -34,6 +36,7 @@ class ShellWindow(QMainWindow):
         self.setWindowTitle("Finance")
         self.resize(1400, 850)
         self.setMinimumSize(1100, 700)
+        self._active_user_dialog: QDialog | None = None
 
         # -------------------------
         # Root widget
@@ -128,6 +131,10 @@ class ShellWindow(QMainWindow):
             self.show_add_user
         )
 
+        self.sidebar.switch_user_clicked.connect(
+            self.show_switch_user
+        )
+
         self.sidebar.user_changed.connect(
             self.handle_user_changed
         )
@@ -159,11 +166,33 @@ class ShellWindow(QMainWindow):
             self.pages.setCurrentWidget(self.welcome_page)
 
     def show_add_user(self):
-        self.sidebar.user_dropdown.hide()
         dialog = AddUserDialog(self)
         dialog.user_created.connect(self.handle_user_created)
-        dialog.exec()
-        dialog.deleteLater()
+        self._run_user_dialog(dialog)
+
+    def show_switch_user(self):
+        dialog = SwitchUserDialog(
+            self.sidebar.users,
+            self.sidebar.current_user_id,
+            self,
+        )
+        dialog.user_selected.connect(self.sidebar.select_user)
+        self._run_user_dialog(dialog)
+
+    def _run_user_dialog(self, dialog: QDialog) -> None:
+        """Run one centered user dialog at a time."""
+        if self._active_user_dialog is not None:
+            dialog.deleteLater()
+            self._active_user_dialog.raise_()
+            self._active_user_dialog.activateWindow()
+            return
+
+        self._active_user_dialog = dialog
+        try:
+            dialog.exec()
+        finally:
+            self._active_user_dialog = None
+            dialog.deleteLater()
 
     def handle_user_created(self, user_id: str):
         self.load_users(user_id)
@@ -194,6 +223,7 @@ class ShellWindow(QMainWindow):
         page = pages.get(page_name)
 
         if page is not None:
+            self.pages.setCurrentWidget(page)
             if page is self.transactions_page:
                 self.transactions_page.reload()
             if page is self.dashboard_page:
@@ -204,4 +234,3 @@ class ShellWindow(QMainWindow):
                 self.investments_page.reload()
             if page is self.categories_page:
                 self.categories_page.reload()
-            self.pages.setCurrentWidget(page)

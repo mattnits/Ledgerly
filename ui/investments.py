@@ -349,6 +349,8 @@ class InvestmentAccountDialog(GenericDialog):
 class InvestmentsPage(QWidget):
     RECENT_ENTRY_HEIGHT = 72
     VISIBLE_RECENT_ENTRIES = 4
+    COMPACT_LAYOUT_WIDTH = 1050
+    NARROW_LAYOUT_WIDTH = 760
 
     def __init__(self, session_factory=SessionLocal):
         super().__init__()
@@ -356,21 +358,39 @@ class InvestmentsPage(QWidget):
         self.user_id: str | None = None
         self._accounts: tuple[InvestmentAccountSummary, ...] = ()
         self.setObjectName("investmentsPage")
-        self.setMinimumSize(980, 760)
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
 
+        self.page_scroll = QScrollArea()
+        self.page_scroll.setObjectName("investmentsScroll")
+        self.page_scroll.setWidgetResizable(True)
+        self.page_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.page_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.page_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.page_scroll.setStyleSheet(
+            "QScrollArea#investmentsScroll { background: transparent; border: none; }"
+            "QScrollArea#investmentsScroll > QWidget > QWidget "
+            "{ background: transparent; }"
+        )
+        root_layout.addWidget(self.page_scroll)
+
         content = QWidget()
+        self.content = content
         content.setObjectName("investmentsContent")
+        content.setMinimumWidth(720)
         content.setSizePolicy(
             QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Minimum,
         )
         layout = QVBoxLayout(content)
         layout.setContentsMargins(28, 24, 28, 24)
         layout.setSpacing(18)
-        root_layout.addWidget(content)
+        self.page_scroll.setWidget(content)
 
         add_account_button = QPushButton("Add Investment Account")
         add_account_button.setObjectName("pageActionButton")
@@ -391,8 +411,8 @@ class InvestmentsPage(QWidget):
         self.period_selector.selection_changed.connect(lambda *_: self.reload())
         layout.addWidget(self.period_selector)
 
-        summary_grid = QGridLayout()
-        summary_grid.setSpacing(16)
+        self.summary_grid = QGridLayout()
+        self.summary_grid.setSpacing(16)
         self.portfolio_card = SummaryCard(
             "Total Portfolio Value", "fa6s.chart-line"
         )
@@ -402,42 +422,47 @@ class InvestmentsPage(QWidget):
         self.accounts_card = SummaryCard(
             "Investment Accounts", "fa6s.building-columns"
         )
-        summary_grid.addWidget(self.portfolio_card, 0, 0)
-        summary_grid.addWidget(self.contribution_card, 0, 1)
-        summary_grid.addWidget(self.accounts_card, 0, 2)
+        self.summary_grid.addWidget(self.portfolio_card, 0, 0)
+        self.summary_grid.addWidget(self.contribution_card, 0, 1)
+        self.summary_grid.addWidget(self.accounts_card, 0, 2)
         for column in range(3):
-            summary_grid.setColumnStretch(column, 1)
-        layout.addLayout(summary_grid)
+            self.summary_grid.setColumnStretch(column, 1)
+        layout.addLayout(self.summary_grid)
 
-        middle = QGridLayout()
-        middle.setHorizontalSpacing(16)
-        middle.setVerticalSpacing(16)
-        chart_card = QFrame()
-        chart_card.setObjectName("contentCard")
-        chart_layout = QVBoxLayout(chart_card)
+        self.middle_grid = QGridLayout()
+        self.middle_grid.setHorizontalSpacing(16)
+        self.middle_grid.setVerticalSpacing(16)
+        self.chart_card = QFrame()
+        self.chart_card.setObjectName("contentCard")
+        chart_layout = QVBoxLayout(self.chart_card)
         chart_layout.setContentsMargins(18, 16, 18, 14)
         chart_title = QLabel("Portfolio Value Over Time")
         chart_title.setObjectName("sectionTitle")
         chart_layout.addWidget(chart_title)
         self.chart = PortfolioChart()
         chart_layout.addWidget(self.chart, 1)
-        middle.addWidget(chart_card, 0, 0, 1, 2)
+        self.middle_grid.addWidget(self.chart_card, 0, 0, 1, 2)
         self.entry_panel = self._build_entry_panel()
-        middle.addWidget(self.entry_panel, 0, 2)
-        middle.setColumnStretch(0, 1)
-        middle.setColumnStretch(1, 1)
-        middle.setColumnStretch(2, 1)
-        layout.addLayout(middle, 5)
+        self.middle_grid.addWidget(self.entry_panel, 0, 2)
+        self.middle_grid.setColumnStretch(0, 1)
+        self.middle_grid.setColumnStretch(1, 1)
+        self.middle_grid.setColumnStretch(2, 1)
+        layout.addLayout(self.middle_grid, 5)
 
-        bottom = QGridLayout()
-        bottom.setHorizontalSpacing(16)
-        bottom.setVerticalSpacing(16)
-        bottom.addWidget(self._build_accounts_panel(), 0, 0, 1, 2)
-        bottom.addWidget(self._build_recent_panel(), 0, 2)
-        bottom.setColumnStretch(0, 1)
-        bottom.setColumnStretch(1, 1)
-        bottom.setColumnStretch(2, 1)
-        layout.addLayout(bottom, 5)
+        self.bottom_grid = QGridLayout()
+        self.bottom_grid.setHorizontalSpacing(16)
+        self.bottom_grid.setVerticalSpacing(16)
+        self.accounts_panel = self._build_accounts_panel()
+        self.recent_panel = self._build_recent_panel()
+        self.bottom_grid.addWidget(self.accounts_panel, 0, 0, 1, 2)
+        self.bottom_grid.addWidget(self.recent_panel, 0, 2)
+        self.bottom_grid.setColumnStretch(0, 1)
+        self.bottom_grid.setColumnStretch(1, 1)
+        self.bottom_grid.setColumnStretch(2, 1)
+        layout.addLayout(self.bottom_grid, 5)
+
+        self._layout_mode: tuple[bool, bool] | None = None
+        self._update_responsive_layout(self.width())
 
     def _build_entry_panel(self) -> QFrame:
         panel = QFrame()
@@ -456,7 +481,7 @@ class InvestmentsPage(QWidget):
         form = QFormLayout()
         self.entry_form = form
         form.setSpacing(10)
-        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
         form.setFieldGrowthPolicy(
             QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
         )
@@ -501,6 +526,60 @@ class InvestmentsPage(QWidget):
         panel_layout.addWidget(self.save_entry_button)
         panel_layout.addStretch()
         return panel
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_responsive_layout(event.size().width())
+
+    def _update_responsive_layout(self, width: int) -> None:
+        compact = width < self.COMPACT_LAYOUT_WIDTH
+        narrow = width < self.NARROW_LAYOUT_WIDTH
+        mode = (compact, narrow)
+        if mode == self._layout_mode:
+            return
+        self._layout_mode = mode
+
+        for card in (
+            self.portfolio_card,
+            self.contribution_card,
+            self.accounts_card,
+        ):
+            self.summary_grid.removeWidget(card)
+        if narrow:
+            self.summary_grid.setColumnStretch(0, 1)
+            self.summary_grid.setColumnStretch(1, 0)
+            self.summary_grid.setColumnStretch(2, 0)
+            self.summary_grid.addWidget(self.portfolio_card, 0, 0)
+            self.summary_grid.addWidget(self.contribution_card, 1, 0)
+            self.summary_grid.addWidget(self.accounts_card, 2, 0)
+        else:
+            for column in range(3):
+                self.summary_grid.setColumnStretch(column, 1)
+            self.summary_grid.addWidget(self.portfolio_card, 0, 0)
+            self.summary_grid.addWidget(self.contribution_card, 0, 1)
+            self.summary_grid.addWidget(self.accounts_card, 0, 2)
+
+        self.middle_grid.removeWidget(self.chart_card)
+        self.middle_grid.removeWidget(self.entry_panel)
+        self.bottom_grid.removeWidget(self.accounts_panel)
+        self.bottom_grid.removeWidget(self.recent_panel)
+        if compact:
+            for grid in (self.middle_grid, self.bottom_grid):
+                grid.setColumnStretch(0, 1)
+                grid.setColumnStretch(1, 0)
+                grid.setColumnStretch(2, 0)
+            self.middle_grid.addWidget(self.chart_card, 0, 0)
+            self.middle_grid.addWidget(self.entry_panel, 1, 0)
+            self.bottom_grid.addWidget(self.accounts_panel, 0, 0)
+            self.bottom_grid.addWidget(self.recent_panel, 1, 0)
+        else:
+            for grid in (self.middle_grid, self.bottom_grid):
+                for column in range(3):
+                    grid.setColumnStretch(column, 1)
+            self.middle_grid.addWidget(self.chart_card, 0, 0, 1, 2)
+            self.middle_grid.addWidget(self.entry_panel, 0, 2)
+            self.bottom_grid.addWidget(self.accounts_panel, 0, 0, 1, 2)
+            self.bottom_grid.addWidget(self.recent_panel, 0, 2)
 
     def _build_accounts_panel(self) -> QFrame:
         panel = QFrame()
@@ -725,8 +804,6 @@ class InvestmentsPage(QWidget):
             action_layout = QHBoxLayout(actions)
             action_layout.setContentsMargins(3, 3, 3, 3)
             action_layout.setSpacing(5)
-            add_button = QPushButton("Add Entry")
-            set_button_icon(add_button, "fa6s.plus", size=14)
             edit_button = QPushButton()
             edit_button.setObjectName("tableIconButton")
             set_icon_only_button(
@@ -738,17 +815,13 @@ class InvestmentsPage(QWidget):
             delete_button.setObjectName("dangerButton")
             delete_button.setToolTip("Delete investment account")
             set_delete_button_icon(delete_button)
-            actions.setMinimumWidth(190)
-            add_button.clicked.connect(
-                lambda checked=False, account_id=account.id: self._select_entry_account(account_id)
-            )
+            actions.setMinimumWidth(92)
             edit_button.clicked.connect(
                 lambda checked=False, selected=account: self._open_edit_account(selected)
             )
             delete_button.clicked.connect(
                 lambda checked=False, selected=account: self._delete_account(selected)
             )
-            action_layout.addWidget(add_button)
             action_layout.addWidget(edit_button)
             action_layout.addWidget(delete_button)
             rows.append((
@@ -782,12 +855,13 @@ class InvestmentsPage(QWidget):
         for entry in entries:
             item = QFrame()
             item.setObjectName("recentInvestmentEntry")
-            item.setFixedHeight(self.RECENT_ENTRY_HEIGHT)
+            item.setMinimumHeight(self.RECENT_ENTRY_HEIGHT)
             item_layout = QVBoxLayout(item)
             item_layout.setContentsMargins(10, 7, 10, 7)
             item_layout.setSpacing(2)
             name = QLabel(f"{entry.account_name} — {entry.institution}")
             name.setStyleSheet(f"color: {COLORS['text']}; font-weight: 650;")
+            name.setWordWrap(True)
             recorded = QLabel(entry.snapshot_datetime.strftime("%b %d, %Y"))
             recorded.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px;")
             value_text = f"Value: {_currency(entry.total_value)}"
@@ -799,6 +873,7 @@ class InvestmentsPage(QWidget):
                 )
             value = QLabel(value_text)
             value.setStyleSheet(f"color: {COLORS['text_muted']};")
+            value.setWordWrap(True)
             item_layout.addWidget(name)
             item_layout.addWidget(recorded)
             item_layout.addWidget(value)
@@ -898,12 +973,6 @@ class InvestmentsPage(QWidget):
             QMessageBox.warning(self.window(), "Unable to Delete Account", str(exc))
             return
         self.reload()
-
-    def _select_entry_account(self, account_id: int) -> None:
-        index = self.entry_account.findData(account_id)
-        if index >= 0:
-            self.entry_account.setCurrentIndex(index)
-        self.entry_total.setFocus()
 
     def _save_entry(self) -> None:
         self.entry_error.clear()

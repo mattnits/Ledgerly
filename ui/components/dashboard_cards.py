@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, QTimer, Qt
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -31,6 +31,29 @@ def format_currency(value: Decimal, *, cents: bool = False) -> str:
     precision = 2 if cents else 0
     sign = "-" if value < 0 else ""
     return f"{sign}${abs(value):,.{precision}f}"
+
+
+class _ElidedLabel(QLabel):
+    """Keep dense dashboard rows readable when their card becomes narrow."""
+
+    def __init__(self, text: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.full_text = text
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        available = max(self.contentsRect().width(), 0)
+        clipped = self.fontMetrics().horizontalAdvance(self.full_text) > available
+        self.setText(
+            self.fontMetrics().elidedText(
+                self.full_text,
+                Qt.TextElideMode.ElideRight,
+                available,
+            )
+        )
+        self.setToolTip(self.full_text if clipped else "")
 
 
 class DashboardCard(QFrame):
@@ -429,9 +452,12 @@ class CategoryCard(DashboardCard):
         self.legend_layout = QVBoxLayout(self.legend)
         self.legend_layout.setContentsMargins(0, 0, 4, 0)
         self.legend_layout.setSpacing(6)
-        scroll = _transparent_scroll(self.legend)
-        content.addWidget(scroll, 1)
+        self.legend_scroll = _transparent_scroll(self.legend)
+        content.addWidget(self.legend_scroll, 1)
         self.layout.addLayout(content, 1)
+        self.amount_labels: list[QLabel] = []
+        self._amounts_visible: bool | None = None
+        self._legend_required_width = 0
 
     def set_data(
         self, period_label: str, items: tuple[CategorySpending, ...]
@@ -439,6 +465,9 @@ class CategoryCard(DashboardCard):
         self.subtitle_label.setText(period_label)
         self.donut.set_data(items)
         _clear_layout(self.legend_layout)
+        self.amount_labels = []
+        self._amounts_visible = None
+        self._legend_required_width = 0
         total = sum((item.amount for item in items), Decimal())
         if not items:
             self.legend_layout.addWidget(_empty_label("No spending for this period"))
@@ -450,7 +479,7 @@ class CategoryCard(DashboardCard):
             dot = QFrame()
             dot.setFixedSize(8, 8)
             dot.setStyleSheet(f"background: {item.color}; border-radius: 4px;")
-            name = QLabel(item.name)
+            name = _ElidedLabel(item.name)
             name.setStyleSheet(
                 f"color: {COLORS['text_muted']}; font-size: 10px;"
             )
@@ -460,6 +489,7 @@ class CategoryCard(DashboardCard):
             )
             row_layout.addWidget(dot)
             row_layout.addWidget(name, 1)
+            share = None
             if total:
                 share = QLabel(f"{float(item.amount / total * 100):.0f}%")
                 share.setStyleSheet(
@@ -467,8 +497,39 @@ class CategoryCard(DashboardCard):
                 )
                 row_layout.addWidget(share)
             row_layout.addWidget(amount)
+            self.amount_labels.append(amount)
+            spacing_width = row_layout.spacing() * (3 if share else 2)
+            required_width = (
+                dot.width()
+                + name.fontMetrics().horizontalAdvance(item.name)
+                + amount.sizeHint().width()
+                + (share.sizeHint().width() if share else 0)
+                + spacing_width
+                + 16
+            )
+            self._legend_required_width = max(
+                self._legend_required_width,
+                required_width,
+            )
             self.legend_layout.addWidget(row)
         self.legend_layout.addStretch()
+        QTimer.singleShot(0, self._update_legend_density)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        QTimer.singleShot(0, self._update_legend_density)
+
+    def _update_legend_density(self) -> None:
+        """Hide amounts exactly when the legend no longer has room for them."""
+        if not self.amount_labels:
+            return
+        available_width = self.legend_scroll.viewport().width()
+        show_amounts = available_width >= self._legend_required_width
+        if show_amounts == self._amounts_visible:
+            return
+        self._amounts_visible = show_amounts
+        for amount in self.amount_labels:
+            amount.setVisible(show_amounts)
 
 
 class BudgetGoalsCard(DashboardCard):

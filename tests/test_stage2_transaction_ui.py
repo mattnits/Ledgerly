@@ -1,4 +1,5 @@
 import os
+import time
 import unittest
 from datetime import date
 from decimal import Decimal
@@ -6,6 +7,7 @@ from decimal import Decimal
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 from sqlalchemy import create_engine
@@ -19,6 +21,16 @@ from utils.constants import TransactionType
 
 
 class Stage2TransactionUiTest(unittest.TestCase):
+    @staticmethod
+    def _wait_for(predicate, timeout=2.0):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            QApplication.processEvents()
+            if predicate():
+                return
+            QTest.qWait(10)
+        raise AssertionError("Timed out waiting for background transaction query")
+
     def test_review_search_selection_and_rule_prefill_work_together(self):
         engine = create_engine(
             "sqlite://",
@@ -73,7 +85,53 @@ class Stage2TransactionUiTest(unittest.TestCase):
         table.resize(1150, 520)
         table.show()
         table.set_user_id("test-user")
-        app.processEvents()
+        self._wait_for(lambda: not table._loading)
+        review_center = table.needs_review_checkbox.mapTo(
+            table,
+            table.needs_review_checkbox.rect().center(),
+        ).y()
+        date_range_center = table.date_range_selector.mapTo(
+            table,
+            table.date_range_selector.rect().center(),
+        ).y()
+        self.assertLessEqual(abs(review_center - date_range_center), 1)
+        for index in range(table.category_selector.count()):
+            self.assertEqual(
+                table.category_selector.itemData(
+                    index,
+                    Qt.ItemDataRole.ForegroundRole,
+                ),
+                QColor("#ffffff"),
+            )
+        category_filter_longest = max(
+            table.category_selector.fontMetrics().horizontalAdvance(
+                table.category_selector.itemText(index)
+            )
+            for index in range(table.category_selector.count())
+        )
+        self.assertGreaterEqual(
+            table.category_selector.view().minimumWidth(),
+            category_filter_longest + 64,
+        )
+        for row in table.rows:
+            for index in range(row.category_combo.count()):
+                self.assertEqual(
+                    row.category_combo.itemData(
+                        index,
+                        Qt.ItemDataRole.ForegroundRole,
+                    ),
+                    QColor("#ffffff"),
+                )
+            longest_category = max(
+                row.category_combo.fontMetrics().horizontalAdvance(
+                    row.category_combo.itemText(index)
+                )
+                for index in range(row.category_combo.count())
+            )
+            self.assertGreaterEqual(
+                row.category_combo.view().minimumWidth(),
+                longest_category + 64,
+            )
         self.assertGreaterEqual(
             table.table.columnWidth(7),
             StatementsTable.MINIMUM_COLUMN_WIDTHS[7],
@@ -106,14 +164,14 @@ class Stage2TransactionUiTest(unittest.TestCase):
         )
 
         table.needs_review_checkbox.setChecked(True)
-        app.processEvents()
+        self._wait_for(lambda: not table._loading and table.filtered_count == 1)
         self.assertEqual(table.filtered_count, 1)
         self.assertFalse(table.review_mode_label.isHidden())
         self.assertEqual(table.rows[0].description, "Tim-Hortons Aurora")
 
         table.needs_review_checkbox.setChecked(False)
         table.search.setText("TIM HORTONS")
-        app.processEvents()
+        self._wait_for(lambda: not table._loading and table.filtered_count == 2)
         self.assertEqual(table.filtered_count, 2)
 
         description_label = table.rows[0].description_label

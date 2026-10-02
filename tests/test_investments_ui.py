@@ -46,24 +46,46 @@ class InvestmentsPageUiTest(unittest.TestCase):
     def tearDown(self):
         self.engine.dispose()
 
-    def test_page_has_no_page_level_scroll_area_and_panels_expand(self):
+    def test_page_scrolls_and_reflows_panels_at_compact_sizes(self):
         page = InvestmentsPage(session_factory=self.sessions)
         self.assertEqual(
             [scroll.objectName() for scroll in page.findChildren(QScrollArea)],
-            ["investmentRecentScroll"],
+            ["investmentsScroll", "investmentRecentScroll"],
         )
 
-        page.resize(page.minimumSize())
+        page.resize(600, 500)
         page.show()
         self.app.processEvents()
-        compact_chart_height = page.chart.height()
-        compact_table_height = page.accounts_table.height()
+        self.assertEqual(page.size().width(), 600)
+        self.assertEqual(
+            page.middle_grid.getItemPosition(
+                page.middle_grid.indexOf(page.entry_panel)
+            )[:2],
+            (1, 0),
+        )
+        self.assertEqual(
+            page.bottom_grid.getItemPosition(
+                page.bottom_grid.indexOf(page.recent_panel)
+            )[:2],
+            (1, 0),
+        )
+        self.assertGreater(page.page_scroll.horizontalScrollBar().maximum(), 0)
+        self.assertGreater(page.page_scroll.verticalScrollBar().maximum(), 0)
 
         page.resize(1600, 1100)
         self.app.processEvents()
-
-        self.assertGreater(page.chart.height(), compact_chart_height)
-        self.assertGreater(page.accounts_table.height(), compact_table_height)
+        self.assertEqual(
+            page.middle_grid.getItemPosition(
+                page.middle_grid.indexOf(page.entry_panel)
+            )[:2],
+            (0, 2),
+        )
+        self.assertEqual(
+            page.bottom_grid.getItemPosition(
+                page.bottom_grid.indexOf(page.recent_panel)
+            )[:2],
+            (0, 2),
+        )
         page.close()
 
     def test_account_edit_and_delete_actions_are_icon_only(self):
@@ -81,6 +103,8 @@ class InvestmentsPageUiTest(unittest.TestCase):
             if button.objectName() == "dangerButton"
         )
 
+        self.assertEqual(len(buttons), 2)
+        self.assertNotIn("Add Entry", (button.text() for button in buttons))
         self.assertEqual(edit_button.text(), "")
         self.assertEqual(edit_button.toolTip(), "Edit investment account")
         self.assertFalse(edit_button.icon().isNull())
@@ -98,7 +122,7 @@ class InvestmentsPageUiTest(unittest.TestCase):
 
         self.assertEqual(
             page.entry_form.rowWrapPolicy(),
-            page.entry_form.RowWrapPolicy.WrapLongRows,
+            page.entry_form.RowWrapPolicy.WrapAllRows,
         )
         for field in (
             page.entry_account,
