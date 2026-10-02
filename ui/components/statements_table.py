@@ -109,6 +109,7 @@ class _TransactionQueryWorker(QRunnable):
 class StatementsTable(QWidget):
     create_rule_requested = Signal(object)
     count_changed = Signal(int)
+    loading_changed = Signal(bool)
 
     PAGE_SIZE = 200
     COLUMN_HEADERS = (
@@ -697,9 +698,16 @@ class StatementsTable(QWidget):
 
     def _schedule_search(self) -> None:
         self._query_generation += 1
-        self._loading = True
+        self._set_loading(True)
         self.loading_overlay.show_loading("Loading transactions...")
         self._search_timer.start()
+
+    def _set_loading(self, loading: bool) -> None:
+        loading = bool(loading)
+        if loading == self._loading:
+            return
+        self._loading = loading
+        self.loading_changed.emit(loading)
 
     def _reset_and_apply(self) -> None:
         self._apply_filters()
@@ -746,7 +754,7 @@ class StatementsTable(QWidget):
         self.review_mode_label.setVisible(self.needs_review_filter)
         self._query_generation += 1
         if self.user_id is None:
-            self._loading = False
+            self._set_loading(False)
             self.loading_overlay.hide_loading()
             self._update_filter_options((), (), frozenset())
             self._show_empty_table()
@@ -808,7 +816,7 @@ class StatementsTable(QWidget):
         worker.signals.failed.connect(self._query_failed)
         self._active_workers[request_id] = worker
         self._request_contexts[request_id] = context
-        self._loading = True
+        self._set_loading(True)
         self._last_failed_context = None
         self.loading_overlay.show_loading("Loading transactions...")
         logger.debug(
@@ -852,7 +860,7 @@ class StatementsTable(QWidget):
         if context.get("kind") == "append":
             if offset != self.loaded_count:
                 logger.debug("Transaction page ignored because its offset is stale")
-                self._loading = False
+                self._set_loading(False)
                 self.loading_overlay.hide_loading()
                 return
             self._append_rows(result.rows)
@@ -860,7 +868,7 @@ class StatementsTable(QWidget):
             self.range_label.setText(
                 f"Showing {self.loaded_count:,} of {self.filtered_count:,} transactions"
             )
-            self._loading = False
+            self._set_loading(False)
             self.loading_overlay.hide_loading()
             return
 
@@ -870,7 +878,7 @@ class StatementsTable(QWidget):
             result.available_months,
         )
         self._replace_rows(result, context)
-        self._loading = False
+        self._set_loading(False)
         self.loading_overlay.hide_loading()
 
     def _replace_rows(self, result: TransactionQueryResult, context: dict) -> None:
@@ -924,7 +932,7 @@ class StatementsTable(QWidget):
                 self._query_generation,
             )
             return
-        self._loading = False
+        self._set_loading(False)
         self._last_failed_context = {**context, "offset": offset}
         self.loading_overlay.show_error("Could not load transactions.")
 

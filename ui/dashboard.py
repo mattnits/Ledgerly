@@ -163,6 +163,9 @@ class DashboardPage(QWidget):
             data.savings_goal,
             data.savings_actual,
             data.savings_balance,
+            data.cash_savings_actual,
+            data.work_rrsp_employee,
+            data.employer_rrsp_match,
         )
         self.category_card.set_data(data.period_label, data.category_spending)
         self.budget_card.set_data(data.period_label, data.budget_progress)
@@ -173,6 +176,9 @@ class DashboardPage(QWidget):
             data.portfolio_baseline_value,
             data.investment_month_labels,
             data.investment_value_series,
+            data.manual_investing_total,
+            data.work_rrsp_employee,
+            data.employer_rrsp_match,
         )
 
     def open_file_selection(self):

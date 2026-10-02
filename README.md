@@ -17,9 +17,16 @@ On startup, `init_db()` safely upgrades the original `investment_snapshots` tabl
 - legacy accounts use `Imported legacy data` as their institution so they are easy to identify and edit;
 - account numbers retain their final seven alphanumeric characters only;
 - installations that previously stored four masked digits preserve those digits in the new field;
+- work RRSP configuration columns are added in place with `false`/`NULL`
+  defaults, so no existing RRSP is opted in automatically;
 - the old table is removed only after its rows have been copied inside the migration transaction.
 
 Before the first launch after upgrading, make a normal backup copy of the SQLite database. Do not delete or recreate it. Then run `python main.py`; no separate migration command is required.
+
+Work RRSP contribution history is derived at read time from non-deleted `INCOME`
+transactions in the `Salary` category. The migration does not rewrite transactions,
+create contribution rows, or alter portfolio snapshots. Editing a work RRSP rate
+therefore recalculates its history without changing the source data.
 
 ## Tests
 

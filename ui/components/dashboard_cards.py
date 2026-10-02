@@ -308,7 +308,10 @@ class SavingsCard(DashboardCard):
         self.goal_value.setStyleSheet(
             f"color: {COLORS['text']}; font-size: 29px; font-weight: 800;"
         )
-        self.actual_row = SummaryRow("Actual saved", "$0")
+        self.cash_saved_row = SummaryRow("Cash saved", "$0")
+        self.work_rrsp_row = SummaryRow("Work RRSP", "$0")
+        self.actual_row = SummaryRow("Personal savings total", "$0")
+        self.employer_match_row = SummaryRow("Employer match", "+$0")
         self.balance_row = SummaryRow("Savings balance", "Not recorded")
         self.progress = QProgressBar()
         self.progress.setObjectName("savingsProgress")
@@ -321,7 +324,10 @@ class SavingsCard(DashboardCard):
         )
         self.layout.addWidget(self.goal_caption)
         self.layout.addWidget(self.goal_value)
+        self.layout.addWidget(self.cash_saved_row)
+        self.layout.addWidget(self.work_rrsp_row)
         self.layout.addWidget(self.actual_row)
+        self.layout.addWidget(self.employer_match_row)
         self.layout.addWidget(self.balance_row)
         self.layout.addStretch()
         self.layout.addWidget(self.progress)
@@ -341,6 +347,9 @@ class SavingsCard(DashboardCard):
         goal: Decimal | None,
         actual: Decimal,
         balance: Decimal | None,
+        cash_actual: Decimal | None = None,
+        work_rrsp_employee: Decimal = Decimal(),
+        employer_match: Decimal = Decimal(),
     ) -> None:
         self.subtitle_label.setText(period_label)
         self.goal_caption.setText(
@@ -349,7 +358,18 @@ class SavingsCard(DashboardCard):
         self.goal_value.setText(
             format_currency(goal) if goal is not None else "Not set"
         )
-        self.actual_row.set_values("Actual saved", format_currency(actual))
+        cash = actual if cash_actual is None else cash_actual
+        self.cash_saved_row.set_values("Cash saved", format_currency(cash))
+        self.work_rrsp_row.set_values(
+            "Work RRSP", format_currency(work_rrsp_employee)
+        )
+        self.actual_row.set_values(
+            "Personal savings total", format_currency(actual)
+        )
+        match_text = format_currency(employer_match)
+        if employer_match >= 0:
+            match_text = f"+{match_text}"
+        self.employer_match_row.set_values("Employer match", match_text)
         self.balance_row.set_values(
             "Savings balance",
             format_currency(balance) if balance is not None else "Not recorded",
@@ -684,6 +704,9 @@ class InvestingCard(DashboardCard):
             f"color: {COLORS['text']}; font-size: 29px; font-weight: 800;"
         )
         self.contribution_row = SummaryRow("Monthly contributions", "$0")
+        self.manual_contribution_row = SummaryRow("Manual contributions", "$0")
+        self.employee_rrsp_row = SummaryRow("Work RRSP - employee", "$0")
+        self.employer_rrsp_row = SummaryRow("Work RRSP - employer", "$0")
         self.change_label = QLabel("No portfolio history")
         self.change_label.setStyleSheet(
             f"color: {COLORS['text_dim']}; font-size: 11px;"
@@ -700,6 +723,9 @@ class InvestingCard(DashboardCard):
         self.chart = MiniLineChart()
         self.layout.addWidget(self.portfolio_caption)
         self.layout.addLayout(value_row)
+        self.layout.addWidget(self.manual_contribution_row)
+        self.layout.addWidget(self.employee_rrsp_row)
+        self.layout.addWidget(self.employer_rrsp_row)
         self.layout.addWidget(self.contribution_row)
         self.layout.addWidget(self.chart, 1)
 
@@ -711,6 +737,9 @@ class InvestingCard(DashboardCard):
         baseline_value: Decimal | None,
         labels: tuple[str, ...],
         values: tuple[Decimal, ...],
+        manual_contribution: Decimal | None = None,
+        work_rrsp_employee: Decimal = Decimal(),
+        work_rrsp_employer: Decimal = Decimal(),
     ) -> None:
         self.subtitle_label.setText(period_label)
         self.portfolio_caption.setText(
@@ -723,6 +752,16 @@ class InvestingCard(DashboardCard):
             "Total contributions"
             if period_label == "All time"
             else "Monthly contributions"
+        )
+        manual = contribution if manual_contribution is None else manual_contribution
+        self.manual_contribution_row.set_values(
+            "Manual contributions", format_currency(manual)
+        )
+        self.employee_rrsp_row.set_values(
+            "Work RRSP - employee", format_currency(work_rrsp_employee)
+        )
+        self.employer_rrsp_row.set_values(
+            "Work RRSP - employer", format_currency(work_rrsp_employer)
         )
         self.contribution_row.set_values(caption, format_currency(contribution))
         if baseline_value is None:
