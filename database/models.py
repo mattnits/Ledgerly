@@ -476,6 +476,21 @@ class InvestmentAccount(Base):
     account_name: Mapped[str] = mapped_column(String(100), nullable=False)
     account_number_last7: Mapped[str | None] = mapped_column(String(7), nullable=True)
     account_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    is_work_related: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
+    auto_track_from_payroll: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
+    employee_contribution_percent: Mapped[Decimal | None] = mapped_column(
+        Numeric(7, 4), nullable=True
+    )
+    employer_matching_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
+    employer_match_percent: Mapped[Decimal | None] = mapped_column(
+        Numeric(7, 4), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, nullable=False
     )
@@ -499,6 +514,16 @@ class InvestmentAccount(Base):
             "account_number_last7 IS NULL OR "
             "length(account_number_last7) BETWEEN 1 AND 7",
             name="ck_investment_account_last7",
+        ),
+        CheckConstraint(
+            "employee_contribution_percent IS NULL OR "
+            "(employee_contribution_percent >= 0 AND "
+            "employee_contribution_percent < 100)",
+            name="ck_investment_account_employee_percent",
+        ),
+        CheckConstraint(
+            "employer_match_percent IS NULL OR employer_match_percent >= 0",
+            name="ck_investment_account_match_percent",
         ),
     )
 

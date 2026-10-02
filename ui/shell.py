@@ -1,3 +1,4 @@
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QDialog,
     QMainWindow,
@@ -29,6 +30,7 @@ from utils.constants import (
 
 
 class ShellWindow(QMainWindow):
+    startup_ready = Signal()
 
     def __init__(self):
         super().__init__()
@@ -37,6 +39,8 @@ class ShellWindow(QMainWindow):
         self.resize(1400, 850)
         self.setMinimumSize(1100, 700)
         self._active_user_dialog: QDialog | None = None
+        self._startup_setup_complete = False
+        self._startup_ready = False
 
         # -------------------------
         # Root widget
@@ -144,12 +148,29 @@ class ShellWindow(QMainWindow):
         )
 
         self.settings_page.data_reset.connect(self.handle_data_reset)
+        self.transactions_page.statements_table.loading_changed.connect(
+            self._handle_startup_loading_changed
+        )
 
         # -------------------------
         # Initial page
         # -------------------------
 
         self.load_users()
+
+    @property
+    def is_startup_ready(self) -> bool:
+        return self._startup_ready
+
+    def _handle_startup_loading_changed(self, loading: bool) -> None:
+        if self._startup_setup_complete and not loading:
+            self._mark_startup_ready()
+
+    def _mark_startup_ready(self) -> None:
+        if self._startup_ready:
+            return
+        self._startup_ready = True
+        self.startup_ready.emit()
 
     def load_users(self, current_user_id: str | None = None):
         users = get_users()
@@ -164,6 +185,10 @@ class ShellWindow(QMainWindow):
         else:
             self.sidebar.hide()
             self.pages.setCurrentWidget(self.welcome_page)
+        if not self._startup_setup_complete:
+            self._startup_setup_complete = True
+            if not self.transactions_page.statements_table._loading:
+                self._mark_startup_ready()
 
     def show_add_user(self):
         dialog = AddUserDialog(self)

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtTest import QTest
+from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -73,6 +73,7 @@ class TransactionAsyncLoadingTest(unittest.TestCase):
         table = StatementsTable(query_loader=loader)
         table.show()
         main_thread = threading.get_ident()
+        loading_changes = QSignalSpy(table.loading_changed)
         table.set_user_id("test-user")
 
         self.assertTrue(table._loading)
@@ -90,6 +91,10 @@ class TransactionAsyncLoadingTest(unittest.TestCase):
         self.assertTrue(worker_threads)
         self.assertTrue(all(thread_id != main_thread for thread_id in worker_threads))
         self.assertFalse(table.loading_overlay.isVisible())
+        self.assertEqual(
+            [loading_changes.at(index)[0] for index in range(loading_changes.count())],
+            [True, False],
+        )
         table.close()
 
     def test_search_is_debounced_to_one_query_after_typing_pauses(self):

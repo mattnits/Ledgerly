@@ -21,6 +21,56 @@ from database.db import init_db
 
 
 class DatabaseMigrationTest(unittest.TestCase):
+    def test_work_rrsp_columns_are_added_with_safe_existing_account_defaults(self):
+        engine = create_engine("sqlite://")
+        metadata = MetaData()
+        accounts = Table(
+            "investment_accounts",
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("user_id", String(36)),
+            Column("group_id", Integer),
+            Column("institution", String(100), nullable=False),
+            Column("account_name", String(100), nullable=False),
+            Column("account_number_last7", String(7)),
+            Column("account_type", String(50)),
+            Column("created_at", DateTime, nullable=False),
+            Column("is_active", Boolean, nullable=False),
+        )
+        metadata.create_all(engine)
+        with engine.begin() as connection:
+            connection.execute(accounts.insert().values(
+                id=1,
+                user_id="legacy-user",
+                institution="Legacy institution",
+                account_name="Existing RRSP",
+                account_type="RRSP",
+                created_at=datetime(2026, 1, 1),
+                is_active=True,
+            ))
+
+        init_db(engine)
+
+        migrated = Table("investment_accounts", MetaData(), autoload_with=engine)
+        columns = {column["name"] for column in inspect(engine).get_columns(
+            "investment_accounts"
+        )}
+        with engine.connect() as connection:
+            row = connection.execute(select(migrated)).mappings().one()
+        self.assertTrue({
+            "is_work_related",
+            "auto_track_from_payroll",
+            "employee_contribution_percent",
+            "employer_matching_enabled",
+            "employer_match_percent",
+        }.issubset(columns))
+        self.assertFalse(row["is_work_related"])
+        self.assertFalse(row["auto_track_from_payroll"])
+        self.assertIsNone(row["employee_contribution_percent"])
+        self.assertFalse(row["employer_matching_enabled"])
+        self.assertIsNone(row["employer_match_percent"])
+        engine.dispose()
+
     def test_last_four_account_values_are_preserved_in_last_seven_field(self):
         engine = create_engine("sqlite://")
         metadata = MetaData()

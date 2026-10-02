@@ -34,6 +34,7 @@ def init_db(db_engine=engine):
 
     Base.metadata.create_all(bind=db_engine)
     _migrate_investment_account_number_last7(db_engine)
+    _migrate_work_rrsp_fields(db_engine)
     _migrate_investment_snapshots(db_engine)
     _migrate_category_rule_account_scope(db_engine)
 
@@ -67,6 +68,34 @@ def _migrate_investment_account_number_last7(db_engine) -> None:
             "SET account_number_last7 = account_number_last4 "
             "WHERE account_number_last4 IS NOT NULL"
         ))
+
+
+def _migrate_work_rrsp_fields(db_engine) -> None:
+    """Add opt-in work RRSP settings without changing existing accounts."""
+    inspector = inspect(db_engine)
+    if "investment_accounts" not in inspector.get_table_names():
+        return
+    if db_engine.dialect.name != "sqlite":
+        raise RuntimeError(
+            "The work RRSP migration currently supports SQLite only."
+        )
+    existing = {
+        column["name"]
+        for column in inspector.get_columns("investment_accounts")
+    }
+    additions = (
+        ("is_work_related", "BOOLEAN NOT NULL DEFAULT 0"),
+        ("auto_track_from_payroll", "BOOLEAN NOT NULL DEFAULT 0"),
+        ("employee_contribution_percent", "NUMERIC(7, 4)"),
+        ("employer_matching_enabled", "BOOLEAN NOT NULL DEFAULT 0"),
+        ("employer_match_percent", "NUMERIC(7, 4)"),
+    )
+    with db_engine.begin() as connection:
+        for name, definition in additions:
+            if name not in existing:
+                connection.execute(text(
+                    f"ALTER TABLE investment_accounts ADD COLUMN {name} {definition}"
+                ))
 
 
 def _migrate_investment_snapshots(db_engine) -> None:

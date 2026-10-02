@@ -15,6 +15,10 @@ from database.finance_services import (
     combine_financial_summaries,
     summarize_transaction_rows,
 )
+from database.investments import (
+    get_monthly_contribution_summary,
+    get_total_contribution_summary,
+)
 from database.models import (
     Account,
     Category,
@@ -83,8 +87,12 @@ class DashboardData:
     total_income: Decimal
     total_spending: Decimal
     account_spending: tuple[AccountSpending, ...]
+    manual_investing_total: Decimal
     investing_total: Decimal
     savings_goal: Decimal | None
+    cash_savings_actual: Decimal
+    work_rrsp_employee: Decimal
+    employer_rrsp_match: Decimal
     savings_actual: Decimal
     savings_balance: Decimal | None
     budget_progress: tuple[BudgetProgress, ...]
@@ -471,7 +479,9 @@ def get_dashboard_data(
         row for row in savings_rows
         if period == "all" or (row[0].year, row[0].month) == selected_month
     ]
-    savings_actual = sum((row[1] for row in selected_savings_rows), Decimal())
+    cash_savings_actual = sum(
+        (row[1] for row in selected_savings_rows), Decimal()
+    )
     balance_rows = [row for row in selected_savings_rows if row[2] is not None]
     savings_balance = balance_rows[-1][2] if balance_rows else None
 
@@ -498,9 +508,30 @@ def get_dashboard_data(
             item.snapshot_datetime.month,
         ) == selected_month
     ]
-    investing_total = sum(
+    manual_investing_total = sum(
         (item.contribution_amount or Decimal() for item in selected_investments),
         Decimal(),
+    )
+    if user_id is None:
+        work_rrsp_employee = employer_rrsp_match = Decimal()
+    else:
+        contribution_summary = (
+            get_monthly_contribution_summary(
+                *selected_month,
+                user_id=user_id,
+                session_factory=session_factory,
+            )
+            if period == "monthly"
+            else get_total_contribution_summary(
+                user_id=user_id,
+                session_factory=session_factory,
+            )
+        )
+        work_rrsp_employee = contribution_summary.work_rrsp_employee
+        employer_rrsp_match = contribution_summary.work_rrsp_employer
+    savings_actual = cash_savings_actual + work_rrsp_employee
+    investing_total = (
+        manual_investing_total + work_rrsp_employee + employer_rrsp_match
     )
     snapshot_months = sorted({
         (item.snapshot_datetime.year, item.snapshot_datetime.month)
@@ -576,8 +607,12 @@ def get_dashboard_data(
         total_income=summary.total_income,
         total_spending=summary.total_spending,
         account_spending=account_spending,
+        manual_investing_total=manual_investing_total,
         investing_total=investing_total,
         savings_goal=savings_goal,
+        cash_savings_actual=cash_savings_actual,
+        work_rrsp_employee=work_rrsp_employee,
+        employer_rrsp_match=employer_rrsp_match,
         savings_actual=savings_actual,
         savings_balance=savings_balance,
         budget_progress=budget_progress,

@@ -18,6 +18,7 @@ from database.investments import (
 )
 from database.models import User
 from ui.investments import InvestmentsPage
+from ui.theme import APP_STYLESHEET
 
 
 class InvestmentsPageUiTest(unittest.TestCase):
@@ -111,6 +112,54 @@ class InvestmentsPageUiTest(unittest.TestCase):
         self.assertEqual(delete_button.text(), "")
         self.assertEqual(delete_button.toolTip(), "Delete investment account")
         self.assertFalse(delete_button.icon().isNull())
+        page.show()
+        self.app.processEvents()
+        button_group_left = min(button.geometry().left() for button in buttons)
+        button_group_right = max(button.geometry().right() for button in buttons)
+        left_margin = button_group_left
+        right_margin = actions.width() - button_group_right - 1
+        self.assertLessEqual(abs(left_margin - right_margin), 1)
+        self.assertEqual(
+            page.accounts_table.horizontalHeaderItem(5).textAlignment(),
+            Qt.AlignmentFlag.AlignCenter,
+        )
+        page.close()
+
+    def test_account_actions_are_centered_in_the_rendered_column(self):
+        previous_stylesheet = self.app.styleSheet()
+        self.app.setStyleSheet(APP_STYLESHEET)
+        page = InvestmentsPage(session_factory=self.sessions)
+        try:
+            page.set_user_id("owner")
+            page.resize(1400, 950)
+            page.show()
+            self.app.processEvents()
+
+            table = page.accounts_table
+            actions = table.cellWidget(0, 5)
+            buttons = actions.findChildren(QPushButton)
+            column_left = table.columnViewportPosition(5)
+            column_center = column_left + table.columnWidth(5) / 2
+            actions_center = actions.x() + actions.width() / 2
+            button_group_left = actions.x() + min(
+                button.x() for button in buttons
+            )
+            button_group_right = actions.x() + max(
+                button.x() + button.width() for button in buttons
+            )
+            button_group_center = (
+                button_group_left + button_group_right
+            ) / 2
+
+            self.assertEqual(
+                table.columnWidth(5),
+                InvestmentsPage.ACCOUNT_ACTION_COLUMN_WIDTH,
+            )
+            self.assertEqual(actions_center, column_center)
+            self.assertEqual(button_group_center, column_center)
+        finally:
+            page.close()
+            self.app.setStyleSheet(previous_stylesheet)
 
     def test_entry_form_wraps_without_overlap_and_masks_account_number(self):
         page = InvestmentsPage(session_factory=self.sessions)

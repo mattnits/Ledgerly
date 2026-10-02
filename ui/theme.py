@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import qtawesome as qta
@@ -127,14 +128,24 @@ def set_label_icon(
 
 
 def brand_icon(institution: str, *, size: int = 24) -> QIcon:
-    """Return the supplied TD/Amex artwork, with a neutral bank fallback."""
-    normalized = institution.casefold()
-    if "american express" in normalized or "amex" in normalized:
+    """Return known institution artwork, with a neutral bank fallback."""
+    normalized = " ".join(re.findall(r"[a-z0-9]+", institution.casefold()))
+    words = set(normalized.split())
+    if "american express" in normalized or "amex" in words:
         path = ICON_ROOT / "amex_icon.png"
         crop_td = False
-    elif normalized == "td" or "toronto-dominion" in normalized:
+    elif normalized == "td" or "toronto dominion" in normalized:
         path = ICON_ROOT / "td_icon.jpg"
         crop_td = True
+    elif "rbc" in words or "royal bank of canada" in normalized:
+        path = ICON_ROOT / "rbc.png"
+        crop_td = False
+    elif "wealthsimple" in words:
+        path = ICON_ROOT / "wealthsimple.png"
+        crop_td = False
+    elif "canada life" in normalized:
+        path = ICON_ROOT / "canada-life.png"
+        crop_td = False
     else:
         return awesome_icon("fa6s.building-columns", color="#b2b8c1")
 
@@ -253,6 +264,22 @@ QLabel#dialogSubtitle {{
     color: {COLORS['text_muted']};
     font-size: 13px;
 }}
+QLabel#investmentDialogSectionTitle {{
+    color: {COLORS['text']};
+    font-size: 14px;
+    font-weight: 700;
+}}
+QLabel#investmentDialogSectionSubtitle {{
+    color: {COLORS['text_muted']};
+    font-size: 11px;
+}}
+QLabel#workRrspInfoNote {{
+    color: #9db8e8;
+    background: #14213a;
+    border: 1px solid #294d87;
+    border-radius: 8px;
+    font-size: 11px;
+}}
 QLabel#sectionTitle {{
     color: {COLORS['text']};
     font-size: 15px;
@@ -321,7 +348,7 @@ QPushButton#tableIconButton:hover {{
     background: {COLORS['surface_hover']};
     border-color: {COLORS['border']};
 }}
-QLineEdit, QComboBox, QSpinBox, QDateEdit {{
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit {{
     color: #e5e7ea;
     background: #15191e;
     border: 1px solid {COLORS['border']};
@@ -330,7 +357,8 @@ QLineEdit, QComboBox, QSpinBox, QDateEdit {{
     padding: 8px 12px;
     selection-background-color: {COLORS['primary']};
 }}
-QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDateEdit:focus {{
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus,
+QDoubleSpinBox:focus, QDateEdit:focus {{
     border-color: #398cff;
 }}
 QComboBox {{ padding-right: 30px; }}
@@ -383,6 +411,20 @@ QFrame#recentInvestmentEntry {{
     background: {COLORS['surface_alt']};
     border: 1px solid {COLORS['border_soft']};
     border-radius: 9px;
+}}
+QFrame#investmentDialogSection {{
+    background: #11161c;
+    border: 1px solid {COLORS['border']};
+    border-radius: 11px;
+}}
+QFrame#workRrspToggleCard {{
+    background: #131920;
+    border: 1px solid {COLORS['border']};
+    border-radius: 9px;
+}}
+QFrame#workRrspToggleCard[selected="true"] {{
+    background: #14203a;
+    border-color: #397df1;
 }}
 QTableWidget#genericTable, QTableWidget#rulesTable {{
     color: #dfe2e6;
