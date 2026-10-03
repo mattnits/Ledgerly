@@ -19,6 +19,7 @@ from database.models import (
     SavingsSnapshot,
     Transaction,
 )
+from database.profiles import visible_owner_scope
 from utils.constants import TransactionType
 
 
@@ -278,7 +279,7 @@ def savings_goal_progress(
         )
         actual = sum(session.scalars(
             select(SavingsSnapshot.amount_saved_this_month).where(
-                _owner_scope(SavingsSnapshot, user_id, group_id),
+                visible_owner_scope(SavingsSnapshot, user_id, group_id),
                 SavingsSnapshot.snapshot_date >= start,
                 SavingsSnapshot.snapshot_date < end,
             )

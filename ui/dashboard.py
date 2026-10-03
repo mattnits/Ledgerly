@@ -30,6 +30,7 @@ class DashboardPage(QWidget):
         super().__init__()
         self.session_factory = session_factory
         self.user_id: str | None = None
+        self.group_id: int | None = None
         self.setObjectName("dashboardPage")
 
         layout = QVBoxLayout(self)
@@ -38,6 +39,7 @@ class DashboardPage(QWidget):
 
         self.files_to_parse = []
         add_files_button = QPushButton(ADD_STATMENT_LABEL)
+        self.add_files_button = add_files_button
         add_files_button.setObjectName("primaryButton")
         set_button_icon(
             add_files_button,
@@ -108,13 +110,30 @@ class DashboardPage(QWidget):
         return self.period_selector.selected_month
 
     def set_user_id(self, user_id: str | None) -> None:
+        self.set_profile(user_id=user_id)
+
+    def set_profile(
+        self,
+        *,
+        user_id: str | None = None,
+        group_id: int | None = None,
+    ) -> None:
         self.user_id = user_id
+        self.group_id = group_id
+        self.add_files_button.setEnabled(user_id is not None)
+        self.add_files_button.setToolTip(
+            "" if user_id is not None else "Switch to a user to import statements"
+        )
         self.period_selector.reset(emit=False)
         self.reload()
 
     def reload(self) -> None:
         self.period_selector.set_available_months(
-            get_transaction_months(self.user_id, self.session_factory)
+            get_transaction_months(
+                self.user_id,
+                self.session_factory,
+                group_id=self.group_id,
+            )
         )
         self._load_dashboard_data()
 
@@ -131,6 +150,7 @@ class DashboardPage(QWidget):
             self.period_filter,
             self.selected_month,
             self.session_factory,
+            group_id=self.group_id,
         )
         self.income_card.set_data(
             data.period_label,
@@ -182,6 +202,8 @@ class DashboardPage(QWidget):
         )
 
     def open_file_selection(self):
+        if self.user_id is None:
+            return
         dialog = FileUploadDialog(self.window())
         dialog.submitted.connect(lambda: self._parse_selected_files(dialog))
         dialog.exec()
@@ -200,7 +222,7 @@ class DashboardPage(QWidget):
 
         parser = GenericParser(
             file_data,
-            self.window().sidebar.current_user_id,
+            self.user_id,
             start_date=start_date,
             end_date=end_date,
         )

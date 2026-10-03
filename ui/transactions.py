@@ -12,6 +12,7 @@ class TransactionsPage(QWidget):
     def __init__(self):
         super().__init__()
         self.user_id: str | None = None
+        self.group_id: int | None = None
         self.setObjectName("transactionsPage")
 
         layout = QVBoxLayout(self)
@@ -19,6 +20,7 @@ class TransactionsPage(QWidget):
         layout.setSpacing(18)
 
         add_files_button = QPushButton(ADD_STATMENT_LABEL)
+        self.add_files_button = add_files_button
         add_files_button.setObjectName("primaryButton")
         set_button_icon(
             add_files_button,
@@ -28,6 +30,7 @@ class TransactionsPage(QWidget):
         )
         add_files_button.clicked.connect(self._open_file_selection)
         rules_button = QPushButton("Classification Rules")
+        self.rules_button = rules_button
         rules_button.setObjectName("secondaryActionButton")
         set_button_icon(rules_button, "fa6s.gear", color="#b9bec5")
         rules_button.clicked.connect(self._open_classification_rules)
@@ -56,8 +59,25 @@ class TransactionsPage(QWidget):
         self.header.set_subtitle(f"{count:,} {noun}")
 
     def set_user_id(self, user_id: str | None) -> None:
+        self.set_profile(user_id=user_id)
+
+    def set_profile(
+        self,
+        *,
+        user_id: str | None = None,
+        group_id: int | None = None,
+    ) -> None:
         self.user_id = user_id
-        self.statements_table.set_user_id(user_id)
+        self.group_id = group_id
+        self.statements_table.set_profile(user_id=user_id, group_id=group_id)
+        self.rules_button.setEnabled(user_id is not None)
+        self.rules_button.setToolTip(
+            "" if user_id is not None else "Classification rules are personal settings"
+        )
+        self.add_files_button.setEnabled(user_id is not None)
+        self.add_files_button.setToolTip(
+            "" if user_id is not None else "Switch to a user to import statements"
+        )
 
     def reload(self) -> None:
         self.statements_table.reload()

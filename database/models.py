@@ -107,6 +107,13 @@ class Group(Base):
         nullable=False,
     )
 
+    color: Mapped[str] = mapped_column(
+        String(7),
+        nullable=False,
+        default="#3397f5",
+        server_default="#3397f5",
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.now,

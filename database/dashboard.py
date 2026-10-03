@@ -29,6 +29,12 @@ from database.models import (
     SavingsSnapshot,
     Transaction,
 )
+from database.profiles import (
+    direct_owner_scope,
+    validate_owner,
+    visible_account_scope,
+    visible_owner_scope,
+)
 from utils.constants import TransactionType
 
 
@@ -215,6 +221,8 @@ def get_dashboard_data(
     period: str,
     selected_month: tuple[int, int],
     session_factory=SessionLocal,
+    *,
+    group_id: int | None = None,
 ) -> DashboardData:
     if period not in ("monthly", "all"):
         raise ValueError(f"Unsupported dashboard period: {period}")
@@ -223,13 +231,16 @@ def get_dashboard_data(
     account_rows: list[tuple[int, str]] = []
     investment_rows: list[_InvestmentData] = []
     savings_goal_rows: list[tuple[int, int, Decimal]] = []
-    savings_rows: list[tuple[date, Decimal, Decimal | None]] = []
+    savings_rows: list[
+        tuple[date, Decimal, Decimal | None, str | None, int | None]
+    ] = []
     budget_rows: list[tuple[int, str, int, int, Decimal]] = []
-    if user_id is not None:
+    if user_id is not None or group_id is not None:
+        validate_owner(user_id, group_id)
         with session_factory() as session:
             account_rows = list(session.execute(
                 select(Account.id, Account.name)
-                .where(Account.user_id == user_id)
+                .where(visible_account_scope(user_id, group_id))
                 .order_by(Account.id)
             ).all())
             rows = session.execute(
@@ -247,7 +258,7 @@ def get_dashboard_data(
                 .join(Account, Transaction.account_id == Account.id)
                 .outerjoin(Category, Transaction.category_id == Category.id)
                 .where(
-                    Account.user_id == user_id,
+                    visible_account_scope(user_id, group_id),
                     Transaction.is_deleted.is_(False),
                 )
                 .order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
@@ -265,7 +276,7 @@ def get_dashboard_data(
                     )
                     .join(InvestmentAccount)
                     .where(
-                        InvestmentAccount.user_id == user_id,
+                        visible_owner_scope(InvestmentAccount, user_id, group_id),
                         InvestmentAccount.is_active.is_(True),
                     )
                 ).all()
@@ -275,15 +286,17 @@ def get_dashboard_data(
                     SavingsGoal.year,
                     SavingsGoal.month,
                     SavingsGoal.target_amount,
-                ).where(SavingsGoal.user_id == user_id)
+                ).where(direct_owner_scope(SavingsGoal, user_id, group_id))
             ).all())
             savings_rows = list(session.execute(
                 select(
                     SavingsSnapshot.snapshot_date,
                     SavingsSnapshot.amount_saved_this_month,
                     SavingsSnapshot.total_savings_balance,
+                    SavingsSnapshot.user_id,
+                    SavingsSnapshot.group_id,
                 )
-                .where(SavingsSnapshot.user_id == user_id)
+                .where(visible_owner_scope(SavingsSnapshot, user_id, group_id))
                 .order_by(SavingsSnapshot.snapshot_date)
             ).all())
             budget_rows = list(session.execute(
@@ -295,7 +308,7 @@ def get_dashboard_data(
                     MonthlyCategoryBudget.target_amount,
                 )
                 .join(Category, MonthlyCategoryBudget.category_id == Category.id)
-                .where(MonthlyCategoryBudget.user_id == user_id)
+                .where(direct_owner_scope(MonthlyCategoryBudget, user_id, group_id))
                 .order_by(Category.name)
             ).all())
 
@@ -483,7 +496,20 @@ def get_dashboard_data(
         (row[1] for row in selected_savings_rows), Decimal()
     )
     balance_rows = [row for row in selected_savings_rows if row[2] is not None]
-    savings_balance = balance_rows[-1][2] if balance_rows else None
+    if group_id is None:
+        savings_balance = balance_rows[-1][2] if balance_rows else None
+    else:
+        latest_by_owner = {}
+        for row in balance_rows:
+            owner = (row[3], row[4])
+            previous = latest_by_owner.get(owner)
+            if previous is None or row[0] >= previous[0]:
+                latest_by_owner[owner] = (row[0], row[2])
+        savings_balance = (
+            sum((value for _, value in latest_by_owner.values()), Decimal())
+            if latest_by_owner
+            else None
+        )
 
     cutoff_date = (
         date(
@@ -512,18 +538,20 @@ def get_dashboard_data(
         (item.contribution_amount or Decimal() for item in selected_investments),
         Decimal(),
     )
-    if user_id is None:
+    if user_id is None and group_id is None:
         work_rrsp_employee = employer_rrsp_match = Decimal()
     else:
         contribution_summary = (
             get_monthly_contribution_summary(
                 *selected_month,
                 user_id=user_id,
+                group_id=group_id,
                 session_factory=session_factory,
             )
             if period == "monthly"
             else get_total_contribution_summary(
                 user_id=user_id,
+                group_id=group_id,
                 session_factory=session_factory,
             )
         )

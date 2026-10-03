@@ -4,10 +4,10 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtTest import QSignalSpy
-from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QSizePolicy
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -121,6 +121,49 @@ class AddUserDialogTest(unittest.TestCase):
             sum(bool(swatch.property("selected")) for swatch in dialog.color_swatches),
             1,
         )
+
+    def test_group_layout_resizes_without_overlap_and_members_scroll(self):
+        with self.sessions.begin() as session:
+            session.add_all(
+                User(
+                    name=f"Member {index:02d}",
+                    color="#3397f5",
+                )
+                for index in range(14)
+            )
+
+        dialog = AddUserDialog(session_factory=self.sessions)
+        dialog.group_button.click()
+        dialog.show()
+        self.app.processEvents()
+
+        self.assertGreaterEqual(dialog.height(), dialog.MINIMUM_HEIGHT)
+        self.assertTrue(dialog.group_button.isChecked())
+        self.assertFalse(dialog.user_button.isChecked())
+        self.assertEqual(
+            dialog.members_scroll.sizePolicy().verticalPolicy(),
+            QSizePolicy.Policy.Expanding,
+        )
+        self.assertGreater(dialog.members_scroll.verticalScrollBar().maximum(), 0)
+
+        dialog.resize(dialog.minimumSize())
+        self.app.processEvents()
+        content_bottom = (
+            dialog.content_scroll.mapTo(dialog.card, QPoint(0, 0)).y()
+            + dialog.content_scroll.height()
+        )
+        footer_top = dialog.footer.mapTo(dialog.card, QPoint(0, 0)).y()
+        self.assertLessEqual(content_bottom, footer_top)
+
+        compact_list_height = dialog.members_scroll.height()
+        dialog.resize(
+            dialog.width(),
+            min(dialog.maximumHeight(), dialog.minimumHeight() + 100),
+        )
+        self.app.processEvents()
+        self.assertGreaterEqual(dialog.members_scroll.height(), compact_list_height)
+        self.assertEqual(dialog.user_button.width(), dialog.group_button.width())
+        dialog.close()
 
 
 if __name__ == "__main__":

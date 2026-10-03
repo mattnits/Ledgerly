@@ -93,6 +93,7 @@ def avatar_icon(name: str, color: str, size: int = 36) -> QIcon:
 class Sidebar(QFrame):
     page_changed = Signal(str)
     user_changed = Signal(str)
+    profile_changed = Signal(str)
     create_user_clicked = Signal()
     switch_user_clicked = Signal()
     collapsed_changed = Signal(bool)
@@ -104,7 +105,9 @@ class Sidebar(QFrame):
         super().__init__()
         self.is_collapsed = False
         self.users: list[dict[str, str]] = []
+        self.profiles: list[dict] = []
         self.current_user_id: str | None = None
+        self.current_profile_key: str | None = None
         self.setObjectName("sidebar")
         self.setFixedWidth(self.EXPANDED_WIDTH)
 
@@ -166,11 +169,11 @@ class Sidebar(QFrame):
         self.user_bar_layout.addWidget(self.current_user_panel, 1)
 
         self.add_user_button = self._user_action_button(
-            "addUserButton", "Add user", "fa6s.user-plus"
+            "addUserButton", "Add user or group", "fa6s.user-plus"
         )
         self.add_user_button.clicked.connect(self.create_user_clicked.emit)
         self.switch_user_button = self._user_action_button(
-            "switchUserButton", "Switch user", "fa6s.right-left"
+            "switchUserButton", "Switch profile", "fa6s.right-left"
         )
         self.switch_user_button.clicked.connect(self.switch_user_clicked.emit)
         self.user_bar_layout.addWidget(self.add_user_button)
@@ -343,17 +346,53 @@ class Sidebar(QFrame):
         current_user_id: str | None = None,
     ):
         self.users = users
+        self.profiles = [
+            {
+                **user,
+                "key": str(user["id"]),
+                "type": "user",
+                "subtitle": "Personal",
+            }
+            for user in users
+        ]
         user_ids = {user["id"] for user in users}
         if current_user_id not in user_ids:
             current_user_id = users[0]["id"] if users else None
         self.current_user_id = current_user_id
+        self.current_profile_key = current_user_id
         self.refresh_user_display()
 
-    def refresh_user_display(self):
-        current_user = next(
-            (user for user in self.users if user["id"] == self.current_user_id),
+    def set_profiles(
+        self,
+        profiles: list[dict],
+        current_profile_key: str | None = None,
+    ) -> None:
+        self.profiles = profiles
+        self.users = [profile for profile in profiles if profile["type"] == "user"]
+        keys = {profile["key"] for profile in profiles}
+        if current_profile_key not in keys:
+            current_profile_key = profiles[0]["key"] if profiles else None
+        self.current_profile_key = current_profile_key
+        current = self.current_profile
+        self.current_user_id = (
+            str(current["id"])
+            if current is not None and current["type"] == "user"
+            else None
+        )
+        self.refresh_user_display()
+
+    @property
+    def current_profile(self) -> dict | None:
+        return next(
+            (
+                profile for profile in self.profiles
+                if profile["key"] == self.current_profile_key
+            ),
             None,
         )
+
+    def refresh_user_display(self):
+        current_user = self.current_profile
         self.user_bar.setVisible(current_user is not None)
         if current_user is None:
             self.current_user_name.setText("")
@@ -362,9 +401,12 @@ class Sidebar(QFrame):
         user_name = current_user["name"]
         icon = avatar_icon(user_name, current_user["color"], 34)
         self.current_user_avatar.setPixmap(icon.pixmap(34, 34))
-        self.current_user_avatar.setToolTip(f"Current user: {user_name}")
+        profile_label = "group" if current_user.get("type") == "group" else "user"
+        self.current_user_avatar.setToolTip(f"Current {profile_label}: {user_name}")
         self.current_user_name.setText(user_name)
-        self.current_user_name.setAccessibleName(f"Current user: {user_name}")
+        self.current_user_name.setAccessibleName(
+            f"Current {profile_label}: {user_name}"
+        )
 
     # Kept as a compatibility entry point; it now opens the modal switcher.
     def toggle_user_dropdown(self):
@@ -378,8 +420,25 @@ class Sidebar(QFrame):
         if user_id not in {user["id"] for user in self.users}:
             return
         self.current_user_id = user_id
+        self.current_profile_key = user_id
         self.refresh_user_display()
         self.user_changed.emit(user_id)
+
+    def select_profile(self, profile_key: str) -> None:
+        if profile_key == self.current_profile_key:
+            return
+        profile = next(
+            (item for item in self.profiles if item["key"] == profile_key),
+            None,
+        )
+        if profile is None:
+            return
+        self.current_profile_key = profile_key
+        self.current_user_id = (
+            str(profile["id"]) if profile["type"] == "user" else None
+        )
+        self.refresh_user_display()
+        self.profile_changed.emit(profile_key)
 
     def create_button(self, text: str, page_name: str, icon_name: str):
         button = QPushButton(text)

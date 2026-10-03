@@ -22,10 +22,13 @@ class UserChoiceRow(QFrame):
     """Keyboard- and pointer-accessible row in the user switcher."""
 
     activated = Signal(str)
+    edit_requested = Signal(int)
 
     def __init__(self, user: dict[str, str], selected: bool, parent=None):
         super().__init__(parent)
+        self.profile_type = user.get("type", "user")
         self.user_id = user["id"]
+        self.profile_key = user.get("key", str(user["id"]))
         self.setObjectName("userChoiceRow")
         self.setProperty("selected", selected)
         self.setAccessibleName(f"Switch to {user['name']}")
@@ -47,11 +50,29 @@ class UserChoiceRow(QFrame):
         text_layout.setSpacing(2)
         self.name_label = ElidedLabel(user["name"])
         self.name_label.setObjectName("userChoiceName")
-        subtitle = QLabel("Personal")
+        subtitle = QLabel(user.get("subtitle", "Personal"))
         subtitle.setObjectName("userChoiceSubtitle")
         text_layout.addWidget(self.name_label)
         text_layout.addWidget(subtitle)
         layout.addLayout(text_layout, 1)
+
+        if self.profile_type == "group":
+            edit_button = QToolButton()
+            edit_button.setObjectName("editGroupButton")
+            edit_button.setFixedSize(30, 30)
+            edit_button.setToolTip("Edit group")
+            edit_button.setAccessibleName(f"Edit {user['name']} group")
+            set_button_icon(
+                edit_button,
+                "fa6s.pen",
+                color=COLORS["text_muted"],
+                active_color=COLORS["text"],
+                size=13,
+            )
+            edit_button.clicked.connect(
+                lambda checked=False: self.edit_requested.emit(int(self.user_id))
+            )
+            layout.addWidget(edit_button)
 
         selected_icon = QLabel()
         selected_icon.setObjectName("selectedUserIcon")
@@ -66,12 +87,12 @@ class UserChoiceRow(QFrame):
         if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(
             event.position().toPoint()
         ):
-            self.activated.emit(self.user_id)
+            self.activated.emit(self.profile_key)
         super().mouseReleaseEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
-            self.activated.emit(self.user_id)
+            self.activated.emit(self.profile_key)
             event.accept()
             return
         super().keyPressEvent(event)
@@ -79,6 +100,8 @@ class UserChoiceRow(QFrame):
 
 class SwitchUserDialog(QDialog):
     user_selected = Signal(str)
+    profile_selected = Signal(str)
+    group_edit_requested = Signal(int)
 
     def __init__(
         self,
@@ -90,7 +113,7 @@ class SwitchUserDialog(QDialog):
         self.users = users
         self.current_user_id = current_user_id
         self.setObjectName("switchUserDialog")
-        self.setWindowTitle("Switch User")
+        self.setWindowTitle("Switch Profile")
         self.setModal(True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
@@ -114,11 +137,10 @@ class SwitchUserDialog(QDialog):
         header = QHBoxLayout()
         heading = QVBoxLayout()
         heading.setSpacing(5)
-        title = QLabel("Switch User")
+        title = QLabel("Switch Profile")
         title.setObjectName("switchUserTitle")
         subtitle = QLabel(
-            "Choose a user to switch to. Each user has separate transactions, "
-            "accounts and settings."
+            "Choose a personal profile or a group financial view."
         )
         subtitle.setObjectName("switchUserSubtitle")
         subtitle.setWordWrap(True)
@@ -154,8 +176,10 @@ class SwitchUserDialog(QDialog):
         self.rows_layout.setSpacing(6)
         self.user_rows: list[UserChoiceRow] = []
         for user in users:
-            row = UserChoiceRow(user, user["id"] == current_user_id)
+            current_key = user.get("key", str(user["id"]))
+            row = UserChoiceRow(user, current_key == current_user_id)
             row.activated.connect(self._select_user)
+            row.edit_requested.connect(self._edit_group)
             self.rows_layout.addWidget(row)
             self.user_rows.append(row)
         self.rows_layout.addStretch()
@@ -172,9 +196,22 @@ class SwitchUserDialog(QDialog):
         content_height = 168 + min(max(len(self.users), 1), 6) * 74
         return max(260, min(content_height, min(620, parent_height - 60)))
 
-    def _select_user(self, user_id: str) -> None:
-        self.user_selected.emit(user_id)
+    def _select_user(self, profile_key: str) -> None:
+        self.profile_selected.emit(profile_key)
+        selected = next(
+            (
+                profile for profile in self.users
+                if profile.get("key", str(profile["id"])) == profile_key
+            ),
+            None,
+        )
+        if selected is not None and selected.get("type", "user") == "user":
+            self.user_selected.emit(str(selected["id"]))
         self.accept()
+
+    def _edit_group(self, group_id: int) -> None:
+        self.group_edit_requested.emit(group_id)
+        self.reject()
 
     def showEvent(self, event) -> None:  # noqa: N802 - Qt API spelling
         super().showEvent(event)
@@ -209,6 +246,10 @@ class SwitchUserDialog(QDialog):
                 background: transparent; border: none; border-radius: 7px;
             }}
             QToolButton#switchUserClose:hover {{ background: #252c34; }}
+            QToolButton#editGroupButton {{
+                background: transparent; border: none; border-radius: 7px;
+            }}
+            QToolButton#editGroupButton:hover {{ background: #2b3540; }}
             QScrollArea#switchUserScroll, QWidget#switchUserRows {{
                 background: transparent; border: none;
             }}

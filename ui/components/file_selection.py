@@ -3,7 +3,6 @@ from datetime import date, timedelta
 from PySide6.QtCore import QDate, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QDateEdit,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -15,6 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.components.date_picker import DatePickerEdit
 from ui.components.file_row import FileRow
 from ui.theme import COLORS, set_button_icon, set_label_icon
 
@@ -183,15 +183,13 @@ class FileSelection(QWidget):
         date_layout.addWidget(self.limit_date_range)
 
         start_default, end_default = previous_month_bounds(date.today())
-        self.start_date = QDateEdit(QDate(
+        self.start_date = DatePickerEdit(QDate(
             start_default.year, start_default.month, start_default.day
         ))
-        self.end_date = QDateEdit(QDate(
+        self.end_date = DatePickerEdit(QDate(
             end_default.year, end_default.month, end_default.day
         ))
         for editor in (self.start_date, self.end_date):
-            editor.setCalendarPopup(True)
-            editor.setDisplayFormat("MMM d, yyyy")
             editor.setEnabled(False)
             editor.setFixedWidth(190)
 

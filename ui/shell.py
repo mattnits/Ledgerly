@@ -7,7 +7,8 @@ from PySide6.QtWidgets import (
     QStackedWidget,
 )
 
-from database.db import get_users
+from database.db import get_profiles
+from database.profiles import ProfileContext
 from ui.accounts import AccountsPage
 from ui.categories import CategoriesPage
 from ui.sidebar import Sidebar
@@ -39,6 +40,7 @@ class ShellWindow(QMainWindow):
         self.resize(1400, 850)
         self.setMinimumSize(1100, 700)
         self._active_user_dialog: QDialog | None = None
+        self._pending_group_edit: int | None = None
         self._startup_setup_complete = False
         self._startup_ready = False
 
@@ -142,6 +144,7 @@ class ShellWindow(QMainWindow):
         self.sidebar.user_changed.connect(
             self.handle_user_changed
         )
+        self.sidebar.profile_changed.connect(self.handle_profile_changed)
 
         self.welcome_page.add_user_clicked.connect(
             self.show_add_user
@@ -173,13 +176,15 @@ class ShellWindow(QMainWindow):
         self.startup_ready.emit()
 
     def load_users(self, current_user_id: str | None = None):
-        users = get_users()
-        self.sidebar.set_users(users, current_user_id)
-        self.dashboard_page.set_user_id(self.sidebar.current_user_id)
-        self.transactions_page.set_user_id(self.sidebar.current_user_id)
-        self.investments_page.set_user_id(self.sidebar.current_user_id)
+        current_key = f"user:{current_user_id}" if current_user_id else None
+        self.load_profiles(current_key)
 
-        if users:
+    def load_profiles(self, current_profile_key: str | None = None) -> None:
+        profiles = get_profiles()
+        self.sidebar.set_profiles(profiles, current_profile_key)
+        self._apply_profile(self.sidebar.current_profile_key)
+
+        if profiles:
             self.sidebar.show()
             self.pages.setCurrentWidget(self.dashboard_page)
         else:
@@ -193,15 +198,29 @@ class ShellWindow(QMainWindow):
     def show_add_user(self):
         dialog = AddUserDialog(self)
         dialog.user_created.connect(self.handle_user_created)
+        dialog.group_created.connect(self.handle_group_created)
         self._run_user_dialog(dialog)
 
     def show_switch_user(self):
         dialog = SwitchUserDialog(
-            self.sidebar.users,
-            self.sidebar.current_user_id,
+            self.sidebar.profiles,
+            self.sidebar.current_profile_key,
             self,
         )
-        dialog.user_selected.connect(self.sidebar.select_user)
+        dialog.profile_selected.connect(self.sidebar.select_profile)
+        dialog.group_edit_requested.connect(self._queue_group_edit)
+        self._run_user_dialog(dialog)
+        if self._pending_group_edit is not None:
+            group_id = self._pending_group_edit
+            self._pending_group_edit = None
+            self.show_edit_group(group_id)
+
+    def _queue_group_edit(self, group_id: int) -> None:
+        self._pending_group_edit = group_id
+
+    def show_edit_group(self, group_id: int) -> None:
+        dialog = AddUserDialog(self, group_id=group_id)
+        dialog.group_updated.connect(self.handle_group_updated)
         self._run_user_dialog(dialog)
 
     def _run_user_dialog(self, dialog: QDialog) -> None:
@@ -222,11 +241,31 @@ class ShellWindow(QMainWindow):
     def handle_user_created(self, user_id: str):
         self.load_users(user_id)
 
+    def handle_group_created(self, group_id: int) -> None:
+        self.load_profiles(f"group:{group_id}")
+
+    def handle_group_updated(self, group_id: int) -> None:
+        self.load_profiles(f"group:{group_id}")
+
     def handle_user_changed(self, user_id: str):
-        self.dashboard_page.set_user_id(user_id)
-        self.transactions_page.set_user_id(user_id)
-        self.investments_page.set_user_id(user_id)
+        # Compatibility path for older callers that still select raw users.
+        self._apply_profile(f"user:{user_id}")
         self.pages.setCurrentWidget(self.dashboard_page)
+
+    def handle_profile_changed(self, profile_key: str) -> None:
+        self._apply_profile(profile_key)
+        self.pages.setCurrentWidget(self.dashboard_page)
+
+    def _apply_profile(self, profile_key: str | None) -> None:
+        if profile_key is None:
+            user_id = group_id = None
+        else:
+            context = ProfileContext.from_key(profile_key)
+            user_id, group_id = context.user_id, context.group_id
+        self.dashboard_page.set_profile(user_id=user_id, group_id=group_id)
+        self.transactions_page.set_profile(user_id=user_id, group_id=group_id)
+        self.investments_page.set_profile(user_id=user_id, group_id=group_id)
+        self.accounts_page.set_profile(user_id=user_id, group_id=group_id)
 
     def handle_data_reset(self) -> None:
         self.dashboard_page.reload()

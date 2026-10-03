@@ -33,10 +33,28 @@ def init_db(db_engine=engine):
     from database import models
 
     Base.metadata.create_all(bind=db_engine)
+    _migrate_group_color(db_engine)
     _migrate_investment_account_number_last7(db_engine)
     _migrate_work_rrsp_fields(db_engine)
     _migrate_investment_snapshots(db_engine)
     _migrate_category_rule_account_scope(db_engine)
+
+
+def _migrate_group_color(db_engine) -> None:
+    """Add profile colours to existing groups without rebuilding any tables."""
+    inspector = inspect(db_engine)
+    if "groups" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("groups")}
+    if "color" in columns:
+        return
+    if db_engine.dialect.name != "sqlite":
+        raise RuntimeError("The group colour migration currently supports SQLite only.")
+    with db_engine.begin() as connection:
+        connection.execute(text(
+            "ALTER TABLE groups ADD COLUMN color VARCHAR(7) "
+            "NOT NULL DEFAULT '#3397f5'"
+        ))
 
 
 def _migrate_investment_account_number_last7(db_engine) -> None:
@@ -268,4 +286,41 @@ def get_users() -> list[dict[str, str]]:
                 "color": user.color,
             }
             for user in users
+        ]
+
+
+def get_profiles(session_factory=SessionLocal) -> list[dict]:
+    """Return switcher-ready user and group profiles with typed keys."""
+    from sqlalchemy import func
+    from database.models import Group, GroupMembership, User
+
+    with session_factory() as session:
+        users = session.scalars(select(User).order_by(User.created_at, User.id)).all()
+        groups = session.execute(
+            select(Group, func.count(GroupMembership.id))
+            .outerjoin(GroupMembership)
+            .group_by(Group.id)
+            .order_by(Group.created_at, Group.id)
+        ).all()
+        return [
+            {
+                "key": f"user:{user.id}",
+                "type": "user",
+                "id": user.id,
+                "name": user.name,
+                "color": user.color,
+                "subtitle": "Personal",
+            }
+            for user in users
+        ] + [
+            {
+                "key": f"group:{group.id}",
+                "type": "group",
+                "id": group.id,
+                "name": group.name,
+                "color": group.color,
+                "member_count": member_count,
+                "subtitle": f"Group • {member_count} member{'s' if member_count != 1 else ''}",
+            }
+            for group, member_count in groups
         ]

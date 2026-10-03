@@ -3,6 +3,7 @@ from sqlalchemy import select
 
 from database.db import SessionLocal
 from database.models import Account, Group, User
+from database.profiles import visible_account_scope
 from ui.components.generic_table import GenericTable
 from ui.components.page_header import PageHeader
 from ui.components.account_badge import AccountBadge
@@ -13,6 +14,8 @@ class AccountsPage(QWidget):
         super().__init__()
         self.setObjectName("accountsPage")
         self.session_factory = session_factory
+        self.user_id: str | None = None
+        self.group_id: int | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(28, 24, 28, 20)
@@ -35,6 +38,10 @@ class AccountsPage(QWidget):
         layout.addWidget(card, 1)
 
     def reload(self) -> None:
+        if self.user_id is None and self.group_id is None:
+            self.table.set_rows([])
+            self.empty_label.setVisible(True)
+            return
         with self.session_factory() as session:
             accounts = session.execute(
                 select(
@@ -48,6 +55,7 @@ class AccountsPage(QWidget):
                 )
                 .outerjoin(User, Account.user_id == User.id)
                 .outerjoin(Group, Account.group_id == Group.id)
+                .where(visible_account_scope(self.user_id, self.group_id))
                 .order_by(Account.name, Account.id)
             ).all()
 
@@ -71,3 +79,16 @@ class AccountsPage(QWidget):
 
         self.table.set_rows(rows)
         self.empty_label.setVisible(not rows)
+
+    def set_profile(
+        self,
+        *,
+        user_id: str | None = None,
+        group_id: int | None = None,
+    ) -> None:
+        self.user_id = user_id
+        self.group_id = group_id
+        self.reload()
+
+    def set_user_id(self, user_id: str | None) -> None:
+        self.set_profile(user_id=user_id)

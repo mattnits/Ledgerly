@@ -33,6 +33,7 @@ from database.transactions import (
     TransactionQueryParams,
     TransactionQueryResult,
     fetch_transactions,
+    get_visible_transaction,
     set_transaction_deleted,
 )
 from ui.components.generic_table import GenericTable
@@ -155,6 +156,7 @@ class StatementsTable(QWidget):
         self._request_contexts: dict[int, dict] = {}
         self._last_failed_context: dict | None = None
         self.user_id: str | None = None
+        self.group_id: int | None = None
         self.rows: list[TransactionRow] = []
         self.category_options: list[tuple[int, str, str]] = []
         self.total_count = 0
@@ -608,7 +610,16 @@ class StatementsTable(QWidget):
         self._apply_filters()
 
     def set_user_id(self, user_id: str | None) -> None:
+        self.set_profile(user_id=user_id)
+
+    def set_profile(
+        self,
+        *,
+        user_id: str | None = None,
+        group_id: int | None = None,
+    ) -> None:
         self.user_id = user_id
+        self.group_id = group_id
         today = date.today()
         self.selected_month = (today.year, today.month)
         self.period_filter = "monthly"
@@ -753,7 +764,7 @@ class StatementsTable(QWidget):
         previously_loaded = self.loaded_count if preserve_scroll else 0
         self.review_mode_label.setVisible(self.needs_review_filter)
         self._query_generation += 1
-        if self.user_id is None:
+        if self.user_id is None and self.group_id is None:
             self._set_loading(False)
             self.loading_overlay.hide_loading()
             self._update_filter_options((), (), frozenset())
@@ -773,7 +784,7 @@ class StatementsTable(QWidget):
     def _load_more(self) -> None:
         if (
             self._loading
-            or self.user_id is None
+            or (self.user_id is None and self.group_id is None)
             or self.loaded_count >= self.filtered_count
         ):
             return
@@ -786,6 +797,7 @@ class StatementsTable(QWidget):
     def _query_params(self, offset: int, limit: int) -> TransactionQueryParams:
         return TransactionQueryParams(
             user_id=self.user_id,
+            group_id=self.group_id,
             period_filter=self.period_filter,
             date_range_filter=self.date_range_filter,
             selected_month=self.selected_month,
@@ -938,7 +950,7 @@ class StatementsTable(QWidget):
 
     def _retry_failed_query(self) -> None:
         context = self._last_failed_context
-        if context is None or self.user_id is None:
+        if context is None or (self.user_id is None and self.group_id is None):
             return
         self._last_failed_context = None
         if context.get("kind") == "append":
@@ -1001,10 +1013,20 @@ class StatementsTable(QWidget):
         self.rows.extend(new_rows)
 
     def _request_rule(self, transaction_id: int) -> None:
+        if self.group_id is not None:
+            QMessageBox.information(
+                self,
+                "Personal Rules",
+                "Classification rules belong to individual users. Switch to the "
+                "account owner's personal profile to create a rule.",
+            )
+            return
         try:
             with self.session_factory() as session:
-                transaction = session.get(Transaction, transaction_id)
-                if transaction is None or transaction.account.user_id != self.user_id:
+                transaction = get_visible_transaction(
+                    session, transaction_id, user_id=self.user_id
+                )
+                if transaction is None:
                     raise ValueError("Transaction is no longer available")
                 prefill = rule_prefill_from_transaction(transaction)
         except Exception as exc:
@@ -1026,8 +1048,13 @@ class StatementsTable(QWidget):
             row._style_category()
         try:
             with self.session_factory.begin() as session:
-                transaction = session.get(Transaction, transaction_id)
-                if transaction is None or transaction.account.user_id != self.user_id:
+                transaction = get_visible_transaction(
+                    session,
+                    transaction_id,
+                    user_id=self.user_id,
+                    group_id=self.group_id,
+                )
+                if transaction is None:
                     raise ValueError("Transaction is no longer available")
                 if category_id is not None and session.get(Category, category_id) is None:
                     raise ValueError("Category is no longer available")
@@ -1046,7 +1073,11 @@ class StatementsTable(QWidget):
     def _set_deleted(self, transaction_id: int, deleted: bool) -> None:
         try:
             set_transaction_deleted(
-                transaction_id, self.user_id, deleted, self.session_factory
+                transaction_id,
+                self.user_id,
+                deleted,
+                self.session_factory,
+                group_id=self.group_id,
             )
         except Exception as exc:
             self.message.setText(f"Could not update transaction: {exc}")

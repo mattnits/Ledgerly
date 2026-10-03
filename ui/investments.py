@@ -46,6 +46,7 @@ from database.investments import (
     update_investment_account,
 )
 from ui.components.account_badge import AccountBadge
+from ui.components.date_picker import DatePickerEdit
 from ui.components.generic_dialog import GenericDialog
 from ui.components.generic_table import GenericTable
 from ui.components.page_header import PageHeader
@@ -430,9 +431,7 @@ class InvestmentAccountDialog(GenericDialog):
 
         self.initial_value = QLineEdit()
         self.initial_value.setPlaceholderText("$    e.g. 10,000.00")
-        self.initial_date = QDateEdit(_qdate(date.today()))
-        self.initial_date.setCalendarPopup(True)
-        self.initial_date.setDisplayFormat("MMM d, yyyy")
+        self.initial_date = DatePickerEdit(_qdate(date.today()))
         self.initial_section, initial_layout = section(
             "Initial Setup",
             "Set the initial value and date for this account (optional).",
@@ -722,6 +721,7 @@ class InvestmentsPage(QWidget):
         super().__init__()
         self.session_factory = session_factory
         self.user_id: str | None = None
+        self.group_id: int | None = None
         self._accounts: tuple[InvestmentAccountSummary, ...] = ()
         self.setObjectName("investmentsPage")
 
@@ -856,9 +856,7 @@ class InvestmentsPage(QWidget):
         )
         form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
         self.entry_account = QComboBox()
-        self.entry_date = QDateEdit(_qdate(date.today()))
-        self.entry_date.setCalendarPopup(True)
-        self.entry_date.setDisplayFormat("MMM d, yyyy")
+        self.entry_date = DatePickerEdit(_qdate(date.today()))
         self.entry_total = QLineEdit()
         self.entry_total.setPlaceholderText("0.00")
         self.entry_contribution = QLineEdit()
@@ -1055,26 +1053,41 @@ class InvestmentsPage(QWidget):
         return panel
 
     def set_user_id(self, user_id: str | None) -> None:
+        self.set_profile(user_id=user_id)
+
+    def set_profile(
+        self,
+        *,
+        user_id: str | None = None,
+        group_id: int | None = None,
+    ) -> None:
         self.user_id = user_id
+        self.group_id = group_id
         self.period_selector.reset(emit=False)
         self.reload()
 
     def reload(self) -> None:
-        if self.user_id is None:
+        if self.user_id is None and self.group_id is None:
             self.period_selector.set_available_months(())
             self._accounts = ()
             self._render_empty()
             return
 
         months = get_investment_months(
-            user_id=self.user_id, session_factory=self.session_factory
+            user_id=self.user_id,
+            group_id=self.group_id,
+            session_factory=self.session_factory,
         )
         self.period_selector.set_available_months(months)
         self._accounts = get_account_summaries(
-            user_id=self.user_id, session_factory=self.session_factory
+            user_id=self.user_id,
+            group_id=self.group_id,
+            session_factory=self.session_factory,
         )
         total_value = get_total_portfolio_value(
-            user_id=self.user_id, session_factory=self.session_factory
+            user_id=self.user_id,
+            group_id=self.group_id,
+            session_factory=self.session_factory,
         )
 
         selected_month = self.period_selector.selected_month
@@ -1085,6 +1098,7 @@ class InvestmentsPage(QWidget):
             comparison = get_monthly_contribution_comparison(
                 *selected_month,
                 user_id=self.user_id,
+                group_id=self.group_id,
                 session_factory=self.session_factory,
             )
             contributions = comparison.current
@@ -1093,7 +1107,9 @@ class InvestmentsPage(QWidget):
         else:
             self.contribution_card.set_title("All-Time Contributions")
             contributions = get_total_contributions(
-                user_id=self.user_id, session_factory=self.session_factory
+                user_id=self.user_id,
+                group_id=self.group_id,
+                session_factory=self.session_factory,
             )
             previous_contributions = None
             contribution_label = "All-time contributions"
@@ -1101,6 +1117,7 @@ class InvestmentsPage(QWidget):
         history_end = end_date if end_date is not None else date.today()
         history = get_portfolio_history(
             user_id=self.user_id,
+            group_id=self.group_id,
             end_date=history_end,
             session_factory=self.session_factory,
         )
@@ -1123,6 +1140,7 @@ class InvestmentsPage(QWidget):
         _, last_day = _month_dates(previous)
         points = get_portfolio_history(
             user_id=self.user_id,
+            group_id=self.group_id,
             end_date=last_day,
             session_factory=self.session_factory,
         )
@@ -1342,6 +1360,7 @@ class InvestmentsPage(QWidget):
         self._clear_layout(self.recent_layout)
         entries = get_recent_snapshots(
             user_id=self.user_id,
+            group_id=self.group_id,
             limit=50,
             start_date=start_date,
             end_date=end_date,
@@ -1405,7 +1424,7 @@ class InvestmentsPage(QWidget):
         self.save_entry_button.setEnabled(bool(self._accounts))
 
     def _open_add_account(self) -> None:
-        if self.user_id is None:
+        if self.user_id is None and self.group_id is None:
             return
         dialog = InvestmentAccountDialog(self.window())
 
@@ -1422,6 +1441,7 @@ class InvestmentsPage(QWidget):
                     initial_value=initial_value,
                     initial_date=_date_from_editor(dialog.initial_date),
                     user_id=self.user_id,
+                    group_id=self.group_id,
                     **dialog.work_settings(),
                     session_factory=self.session_factory,
                 )

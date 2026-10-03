@@ -87,10 +87,12 @@ def main():
         ensure_categories()
 
         set_splash_status(app, splash, "Loading your dashboard...")
+        from ui.input_behavior import install_wheel_change_guard
         from ui.shell import ShellWindow
         from ui.theme import apply_theme
 
         apply_theme(app)
+        install_wheel_change_guard(app)
         window = ShellWindow()
 
         revealed = False
