@@ -8,6 +8,7 @@ ACCOUNTS_LABEL = "Accounts"
 INVESTMENTS_LABEL = "Investments"
 CATEGORIES_LABEL = "Categories"
 SETTINGS_LABEL = "Settings"
+USER_MANAGEMENT_LABEL = "User Management"
 
 DASHBOARD_PAGE = "dashboard"
 TRANSACTIONS_PAGE = "transactions"
@@ -15,6 +16,7 @@ ACCOUNTS_PAGE = "accounts"
 INVESTMENTS_PAGE = "investments"
 CATEGORIES_PAGE = "categories"
 SETTINGS_PAGE = "settings"
+USER_MANAGEMENT_PAGE = "user_management"
 
 class SUPPORTED_PARSE_TYPES(StrEnum):
     TD_DEBIT = "TD Debit",

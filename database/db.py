@@ -33,11 +33,63 @@ def init_db(db_engine=engine):
     from database import models
 
     Base.metadata.create_all(bind=db_engine)
+    _migrate_user_permissions(db_engine)
+    _migrate_category_ownership(db_engine)
     _migrate_group_color(db_engine)
     _migrate_investment_account_number_last7(db_engine)
     _migrate_work_rrsp_fields(db_engine)
     _migrate_investment_snapshots(db_engine)
     _migrate_category_rule_account_scope(db_engine)
+
+
+def _migrate_user_permissions(db_engine) -> None:
+    """Add the Admin flag and deterministically seed one legacy Admin."""
+    inspector = inspect(db_engine)
+    if "users" not in inspector.get_table_names():
+        return
+    if db_engine.dialect.name != "sqlite":
+        raise RuntimeError("The user permissions migration currently supports SQLite only.")
+    columns = {column["name"] for column in inspector.get_columns("users")}
+    with db_engine.begin() as connection:
+        if "is_admin" not in columns:
+            connection.execute(text(
+                "ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0"
+            ))
+        admin_count = connection.scalar(text(
+            "SELECT COUNT(*) FROM users WHERE is_admin = 1"
+        ))
+        user_count = connection.scalar(text("SELECT COUNT(*) FROM users"))
+        if user_count and not admin_count:
+            first_id = connection.scalar(text(
+                "SELECT id FROM users ORDER BY created_at, id LIMIT 1"
+            ))
+            connection.execute(
+                text("UPDATE users SET is_admin = 1 WHERE id = :user_id"),
+                {"user_id": first_id},
+            )
+
+
+def _migrate_category_ownership(db_engine) -> None:
+    """Classify defaults as system categories without guessing legacy ownership."""
+    inspector = inspect(db_engine)
+    if "categories" not in inspector.get_table_names():
+        return
+    if db_engine.dialect.name != "sqlite":
+        raise RuntimeError("The category ownership migration currently supports SQLite only.")
+    columns = {column["name"] for column in inspector.get_columns("categories")}
+    with db_engine.begin() as connection:
+        if "created_by_user_id" not in columns:
+            connection.execute(text(
+                "ALTER TABLE categories ADD COLUMN created_by_user_id VARCHAR(36)"
+            ))
+        if "is_system" not in columns:
+            connection.execute(text(
+                "ALTER TABLE categories ADD COLUMN is_system BOOLEAN NOT NULL DEFAULT 0"
+            ))
+        connection.execute(text(
+            "UPDATE categories SET is_system = 1, created_by_user_id = NULL "
+            "WHERE is_default = 1"
+        ))
 
 
 def _migrate_group_color(db_engine) -> None:
@@ -258,8 +310,13 @@ def ensure_categories(db_engine=engine) -> None:
             if name in existing:
                 existing[name].color = color
                 existing[name].is_default = True
+                existing[name].is_system = True
+                existing[name].created_by_user_id = None
             else:
-                session.add(Category(name=name, color=color, is_default=True))
+                session.add(Category(
+                    name=name, color=color, is_default=True, is_system=True,
+                    created_by_user_id=None,
+                ))
 
 
 def user_exists() -> bool:
@@ -284,24 +341,37 @@ def get_users() -> list[dict[str, str]]:
                 "id": user.id,
                 "name": user.name,
                 "color": user.color,
+                "is_admin": user.is_admin,
             }
             for user in users
         ]
 
 
-def get_profiles(session_factory=SessionLocal) -> list[dict]:
+def get_profiles(
+    session_factory=SessionLocal,
+    current_user_id: str | None = None,
+) -> list[dict]:
     """Return switcher-ready user and group profiles with typed keys."""
     from sqlalchemy import func
     from database.models import Group, GroupMembership, User
 
     with session_factory() as session:
         users = session.scalars(select(User).order_by(User.created_at, User.id)).all()
-        groups = session.execute(
+        group_query = (
             select(Group, func.count(GroupMembership.id))
             .outerjoin(GroupMembership)
             .group_by(Group.id)
             .order_by(Group.created_at, Group.id)
-        ).all()
+        )
+        if current_user_id is not None:
+            current = session.get(User, current_user_id)
+            if current is not None and not current.is_admin:
+                group_query = group_query.where(Group.id.in_(
+                    select(GroupMembership.group_id).where(
+                        GroupMembership.user_id == current_user_id
+                    )
+                ))
+        groups = session.execute(group_query).all()
         return [
             {
                 "key": f"user:{user.id}",
@@ -310,6 +380,7 @@ def get_profiles(session_factory=SessionLocal) -> list[dict]:
                 "name": user.name,
                 "color": user.color,
                 "subtitle": "Personal",
+                "is_admin": user.is_admin,
             }
             for user in users
         ] + [

@@ -22,6 +22,7 @@ from ui.theme import set_button_icon, set_delete_button_icon
 class CategoriesPage(QWidget):
     def __init__(self):
         super().__init__()
+        self.current_user_id: str | None = None
         self.setObjectName("categoriesPage")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(28, 24, 28, 20)
@@ -43,6 +44,9 @@ class CategoriesPage(QWidget):
         card_layout.addWidget(self.table)
         layout.addWidget(card, 1)
         self.reload()
+
+    def set_current_user(self, user_id: str | None) -> None:
+        self.current_user_id = user_id
 
     def reload(self):
         rows = []
@@ -102,7 +106,9 @@ class CategoriesPage(QWidget):
 
         def submit():
             try:
-                add_category(name_input.text(), color.name())
+                add_category(
+                    name_input.text(), color.name(), self.current_user_id
+                )
             except ValueError as exc:
                 QMessageBox.warning(dialog, "Invalid Category", str(exc))
             except Exception as exc:

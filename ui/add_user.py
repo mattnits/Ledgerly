@@ -2,6 +2,7 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QBoxLayout,
     QCheckBox,
     QColorDialog,
     QDialog,
@@ -24,6 +25,7 @@ from PySide6.QtWidgets import (
 from database.db import SessionLocal
 from database.groups import create_group, get_group, update_group
 from database.models import User
+from database.user_management import create_user, update_group_as_admin, update_user
 from ui.sidebar import ElidedLabel, avatar_icon
 from ui.theme import COLORS, set_button_icon
 
@@ -81,6 +83,7 @@ class AddUserDialog(QDialog):
     """Responsive modal user-creation form shared by onboarding and the sidebar."""
 
     user_created = Signal(str)
+    user_updated = Signal(str)
     group_created = Signal(int)
     group_updated = Signal(int)
 
@@ -88,6 +91,10 @@ class AddUserDialog(QDialog):
     MINIMUM_HEIGHT = 620
     PREFERRED_MAX_WIDTH = 800
     PREFERRED_MAX_HEIGHT = 780
+    EDIT_USER_MINIMUM_HEIGHT = 500
+    EDIT_USER_PREFERRED_HEIGHT = 540
+    EDIT_USER_PREFERRED_WIDTH = 700
+    STACKED_CONTENT_WIDTH = 620
 
     def __init__(
         self,
@@ -95,10 +102,16 @@ class AddUserDialog(QDialog):
         session_factory=SessionLocal,
         *,
         group_id: int | None = None,
+        user_id: str | None = None,
+        actor_user_id: str | None = None,
     ):
         super().__init__(parent)
         self.session_factory = session_factory
         self.group_id = group_id
+        self.user_id = user_id
+        self.actor_user_id = actor_user_id
+        if group_id is not None and user_id is not None:
+            raise ValueError("Only one profile can be edited at a time")
         self.creation_type = "group" if group_id is not None else "user"
         self.selected_color = QColor(PROFILE_COLORS[0])
         self.setObjectName("addUserDialog")
@@ -199,12 +212,14 @@ class AddUserDialog(QDialog):
         )
         self.content_widget = QWidget()
         self.content_widget.setObjectName("addProfileContent")
-        content = QHBoxLayout(self.content_widget)
-        content.setContentsMargins(0, 0, 0, 0)
-        content.setSpacing(22)
-        content.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
-        form = QVBoxLayout()
-        form.setSpacing(0)
+        self.content_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        self.content_widget.setLayout(self.content_layout)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(22)
+        self.content_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        self.form_layout = QVBoxLayout()
+        self.form_layout.setSpacing(0)
+        self.form_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.name_label = QLabel("Name")
         self.name_label.setObjectName("addUserFieldLabel")
         self.name_input = QLineEdit()
@@ -215,14 +230,14 @@ class AddUserDialog(QDialog):
         self.name_input.setAccessibleName("Name")
         self.name_label.setBuddy(self.name_input)
         self.name_input.textChanged.connect(self.update_preview)
-        form.addWidget(self.name_label)
-        form.addSpacing(7)
-        form.addWidget(self.name_input)
-        form.addSpacing(20)
+        self.form_layout.addWidget(self.name_label)
+        self.form_layout.addSpacing(7)
+        self.form_layout.addWidget(self.name_input)
+        self.form_layout.addSpacing(20)
         self.color_label = QLabel("Profile Colour")
         self.color_label.setObjectName("addUserFieldLabel")
-        form.addWidget(self.color_label)
-        form.addSpacing(10)
+        self.form_layout.addWidget(self.color_label)
+        self.form_layout.addSpacing(10)
 
         palette = QGridLayout()
         palette.setContentsMargins(0, 0, 0, 0)
@@ -236,8 +251,8 @@ class AddUserDialog(QDialog):
             self.color_swatches.append(swatch)
         self.color_button = self.color_swatches[0]
         self.color_label.setBuddy(self.color_button)
-        form.addLayout(palette)
-        form.addSpacing(18)
+        self.form_layout.addLayout(palette)
+        self.form_layout.addSpacing(18)
 
         self.members_widget = QWidget()
         self.members_widget.setSizePolicy(
@@ -296,13 +311,15 @@ class AddUserDialog(QDialog):
         self.members_list_layout.addStretch()
         self.members_scroll.setWidget(self.members_list)
         members_layout.addWidget(self.members_scroll, 1)
-        form.addWidget(self.members_widget, 1)
-        content.addLayout(form, 2)
+        self.form_layout.addWidget(self.members_widget)
+        self.form_layout.addStretch()
+        self.content_layout.addLayout(self.form_layout, 2)
 
         self.preview_card = QFrame()
         self.preview_card.setObjectName("addUserPreviewCard")
         self.preview_card.setMinimumWidth(150)
         self.preview_card.setMaximumWidth(220)
+        self.preview_card.setMinimumHeight(270)
         self.preview_card.setSizePolicy(
             QSizePolicy.Policy.Preferred,
             QSizePolicy.Policy.Expanding,
@@ -335,7 +352,7 @@ class AddUserDialog(QDialog):
         self.preview_type.setMinimumHeight(30)
         preview_layout.addWidget(self.preview_type)
         preview_layout.addStretch()
-        content.addWidget(self.preview_card, 1)
+        self.content_layout.addWidget(self.preview_card, 1)
         self.content_scroll.setWidget(self.content_widget)
         layout.addWidget(self.content_scroll, 1)
         layout.addSpacing(20)
@@ -379,6 +396,10 @@ class AddUserDialog(QDialog):
         if self.group_id is not None:
             self.type_selector.hide()
             self._load_group()
+        elif self.user_id is not None:
+            self.type_selector.hide()
+            self._load_user()
+        self._apply_content_direction()
         self.name_input.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _load_users(self) -> list[dict[str, str]]:
@@ -401,6 +422,30 @@ class AddUserDialog(QDialog):
                 checkbox.setChecked(True)
         self.update_preview()
 
+    def _load_user(self) -> None:
+        with self.session_factory() as session:
+            user = session.get(User, self.user_id)
+            if user is None:
+                raise ValueError("User no longer exists")
+            self.name_input.setText(user.name)
+            self.selected_color = QColor(user.color)
+        editing_self = self.actor_user_id == self.user_id
+        self.title_label.setText("Edit Profile" if editing_self else "Edit User")
+        self.subtitle_label.setText(
+            "Update your name and profile colour."
+            if editing_self
+            else "Update this user's name and profile colour."
+        )
+        self.add_user_button.setText("Save User")
+        set_button_icon(
+            self.add_user_button,
+            "fa6s.check",
+            color="#ffffff",
+            active_color="#ffffff",
+            size=15,
+        )
+        self.update_preview()
+
     def set_creation_type(self, creation_type: str) -> None:
         if creation_type not in {"user", "group"}:
             raise ValueError("Unknown profile type")
@@ -409,7 +454,11 @@ class AddUserDialog(QDialog):
         self.user_button.setChecked(not is_group)
         self.group_button.setChecked(is_group)
         self.members_widget.setVisible(is_group)
-        self.title_label.setText("Edit Group" if self.group_id is not None else ("Add Group" if is_group else "Add User"))
+        self.title_label.setText(
+            "Edit Group" if self.group_id is not None
+            else "Edit User" if self.user_id is not None
+            else ("Add Group" if is_group else "Add User")
+        )
         self.subtitle_label.setText(
             "Combine multiple users into one shared financial view."
             if is_group
@@ -421,13 +470,31 @@ class AddUserDialog(QDialog):
             if is_group
             else "Enter a name (e.g. Alex)"
         )
-        button_text = "Save Group" if self.group_id is not None else ("Add Group" if is_group else "Add User")
+        button_text = (
+            "Save Group" if self.group_id is not None
+            else "Save User" if self.user_id is not None
+            else ("Add Group" if is_group else "Add User")
+        )
         self.add_user_button.setText(button_text)
+        set_button_icon(
+            self.add_user_button,
+            "fa6s.check" if self.user_id is not None or self.group_id is not None
+            else "fa6s.user-plus" if not is_group
+            else "fa6s.users",
+            color="#ffffff",
+            active_color="#ffffff",
+            size=15,
+        )
         self.preview_type.setText("Group • 0 members" if is_group else "Personal")
         self.update_preview()
 
     def _preferred_width(self) -> int:
         parent_width = self.parentWidget().width() if self.parentWidget() else 700
+        if self.user_id is not None:
+            return max(
+                self.MINIMUM_WIDTH,
+                min(self.EDIT_USER_PREFERRED_WIDTH, int(parent_width * 0.68)),
+            )
         return max(
             self.MINIMUM_WIDTH,
             min(self.PREFERRED_MAX_WIDTH, int(parent_width * 0.68)),
@@ -435,6 +502,11 @@ class AddUserDialog(QDialog):
 
     def _preferred_height(self) -> int:
         parent_height = self.parentWidget().height() if self.parentWidget() else 800
+        if self.user_id is not None:
+            return max(
+                self.EDIT_USER_MINIMUM_HEIGHT,
+                min(self.EDIT_USER_PREFERRED_HEIGHT, int(parent_height * 0.78)),
+            )
         return max(
             self.MINIMUM_HEIGHT,
             min(self.PREFERRED_MAX_HEIGHT, int(parent_height * 0.90)),
@@ -454,14 +526,32 @@ class AddUserDialog(QDialog):
             else self.PREFERRED_MAX_HEIGHT
         )
         self.setMaximumSize(maximum_width, maximum_height)
+        minimum_height = (
+            self.EDIT_USER_MINIMUM_HEIGHT
+            if self.user_id is not None
+            else self.MINIMUM_HEIGHT
+        )
         self.setMinimumSize(
             min(self.MINIMUM_WIDTH, maximum_width),
-            min(self.MINIMUM_HEIGHT, maximum_height),
+            min(minimum_height, maximum_height),
         )
         self.resize(
             min(self._preferred_width(), maximum_width),
             min(self._preferred_height(), maximum_height),
         )
+        self._apply_content_direction()
+
+    def _apply_content_direction(self) -> None:
+        if not hasattr(self, "content_layout"):
+            return
+        stacked = self.width() < self.STACKED_CONTENT_WIDTH
+        self.content_layout.setDirection(
+            QBoxLayout.Direction.TopToBottom
+            if stacked
+            else QBoxLayout.Direction.LeftToRight
+        )
+        self.preview_card.setMaximumWidth(16777215 if stacked else 220)
+        self.preview_card.setMaximumHeight(300 if stacked else 16777215)
 
     def select_color(self, color: str) -> None:
         selected = QColor(color)
@@ -487,7 +577,10 @@ class AddUserDialog(QDialog):
         fallback = "New group" if self.creation_type == "group" else "New user"
         name = self.name_input.text().strip() or fallback
         color = self.selected_color.name()
-        self.color_preview.setPixmap(avatar_icon(name, color, 76).pixmap(76, 76))
+        self.color_preview.setPixmap(avatar_icon(
+            name, color, 76, profile_type=self.creation_type
+        ).pixmap(76, 76))
+        self.color_preview.setProperty("profileType", self.creation_type)
         self.color_preview.setToolTip(color.upper())
         self.preview_name.setText(name)
         if self.creation_type == "group":
@@ -512,15 +605,22 @@ class AddUserDialog(QDialog):
 
         self.add_user_button.setEnabled(False)
         try:
-            with self.session_factory.begin() as session:
-                user = User(
-                    name=name,
-                    color=self.selected_color.name(),
-                    profile_code_hash=None,
+            if self.user_id is None:
+                user_id = create_user(
+                    name, self.selected_color.name(),
+                    session_factory=self.session_factory,
                 )
-                session.add(user)
-                session.flush()
-                user_id = user.id
+            else:
+                if self.actor_user_id is None:
+                    raise ValueError("The current user is required to edit a profile")
+                update_user(
+                    self.actor_user_id,
+                    self.user_id,
+                    name,
+                    self.selected_color.name(),
+                    session_factory=self.session_factory,
+                )
+                user_id = self.user_id
         except Exception as exc:
             self.add_user_button.setEnabled(True)
             QMessageBox.critical(
@@ -530,7 +630,10 @@ class AddUserDialog(QDialog):
 
         self.name_input.clear()
         self.accept()
-        self.user_created.emit(user_id)
+        if self.user_id is None:
+            self.user_created.emit(user_id)
+        else:
+            self.user_updated.emit(user_id)
 
     def selected_member_ids(self) -> tuple[str, ...]:
         return tuple(
@@ -557,13 +660,23 @@ class AddUserDialog(QDialog):
                 )
             else:
                 group_id = self.group_id
-                update_group(
-                    group_id,
-                    name,
-                    self.selected_color.name(),
-                    member_ids,
-                    session_factory=self.session_factory,
-                )
+                if self.actor_user_id is None:
+                    update_group(
+                        group_id,
+                        name,
+                        self.selected_color.name(),
+                        member_ids,
+                        session_factory=self.session_factory,
+                    )
+                else:
+                    update_group_as_admin(
+                        self.actor_user_id,
+                        group_id,
+                        name,
+                        self.selected_color.name(),
+                        member_ids,
+                        session_factory=self.session_factory,
+                    )
         except Exception as exc:
             self.add_user_button.setEnabled(True)
             QMessageBox.critical(self, "Error", f"Could not save group:\n{exc}")
@@ -578,6 +691,10 @@ class AddUserDialog(QDialog):
         self._fit_to_available_screen()
         super().showEvent(event)
         self._center_on_parent()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt API spelling
+        super().resizeEvent(event)
+        self._apply_content_direction()
 
     def _center_on_parent(self) -> None:
         parent = self.parentWidget()

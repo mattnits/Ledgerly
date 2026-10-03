@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QColor
 
 from ui.sidebar import ElidedLabel, avatar_icon
-from ui.theme import COLORS, set_button_icon
+from ui.theme import COLORS, awesome_icon, set_button_icon
 
 
 class UserChoiceRow(QFrame):
@@ -24,7 +24,14 @@ class UserChoiceRow(QFrame):
     activated = Signal(str)
     edit_requested = Signal(int)
 
-    def __init__(self, user: dict[str, str], selected: bool, parent=None):
+    def __init__(
+        self,
+        user: dict[str, str],
+        selected: bool,
+        parent=None,
+        *,
+        can_edit_group: bool = True,
+    ):
         super().__init__(parent)
         self.profile_type = user.get("type", "user")
         self.user_id = user["id"]
@@ -40,23 +47,38 @@ class UserChoiceRow(QFrame):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 10, 14, 10)
         layout.setSpacing(13)
-        avatar = QLabel()
-        avatar.setFixedSize(42, 42)
-        avatar.setPixmap(avatar_icon(user["name"], user["color"], 42).pixmap(42, 42))
-        layout.addWidget(avatar)
+        self.avatar = QLabel()
+        self.avatar.setFixedSize(42, 42)
+        self.avatar.setProperty("profileType", self.profile_type)
+        self.avatar.setPixmap(avatar_icon(
+            user["name"], user["color"], 42, profile_type=self.profile_type
+        ).pixmap(42, 42))
+        layout.addWidget(self.avatar)
 
         text_layout = QVBoxLayout()
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(2)
         self.name_label = ElidedLabel(user["name"])
         self.name_label.setObjectName("userChoiceName")
+        name_row = QHBoxLayout()
+        name_row.setContentsMargins(0, 0, 0, 0)
+        name_row.setSpacing(6)
+        name_row.addWidget(self.name_label, 1)
+        if user.get("is_admin"):
+            self.name_label.setAccessibleName(f"{user['name']}, Admin")
+            self.admin_star = QLabel()
+            self.admin_star.setPixmap(
+                awesome_icon("fa6s.star", color="#a7afb9").pixmap(12, 12)
+            )
+            self.admin_star.setToolTip("Admin")
+            name_row.addWidget(self.admin_star)
         subtitle = QLabel(user.get("subtitle", "Personal"))
         subtitle.setObjectName("userChoiceSubtitle")
-        text_layout.addWidget(self.name_label)
+        text_layout.addLayout(name_row)
         text_layout.addWidget(subtitle)
         layout.addLayout(text_layout, 1)
 
-        if self.profile_type == "group":
+        if self.profile_type == "group" and can_edit_group:
             edit_button = QToolButton()
             edit_button.setObjectName("editGroupButton")
             edit_button.setFixedSize(30, 30)
@@ -108,6 +130,8 @@ class SwitchUserDialog(QDialog):
         users: list[dict[str, str]],
         current_user_id: str | None,
         parent=None,
+        *,
+        can_manage_groups: bool = True,
     ):
         super().__init__(parent)
         self.users = users
@@ -175,13 +199,27 @@ class SwitchUserDialog(QDialog):
         self.rows_layout.setContentsMargins(0, 0, 0, 0)
         self.rows_layout.setSpacing(6)
         self.user_rows: list[UserChoiceRow] = []
-        for user in users:
-            current_key = user.get("key", str(user["id"]))
-            row = UserChoiceRow(user, current_key == current_user_id)
-            row.activated.connect(self._select_user)
-            row.edit_requested.connect(self._edit_group)
-            self.rows_layout.addWidget(row)
-            self.user_rows.append(row)
+        for profile_type, heading in (("user", "PEOPLE"), ("group", "GROUPS")):
+            section_profiles = [
+                profile for profile in users
+                if profile.get("type", "user") == profile_type
+            ]
+            if not section_profiles:
+                continue
+            section = QLabel(heading)
+            section.setObjectName("profileSectionLabel")
+            self.rows_layout.addWidget(section)
+            for user in section_profiles:
+                current_key = user.get("key", str(user["id"]))
+                row = UserChoiceRow(
+                    user,
+                    current_key == current_user_id,
+                    can_edit_group=can_manage_groups,
+                )
+                row.activated.connect(self._select_user)
+                row.edit_requested.connect(self._edit_group)
+                self.rows_layout.addWidget(row)
+                self.user_rows.append(row)
         self.rows_layout.addStretch()
         self.scroll.setWidget(self.rows_widget)
         layout.addWidget(self.scroll, 1)
@@ -269,6 +307,10 @@ class SwitchUserDialog(QDialog):
             }}
             QLabel#userChoiceSubtitle {{
                 color: {COLORS['text_muted']}; font-size: 12px;
+            }}
+            QLabel#profileSectionLabel {{
+                color: {COLORS['text_dim']}; font-size: 11px; font-weight: 700;
+                padding: 10px 4px 3px 4px;
             }}
             QScrollBar:vertical {{ width: 8px; background: transparent; }}
             QScrollBar::handle:vertical {{

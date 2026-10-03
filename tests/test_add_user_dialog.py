@@ -7,7 +7,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtTest import QSignalSpy
-from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QSizePolicy
+from PySide6.QtWidgets import (
+    QApplication,
+    QBoxLayout,
+    QDialog,
+    QMessageBox,
+    QSizePolicy,
+    QWidget,
+)
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -164,6 +171,41 @@ class AddUserDialogTest(unittest.TestCase):
         self.assertGreaterEqual(dialog.members_scroll.height(), compact_list_height)
         self.assertEqual(dialog.user_button.width(), dialog.group_button.width())
         dialog.close()
+
+    def test_edit_profile_dialog_is_compact_and_reflows_at_narrow_widths(self):
+        with self.sessions.begin() as session:
+            user = User(name="Matthew", color="#3397f5", is_admin=True)
+            session.add(user)
+            session.flush()
+            user_id = user.id
+        parent = QWidget()
+        parent.resize(1100, 760)
+        parent.show()
+        dialog = AddUserDialog(
+            parent,
+            session_factory=self.sessions,
+            user_id=user_id,
+            actor_user_id=user_id,
+        )
+        dialog.show()
+        self.app.processEvents()
+
+        self.assertEqual(dialog.title_label.text(), "Edit Profile")
+        self.assertLessEqual(dialog.width(), dialog.EDIT_USER_PREFERRED_WIDTH)
+        self.assertLessEqual(dialog.height(), dialog.EDIT_USER_PREFERRED_HEIGHT)
+        self.assertEqual(
+            dialog.content_layout.direction(),
+            QBoxLayout.Direction.LeftToRight,
+        )
+
+        dialog.resize(580, dialog.height())
+        self.app.processEvents()
+        self.assertEqual(
+            dialog.content_layout.direction(),
+            QBoxLayout.Direction.TopToBottom,
+        )
+        dialog.close()
+        parent.close()
 
 
 if __name__ == "__main__":

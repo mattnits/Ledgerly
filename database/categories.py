@@ -12,7 +12,7 @@ def list_categories() -> list[tuple[int, str, str, bool]]:
         return [(item.id, item.name, item.color, item.is_default) for item in categories]
 
 
-def add_category(name: str, color: str) -> None:
+def add_category(name: str, color: str, created_by_user_id: str | None = None) -> None:
     name = name.strip()
     if not name:
         raise ValueError("Enter a category name.")
@@ -27,7 +27,13 @@ def add_category(name: str, color: str) -> None:
         names = session.scalars(select(Category.name)).all()
         if any(existing.casefold() == name.casefold() for existing in names):
             raise ValueError("A category with that name already exists.")
-        session.add(Category(name=name, color=color, is_default=False))
+        session.add(Category(
+            name=name,
+            color=color,
+            is_default=False,
+            is_system=False,
+            created_by_user_id=created_by_user_id,
+        ))
 
 
 def delete_category(category_id: int) -> None:
