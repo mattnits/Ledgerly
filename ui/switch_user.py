@@ -15,17 +15,27 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QColor
 
 from ui.sidebar import ElidedLabel, avatar_icon
-from ui.theme import COLORS, set_button_icon
+from ui.theme import COLORS, awesome_icon, set_button_icon
 
 
 class UserChoiceRow(QFrame):
     """Keyboard- and pointer-accessible row in the user switcher."""
 
     activated = Signal(str)
+    edit_requested = Signal(int)
 
-    def __init__(self, user: dict[str, str], selected: bool, parent=None):
+    def __init__(
+        self,
+        user: dict[str, str],
+        selected: bool,
+        parent=None,
+        *,
+        can_edit_group: bool = True,
+    ):
         super().__init__(parent)
+        self.profile_type = user.get("type", "user")
         self.user_id = user["id"]
+        self.profile_key = user.get("key", str(user["id"]))
         self.setObjectName("userChoiceRow")
         self.setProperty("selected", selected)
         self.setAccessibleName(f"Switch to {user['name']}")
@@ -37,21 +47,54 @@ class UserChoiceRow(QFrame):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 10, 14, 10)
         layout.setSpacing(13)
-        avatar = QLabel()
-        avatar.setFixedSize(42, 42)
-        avatar.setPixmap(avatar_icon(user["name"], user["color"], 42).pixmap(42, 42))
-        layout.addWidget(avatar)
+        self.avatar = QLabel()
+        self.avatar.setFixedSize(42, 42)
+        self.avatar.setProperty("profileType", self.profile_type)
+        self.avatar.setPixmap(avatar_icon(
+            user["name"], user["color"], 42, profile_type=self.profile_type
+        ).pixmap(42, 42))
+        layout.addWidget(self.avatar)
 
         text_layout = QVBoxLayout()
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(2)
         self.name_label = ElidedLabel(user["name"])
         self.name_label.setObjectName("userChoiceName")
-        subtitle = QLabel("Personal")
+        name_row = QHBoxLayout()
+        name_row.setContentsMargins(0, 0, 0, 0)
+        name_row.setSpacing(6)
+        name_row.addWidget(self.name_label, 1)
+        if user.get("is_admin"):
+            self.name_label.setAccessibleName(f"{user['name']}, Admin")
+            self.admin_star = QLabel()
+            self.admin_star.setPixmap(
+                awesome_icon("fa6s.star", color="#a7afb9").pixmap(12, 12)
+            )
+            self.admin_star.setToolTip("Admin")
+            name_row.addWidget(self.admin_star)
+        subtitle = QLabel(user.get("subtitle", "Personal"))
         subtitle.setObjectName("userChoiceSubtitle")
-        text_layout.addWidget(self.name_label)
+        text_layout.addLayout(name_row)
         text_layout.addWidget(subtitle)
         layout.addLayout(text_layout, 1)
+
+        if self.profile_type == "group" and can_edit_group:
+            edit_button = QToolButton()
+            edit_button.setObjectName("editGroupButton")
+            edit_button.setFixedSize(30, 30)
+            edit_button.setToolTip("Edit group")
+            edit_button.setAccessibleName(f"Edit {user['name']} group")
+            set_button_icon(
+                edit_button,
+                "fa6s.pen",
+                color=COLORS["text_muted"],
+                active_color=COLORS["text"],
+                size=13,
+            )
+            edit_button.clicked.connect(
+                lambda checked=False: self.edit_requested.emit(int(self.user_id))
+            )
+            layout.addWidget(edit_button)
 
         selected_icon = QLabel()
         selected_icon.setObjectName("selectedUserIcon")
@@ -66,12 +109,12 @@ class UserChoiceRow(QFrame):
         if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(
             event.position().toPoint()
         ):
-            self.activated.emit(self.user_id)
+            self.activated.emit(self.profile_key)
         super().mouseReleaseEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
-            self.activated.emit(self.user_id)
+            self.activated.emit(self.profile_key)
             event.accept()
             return
         super().keyPressEvent(event)
@@ -79,18 +122,22 @@ class UserChoiceRow(QFrame):
 
 class SwitchUserDialog(QDialog):
     user_selected = Signal(str)
+    profile_selected = Signal(str)
+    group_edit_requested = Signal(int)
 
     def __init__(
         self,
         users: list[dict[str, str]],
         current_user_id: str | None,
         parent=None,
+        *,
+        can_manage_groups: bool = True,
     ):
         super().__init__(parent)
         self.users = users
         self.current_user_id = current_user_id
         self.setObjectName("switchUserDialog")
-        self.setWindowTitle("Switch User")
+        self.setWindowTitle("Switch Profile")
         self.setModal(True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
@@ -114,11 +161,10 @@ class SwitchUserDialog(QDialog):
         header = QHBoxLayout()
         heading = QVBoxLayout()
         heading.setSpacing(5)
-        title = QLabel("Switch User")
+        title = QLabel("Switch Profile")
         title.setObjectName("switchUserTitle")
         subtitle = QLabel(
-            "Choose a user to switch to. Each user has separate transactions, "
-            "accounts and settings."
+            "Choose a personal profile or a group financial view."
         )
         subtitle.setObjectName("switchUserSubtitle")
         subtitle.setWordWrap(True)
@@ -153,11 +199,27 @@ class SwitchUserDialog(QDialog):
         self.rows_layout.setContentsMargins(0, 0, 0, 0)
         self.rows_layout.setSpacing(6)
         self.user_rows: list[UserChoiceRow] = []
-        for user in users:
-            row = UserChoiceRow(user, user["id"] == current_user_id)
-            row.activated.connect(self._select_user)
-            self.rows_layout.addWidget(row)
-            self.user_rows.append(row)
+        for profile_type, heading in (("user", "PEOPLE"), ("group", "GROUPS")):
+            section_profiles = [
+                profile for profile in users
+                if profile.get("type", "user") == profile_type
+            ]
+            if not section_profiles:
+                continue
+            section = QLabel(heading)
+            section.setObjectName("profileSectionLabel")
+            self.rows_layout.addWidget(section)
+            for user in section_profiles:
+                current_key = user.get("key", str(user["id"]))
+                row = UserChoiceRow(
+                    user,
+                    current_key == current_user_id,
+                    can_edit_group=can_manage_groups,
+                )
+                row.activated.connect(self._select_user)
+                row.edit_requested.connect(self._edit_group)
+                self.rows_layout.addWidget(row)
+                self.user_rows.append(row)
         self.rows_layout.addStretch()
         self.scroll.setWidget(self.rows_widget)
         layout.addWidget(self.scroll, 1)
@@ -172,9 +234,22 @@ class SwitchUserDialog(QDialog):
         content_height = 168 + min(max(len(self.users), 1), 6) * 74
         return max(260, min(content_height, min(620, parent_height - 60)))
 
-    def _select_user(self, user_id: str) -> None:
-        self.user_selected.emit(user_id)
+    def _select_user(self, profile_key: str) -> None:
+        self.profile_selected.emit(profile_key)
+        selected = next(
+            (
+                profile for profile in self.users
+                if profile.get("key", str(profile["id"])) == profile_key
+            ),
+            None,
+        )
+        if selected is not None and selected.get("type", "user") == "user":
+            self.user_selected.emit(str(selected["id"]))
         self.accept()
+
+    def _edit_group(self, group_id: int) -> None:
+        self.group_edit_requested.emit(group_id)
+        self.reject()
 
     def showEvent(self, event) -> None:  # noqa: N802 - Qt API spelling
         super().showEvent(event)
@@ -209,6 +284,10 @@ class SwitchUserDialog(QDialog):
                 background: transparent; border: none; border-radius: 7px;
             }}
             QToolButton#switchUserClose:hover {{ background: #252c34; }}
+            QToolButton#editGroupButton {{
+                background: transparent; border: none; border-radius: 7px;
+            }}
+            QToolButton#editGroupButton:hover {{ background: #2b3540; }}
             QScrollArea#switchUserScroll, QWidget#switchUserRows {{
                 background: transparent; border: none;
             }}
@@ -228,6 +307,10 @@ class SwitchUserDialog(QDialog):
             }}
             QLabel#userChoiceSubtitle {{
                 color: {COLORS['text_muted']}; font-size: 12px;
+            }}
+            QLabel#profileSectionLabel {{
+                color: {COLORS['text_dim']}; font-size: 11px; font-weight: 700;
+                padding: 10px 4px 3px 4px;
             }}
             QScrollBar:vertical {{ width: 8px; background: transparent; }}
             QScrollBar::handle:vertical {{

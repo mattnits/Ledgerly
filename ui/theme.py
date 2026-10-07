@@ -237,7 +237,8 @@ QMainWindow, QWidget#appRoot, QStackedWidget#pageStack,
 QWidget#dashboardPage, QWidget#transactionsPage, QWidget#accountsPage,
 QWidget#investmentsPage, QWidget#investmentsContent,
 QWidget#categoriesPage, QWidget#settingsPage, QWidget#welcomePage,
-QWidget#addUserPage {{
+QWidget#addUserPage, QWidget#userManagementPage,
+QWidget#userManagementContent {{
     background: {COLORS['canvas']};
 }}
 QToolTip {{

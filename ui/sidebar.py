@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
@@ -25,6 +25,8 @@ from utils.constants import (
     SETTINGS_PAGE,
     TRANSACTIONS_LABEL,
     TRANSACTIONS_PAGE,
+    USER_MANAGEMENT_LABEL,
+    USER_MANAGEMENT_PAGE,
 )
 
 
@@ -44,6 +46,12 @@ class ElidedLabel(QLabel):
     def fullText(self) -> str:  # noqa: N802 - Qt API spelling
         return self._full_text
 
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt API spelling
+        """Keep layouts aware of the full label while still allowing elision."""
+        hint = super().sizeHint()
+        hint.setWidth(self.fontMetrics().horizontalAdvance(self._full_text))
+        return hint
+
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt API spelling
         super().resizeEvent(event)
         self._refresh_text()
@@ -62,8 +70,10 @@ class ElidedLabel(QLabel):
         self.setToolTip(self._full_text if clipped else "")
 
 
-def avatar_icon(name: str, color: str, size: int = 36) -> QIcon:
-    """Render a circular profile avatar using the user's first initial."""
+def avatar_icon(
+    name: str, color: str, size: int = 36, *, profile_type: str = "user"
+) -> QIcon:
+    """Render a circular user or rounded-square group profile avatar."""
     background = QColor(color)
     if not background.isValid():
         background = QColor("#398cff")
@@ -74,7 +84,11 @@ def avatar_icon(name: str, color: str, size: int = 36) -> QIcon:
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(background)
-    painter.drawEllipse(1, 1, size - 2, size - 2)
+    if profile_type == "group":
+        radius = max(5, int(size * 0.24))
+        painter.drawRoundedRect(1, 1, size - 2, size - 2, radius, radius)
+    else:
+        painter.drawEllipse(1, 1, size - 2, size - 2)
 
     font = painter.font()
     font.setPixelSize(max(13, int(size * 0.46)))
@@ -93,6 +107,7 @@ def avatar_icon(name: str, color: str, size: int = 36) -> QIcon:
 class Sidebar(QFrame):
     page_changed = Signal(str)
     user_changed = Signal(str)
+    profile_changed = Signal(str)
     create_user_clicked = Signal()
     switch_user_clicked = Signal()
     collapsed_changed = Signal(bool)
@@ -104,7 +119,9 @@ class Sidebar(QFrame):
         super().__init__()
         self.is_collapsed = False
         self.users: list[dict[str, str]] = []
+        self.profiles: list[dict] = []
         self.current_user_id: str | None = None
+        self.current_profile_key: str | None = None
         self.setObjectName("sidebar")
         self.setFixedWidth(self.EXPANDED_WIDTH)
 
@@ -146,7 +163,9 @@ class Sidebar(QFrame):
         self.user_bar = QFrame()
         self.user_bar.setObjectName("userBar")
         self.user_bar_layout = QHBoxLayout(self.user_bar)
-        self.user_bar_layout.setContentsMargins(6, 7, 6, 7)
+        # The larger top inset raises the divider while keeping the profile row
+        # visually centered between that divider and the bottom of the sidebar.
+        self.user_bar_layout.setContentsMargins(6, 24, 6, 7)
         self.user_bar_layout.setSpacing(6)
         self.current_user_panel = QWidget()
         self.current_user_panel.setObjectName("currentUserPanel")
@@ -156,26 +175,37 @@ class Sidebar(QFrame):
         self.current_user_avatar = QLabel()
         self.current_user_avatar.setObjectName("currentUserAvatar")
         self.current_user_avatar.setFixedSize(34, 34)
+        self.current_user_text = QWidget()
+        self.current_user_text.setObjectName("currentUserText")
+        self.current_user_text_layout = QVBoxLayout(self.current_user_text)
+        self.current_user_text_layout.setContentsMargins(0, 0, 0, 0)
+        self.current_user_text_layout.setSpacing(1)
         self.current_user_name = ElidedLabel()
         self.current_user_name.setObjectName("currentUserName")
         self.current_user_name.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
+        self.current_user_subtitle = ElidedLabel()
+        self.current_user_subtitle.setObjectName("currentUserSubtitle")
+        self.current_user_subtitle.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.current_user_text_layout.addWidget(self.current_user_name)
+        self.current_user_text_layout.addWidget(self.current_user_subtitle)
         self.current_user_layout.addWidget(self.current_user_avatar)
-        self.current_user_layout.addWidget(self.current_user_name, 1)
+        self.current_user_layout.addWidget(self.current_user_text, 1)
         self.user_bar_layout.addWidget(self.current_user_panel, 1)
 
         self.add_user_button = self._user_action_button(
-            "addUserButton", "Add user", "fa6s.user-plus"
+            "addUserButton", "Add user or group", "fa6s.user-plus"
         )
         self.add_user_button.clicked.connect(self.create_user_clicked.emit)
         self.switch_user_button = self._user_action_button(
-            "switchUserButton", "Switch user", "fa6s.right-left"
+            "switchUserButton", "Switch profile", "fa6s.right-left"
         )
         self.switch_user_button.clicked.connect(self.switch_user_clicked.emit)
         self.user_bar_layout.addWidget(self.add_user_button)
         self.user_bar_layout.addWidget(self.switch_user_button)
-        self.sidebar_layout.addWidget(self.user_bar)
 
         self.dashboard_button = self.create_button(
             DASHBOARD_LABEL, DASHBOARD_PAGE, "fa6s.house"
@@ -192,6 +222,9 @@ class Sidebar(QFrame):
         self.categories_button = self.create_button(
             CATEGORIES_LABEL, CATEGORIES_PAGE, "fa6s.tags"
         )
+        self.user_management_button = self.create_button(
+            USER_MANAGEMENT_LABEL, USER_MANAGEMENT_PAGE, "fa6s.users-gear"
+        )
         self.settings_button = self.create_button(
             SETTINGS_LABEL, SETTINGS_PAGE, "fa6s.gear"
         )
@@ -201,16 +234,24 @@ class Sidebar(QFrame):
             self.investments_button,
             self.accounts_button,
             self.categories_button,
+            self.user_management_button,
             self.settings_button,
         )
+        self.management_divider = QFrame()
+        self.management_divider.setObjectName("sidebarDivider")
+        self.management_divider.setFrameShape(QFrame.Shape.HLine)
+        self.management_divider.setFixedHeight(17)
         self.sidebar_layout.addSpacing(22)
         self.sidebar_layout.addWidget(self.dashboard_button)
         self.sidebar_layout.addWidget(self.transactions_button)
         self.sidebar_layout.addWidget(self.investments_button)
         self.sidebar_layout.addWidget(self.accounts_button)
         self.sidebar_layout.addWidget(self.categories_button)
-        self.sidebar_layout.addStretch()
+        self.sidebar_layout.addWidget(self.management_divider)
+        self.sidebar_layout.addWidget(self.user_management_button)
         self.sidebar_layout.addWidget(self.settings_button)
+        self.sidebar_layout.addStretch()
+        self.sidebar_layout.addWidget(self.user_bar)
 
         self.setStyleSheet("""
             QFrame#sidebar {
@@ -240,12 +281,22 @@ class Sidebar(QFrame):
             QFrame#userBar {
                 background-color: transparent;
                 border-top: 1px solid #2b3037;
-                border-bottom: 1px solid #2b3037;
             }
             QLabel#currentUserName {
                 color: #f2f4f7;
-                font-size: 14px;
+                font-size: 13px;
                 font-weight: 600;
+            }
+            QLabel#currentUserSubtitle {
+                color: #858f9c;
+                font-size: 10px;
+                font-weight: 400;
+            }
+            QFrame#sidebarDivider {
+                color: #2b3037;
+                background-color: transparent;
+                border: none;
+                border-top: 1px solid #2b3037;
             }
             QPushButton#navButton {
                 background-color: transparent;
@@ -323,11 +374,16 @@ class Sidebar(QFrame):
             label = button.property("sidebarLabel")
             button.setText("" if collapsed else label)
             button.setMaximumWidth(48 if collapsed else 16777215)
+        self.current_user_text.setVisible(not collapsed)
         self.current_user_name.setVisible(not collapsed)
+        self.current_user_subtitle.setVisible(not collapsed)
         self.add_user_button.setVisible(not collapsed)
         self.switch_user_button.setVisible(not collapsed)
         self.user_bar_layout.setContentsMargins(
-            7 if collapsed else 6, 7, 7 if collapsed else 6, 7
+            7 if collapsed else 6,
+            24,
+            7 if collapsed else 6,
+            7,
         )
         self.refresh_user_display()
         self.collapsed_changed.emit(collapsed)
@@ -343,28 +399,79 @@ class Sidebar(QFrame):
         current_user_id: str | None = None,
     ):
         self.users = users
+        self.profiles = [
+            {
+                **user,
+                "key": str(user["id"]),
+                "type": "user",
+                "subtitle": "Personal",
+            }
+            for user in users
+        ]
         user_ids = {user["id"] for user in users}
         if current_user_id not in user_ids:
             current_user_id = users[0]["id"] if users else None
         self.current_user_id = current_user_id
+        self.current_profile_key = current_user_id
         self.refresh_user_display()
 
-    def refresh_user_display(self):
-        current_user = next(
-            (user for user in self.users if user["id"] == self.current_user_id),
+    def set_profiles(
+        self,
+        profiles: list[dict],
+        current_profile_key: str | None = None,
+    ) -> None:
+        self.profiles = profiles
+        self.users = [profile for profile in profiles if profile["type"] == "user"]
+        keys = {profile["key"] for profile in profiles}
+        if current_profile_key not in keys:
+            current_profile_key = profiles[0]["key"] if profiles else None
+        self.current_profile_key = current_profile_key
+        current = self.current_profile
+        self.current_user_id = (
+            str(current["id"])
+            if current is not None and current["type"] == "user"
+            else None
+        )
+        self.refresh_user_display()
+
+    @property
+    def current_profile(self) -> dict | None:
+        return next(
+            (
+                profile for profile in self.profiles
+                if profile["key"] == self.current_profile_key
+            ),
             None,
         )
+
+    def refresh_user_display(self):
+        current_user = self.current_profile
         self.user_bar.setVisible(current_user is not None)
         if current_user is None:
             self.current_user_name.setText("")
+            self.current_user_subtitle.setText("")
             self.current_user_avatar.clear()
             return
         user_name = current_user["name"]
-        icon = avatar_icon(user_name, current_user["color"], 34)
+        icon = avatar_icon(
+            user_name,
+            current_user["color"],
+            34,
+            profile_type=current_user.get("type", "user"),
+        )
+        self.current_user_avatar.setProperty(
+            "profileType", current_user.get("type", "user")
+        )
         self.current_user_avatar.setPixmap(icon.pixmap(34, 34))
-        self.current_user_avatar.setToolTip(f"Current user: {user_name}")
+        profile_label = "group" if current_user.get("type") == "group" else "user"
+        self.current_user_avatar.setToolTip(f"Current {profile_label}: {user_name}")
         self.current_user_name.setText(user_name)
-        self.current_user_name.setAccessibleName(f"Current user: {user_name}")
+        self.current_user_subtitle.setText(
+            str(current_user.get("subtitle") or "Personal")
+        )
+        self.current_user_name.setAccessibleName(
+            f"Current {profile_label}: {user_name}"
+        )
 
     # Kept as a compatibility entry point; it now opens the modal switcher.
     def toggle_user_dropdown(self):
@@ -378,13 +485,31 @@ class Sidebar(QFrame):
         if user_id not in {user["id"] for user in self.users}:
             return
         self.current_user_id = user_id
+        self.current_profile_key = user_id
         self.refresh_user_display()
         self.user_changed.emit(user_id)
+
+    def select_profile(self, profile_key: str) -> None:
+        if profile_key == self.current_profile_key:
+            return
+        profile = next(
+            (item for item in self.profiles if item["key"] == profile_key),
+            None,
+        )
+        if profile is None:
+            return
+        self.current_profile_key = profile_key
+        self.current_user_id = (
+            str(profile["id"]) if profile["type"] == "user" else None
+        )
+        self.refresh_user_display()
+        self.profile_changed.emit(profile_key)
 
     def create_button(self, text: str, page_name: str, icon_name: str):
         button = QPushButton(text)
         button.setObjectName("navButton")
         button.setProperty("sidebarLabel", text)
+        button.setProperty("sidebarPage", page_name)
         button.setToolTip(text)
         button.setAccessibleName(text)
         button.setCheckable(True)
@@ -398,9 +523,13 @@ class Sidebar(QFrame):
         button.clicked.connect(lambda: self.handle_navigation(button, page_name))
         return button
 
+    def set_current_page(self, page_name: str) -> None:
+        """Synchronize checked navigation state after programmatic page changes."""
+        for button in self.navigation_buttons:
+            button.setChecked(button.property("sidebarPage") == page_name)
+
     def handle_navigation(
         self, selected_button: QPushButton, page_name: str
     ):
-        for button in self.navigation_buttons:
-            button.setChecked(button is selected_button)
+        self.set_current_page(page_name)
         self.page_changed.emit(page_name)

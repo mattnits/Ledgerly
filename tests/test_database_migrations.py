@@ -21,6 +21,58 @@ from database.db import init_db
 
 
 class DatabaseMigrationTest(unittest.TestCase):
+    def test_permissions_and_category_ownership_migrate_without_guessing(self):
+        engine = create_engine("sqlite://")
+        metadata = MetaData()
+        users = Table(
+            "users", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("name", String(100), nullable=False),
+            Column("profile_code_hash", String(255)),
+            Column("color", String(7), nullable=False),
+            Column("created_at", DateTime, nullable=False),
+        )
+        categories = Table(
+            "categories", metadata,
+            Column("id", Integer, primary_key=True),
+            Column("name", String(100), nullable=False, unique=True),
+            Column("color", String(7), nullable=False),
+            Column("is_default", Boolean, nullable=False),
+        )
+        metadata.create_all(engine)
+        with engine.begin() as connection:
+            connection.execute(users.insert(), (
+                {"id": "later", "name": "Later", "color": "#111111",
+                 "created_at": datetime(2026, 2, 1)},
+                {"id": "first", "name": "First", "color": "#222222",
+                 "created_at": datetime(2026, 1, 1)},
+            ))
+            connection.execute(categories.insert(), (
+                {"id": 1, "name": "Default", "color": "#111111",
+                 "is_default": True},
+                {"id": 2, "name": "Legacy Custom", "color": "#222222",
+                 "is_default": False},
+            ))
+
+        init_db(engine)
+
+        migrated_users = Table("users", MetaData(), autoload_with=engine)
+        migrated_categories = Table("categories", MetaData(), autoload_with=engine)
+        with engine.connect() as connection:
+            user_rows = connection.execute(
+                select(migrated_users).order_by(migrated_users.c.created_at)
+            ).mappings().all()
+            category_rows = connection.execute(
+                select(migrated_categories).order_by(migrated_categories.c.id)
+            ).mappings().all()
+        self.assertTrue(user_rows[0]["is_admin"])
+        self.assertFalse(user_rows[1]["is_admin"])
+        self.assertTrue(category_rows[0]["is_system"])
+        self.assertIsNone(category_rows[0]["created_by_user_id"])
+        self.assertFalse(category_rows[1]["is_system"])
+        self.assertIsNone(category_rows[1]["created_by_user_id"])
+        engine.dispose()
+
     def test_work_rrsp_columns_are_added_with_safe_existing_account_defaults(self):
         engine = create_engine("sqlite://")
         metadata = MetaData()

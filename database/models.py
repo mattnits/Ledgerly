@@ -63,6 +63,13 @@ class User(Base):
         nullable=False,
     )
 
+    is_admin: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="0",
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.now,
@@ -105,6 +112,13 @@ class Group(Base):
     name: Mapped[str] = mapped_column(
         String(100),
         nullable=False,
+    )
+
+    color: Mapped[str] = mapped_column(
+        String(7),
+        nullable=False,
+        default="#3397f5",
+        server_default="#3397f5",
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -257,6 +271,12 @@ class Category(Base):
     )
     color: Mapped[str] = mapped_column(String(7), nullable=False, default="#64748b")
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_system: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    created_by_user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
 
     transactions: Mapped[list["Transaction"]] = relationship(
         back_populates="category",

@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 
 from database.db import SessionLocal
 from database.category_rules import needs_review_expression, normalize_description
-from database.models import Account, Category, Transaction
+from database.models import Account, Category, Group, Transaction, User
+from database.profiles import validate_owner, visible_account_scope
 from utils.constants import (
     CATEGORY_FREE_TRANSACTION_TYPES,
     ClassificationSource,
@@ -24,7 +25,7 @@ _UNCHANGED = object()
 class TransactionQueryParams:
     """Immutable snapshot of the Transactions page's query controls."""
 
-    user_id: str
+    user_id: str | None
     period_filter: str = "monthly"
     date_range_filter: str = "this_month"
     selected_month: tuple[int, int] = (date.today().year, date.today().month)
@@ -37,6 +38,7 @@ class TransactionQueryParams:
     sort_descending: bool = True
     offset: int = 0
     limit: int = 200
+    group_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -69,19 +71,41 @@ def fetch_transactions(
 ) -> TransactionQueryResult:
     """Fetch one page as detached plain data using a worker-owned session."""
 
+    validate_owner(params.user_id, params.group_id)
+    account_scope = visible_account_scope(params.user_id, params.group_id)
     with session_factory() as session:
-        accounts = tuple(session.execute(
-            select(Account.id, Account.name, Account.institution)
-            .where(Account.user_id == params.user_id)
+        account_rows = session.execute(
+            select(
+                Account.id,
+                Account.name,
+                Account.institution,
+                User.name,
+                Group.name,
+            )
+            .outerjoin(User, Account.user_id == User.id)
+            .outerjoin(Group, Account.group_id == Group.id)
+            .where(account_scope)
             .order_by(Account.name, Account.id)
-        ).all())
+        ).all()
+        accounts = tuple(
+            (
+                account_id,
+                (
+                    f"{name} — {user_name or group_name}"
+                    if params.group_id is not None and (user_name or group_name)
+                    else name
+                ),
+                institution,
+            )
+            for account_id, name, institution, user_name, group_name in account_rows
+        )
         categories = tuple(session.execute(
             select(Category.id, Category.name, Category.color).order_by(Category.name)
         ).all())
         month_values = session.scalars(
             select(func.strftime("%Y-%m", Transaction.transaction_date))
             .join(Account, Transaction.account_id == Account.id)
-            .where(Account.user_id == params.user_id)
+            .where(account_scope)
             .distinct()
         ).all()
         available_months = frozenset(
@@ -105,7 +129,7 @@ def fetch_transactions(
             )
             .join(Account, Transaction.account_id == Account.id)
             .outerjoin(Category, Transaction.category_id == Category.id)
-            .where(Account.user_id == params.user_id)
+            .where(account_scope)
             .where(Transaction.is_deleted.is_(params.category_filter == "deleted"))
         )
         if params.period_filter == "monthly":
@@ -198,15 +222,19 @@ def get_transaction_months(
     user_id: str | None,
     session_factory=SessionLocal,
     include_deleted: bool = False,
+    *,
+    group_id: int | None = None,
 ) -> set[tuple[int, int]]:
-    if user_id is None:
+    if user_id is None and group_id is None:
         return set()
+
+    validate_owner(user_id, group_id)
 
     with session_factory() as session:
         query = (
             select(func.strftime("%Y-%m", Transaction.transaction_date))
             .join(Account, Transaction.account_id == Account.id)
-            .where(Account.user_id == user_id)
+            .where(visible_account_scope(user_id, group_id))
             .distinct()
         )
         if not include_deleted:
@@ -222,16 +250,44 @@ def get_transaction_months(
 
 def set_transaction_deleted(
     transaction_id: int,
-    user_id: str,
+    user_id: str | None,
     deleted: bool,
     session_factory=SessionLocal,
+    *,
+    group_id: int | None = None,
 ) -> None:
+    validate_owner(user_id, group_id)
     with session_factory.begin() as session:
-        transaction = session.get(Transaction, transaction_id)
-        if transaction is None or transaction.account.user_id != user_id:
+        transaction = session.scalar(
+            select(Transaction)
+            .join(Account)
+            .where(
+                Transaction.id == transaction_id,
+                visible_account_scope(user_id, group_id),
+            )
+        )
+        if transaction is None:
             raise ValueError("Transaction is no longer available")
 
         transaction.is_deleted = deleted
+
+
+def get_visible_transaction(
+    session: Session,
+    transaction_id: int,
+    *,
+    user_id: str | None = None,
+    group_id: int | None = None,
+) -> Transaction | None:
+    validate_owner(user_id, group_id)
+    return session.scalar(
+        select(Transaction)
+        .join(Account)
+        .where(
+            Transaction.id == transaction_id,
+            visible_account_scope(user_id, group_id),
+        )
+    )
 
 
 def bulk_classify_transactions(
