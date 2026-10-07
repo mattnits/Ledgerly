@@ -5,13 +5,16 @@ from decimal import Decimal
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
+from PySide6.QtTest import QSignalSpy
 
 from database.dashboard import CategorySpending
 from ui.components.dashboard_cards import (
+    BudgetGoalsCard,
     CategoryCard,
     DonutChart,
     InvestingCard,
     MetricCard,
+    SavingsCard,
 )
 
 
@@ -29,6 +32,18 @@ class DashboardUiTest(unittest.TestCase):
         self.assertGreaterEqual(ring.top() - half_stroke, 0)
         self.assertLessEqual(ring.right() + half_stroke, width)
         self.assertLessEqual(ring.bottom() + half_stroke, height)
+
+    def test_savings_and_budget_cards_link_to_goals(self):
+        for card in (SavingsCard(), BudgetGoalsCard()):
+            spy = QSignalSpy(card.goals_requested)
+            card.open_goals_button.click()
+
+            self.assertEqual(spy.count(), 1)
+            self.assertEqual(
+                card.open_goals_button.accessibleName(),
+                "Open Goals",
+            )
+            card.close()
 
     def test_investment_change_shows_dollars_and_percentage(self):
         card = InvestingCard()

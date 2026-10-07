@@ -5,7 +5,7 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Iterable
 
-from sqlalchemy import Select, or_, select
+from sqlalchemy import Select, and_, or_, select
 
 from database.db import SessionLocal
 from database.models import (
@@ -249,14 +249,28 @@ def monthly_budget_progress(
             .join(Category, MonthlyCategoryBudget.category_id == Category.id)
             .where(
                 _owner_scope(MonthlyCategoryBudget, user_id, group_id),
-                MonthlyCategoryBudget.year == year,
-                MonthlyCategoryBudget.month == month,
+                or_(
+                    MonthlyCategoryBudget.year < year,
+                    and_(
+                        MonthlyCategoryBudget.year == year,
+                        MonthlyCategoryBudget.month <= month,
+                    ),
+                ),
             )
-            .order_by(Category.name)
+            .order_by(
+                MonthlyCategoryBudget.year.desc(),
+                MonthlyCategoryBudget.month.desc(),
+            )
         ).all()
+    effective: dict[int, tuple[str, Decimal]] = {}
+    for category_id, name, target in rows:
+        effective.setdefault(category_id, (name, target))
     return tuple(
         BudgetProgress(category_id, name, spending.get(category_id, Decimal()), target)
-        for category_id, name, target in rows
+        for category_id, (name, target) in sorted(
+            effective.items(), key=lambda item: item[1][0].casefold()
+        )
+        if target > 0
     )
 
 
@@ -271,11 +285,16 @@ def savings_goal_progress(
     start, end = _month_bounds(year, month)
     with session_factory() as session:
         target = session.scalar(
-            select(SavingsGoal.target_amount).where(
+            select(SavingsGoal.target_amount)
+            .where(
                 _owner_scope(SavingsGoal, user_id, group_id),
-                SavingsGoal.year == year,
-                SavingsGoal.month == month,
+                or_(
+                    SavingsGoal.year < year,
+                    and_(SavingsGoal.year == year, SavingsGoal.month <= month),
+                ),
             )
+            .order_by(SavingsGoal.year.desc(), SavingsGoal.month.desc())
+            .limit(1)
         )
         actual = sum(session.scalars(
             select(SavingsSnapshot.amount_saved_this_month).where(

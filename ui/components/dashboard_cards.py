@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from PySide6.QtCore import QPointF, QRectF, QTimer, Qt
+from PySide6.QtCore import QPointF, QRectF, QTimer, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -18,13 +18,14 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QScrollArea,
     QSizePolicy,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from database.dashboard import CategorySpending
 from database.finance_services import BudgetProgress
-from ui.theme import COLORS, set_label_icon
+from ui.theme import COLORS, set_button_icon, set_label_icon
 
 
 def format_currency(value: Decimal, *, cents: bool = False) -> str:
@@ -75,8 +76,8 @@ class DashboardCard(QFrame):
         self.layout.setContentsMargins(20, 18, 20, 18)
         self.layout.setSpacing(12)
 
-        header = QHBoxLayout()
-        header.setSpacing(10)
+        self.header_layout = QHBoxLayout()
+        self.header_layout.setSpacing(10)
         icon_container = QFrame()
         icon_container.setObjectName("dashboardIcon")
         icon_container.setFixedSize(36, 36)
@@ -90,7 +91,7 @@ class DashboardCard(QFrame):
             f" border: 1px solid {QColor(accent).darker(190).name()};"
             " border-radius: 10px; }"
         )
-        header.addWidget(icon_container)
+        self.header_layout.addWidget(icon_container)
 
         heading = QVBoxLayout()
         heading.setSpacing(1)
@@ -100,8 +101,8 @@ class DashboardCard(QFrame):
         self.subtitle_label.setObjectName("cardSubtitle")
         heading.addWidget(title_label)
         heading.addWidget(self.subtitle_label)
-        header.addLayout(heading, 1)
-        self.layout.addLayout(header)
+        self.header_layout.addLayout(heading, 1)
+        self.layout.addLayout(self.header_layout)
 
         self.setStyleSheet(f"""
             QFrame#dashboardCard {{
@@ -120,6 +121,34 @@ class DashboardCard(QFrame):
                 font-size: 11px;
             }}
         """)
+
+    def add_header_action(self, tooltip: str) -> QToolButton:
+        button = QToolButton()
+        button.setObjectName("dashboardHeaderAction")
+        button.setFixedSize(30, 30)
+        button.setToolTip(tooltip)
+        button.setAccessibleName(tooltip)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        set_button_icon(
+            button,
+            "fa6s.arrow-right",
+            color="#8fc5ff",
+            active_color="#ffffff",
+            size=13,
+        )
+        button.setStyleSheet("""
+            QToolButton#dashboardHeaderAction {
+                background: #172433;
+                border: 1px solid #315a82;
+                border-radius: 8px;
+            }
+            QToolButton#dashboardHeaderAction:hover {
+                background: #1e5f9f;
+                border-color: #4aa3ff;
+            }
+        """)
+        self.header_layout.addWidget(button, alignment=Qt.AlignmentFlag.AlignTop)
+        return button
 
 
 class SummaryRow(QWidget):
@@ -317,8 +346,12 @@ class MetricCard(DashboardCard):
 
 
 class SavingsCard(DashboardCard):
+    goals_requested = Signal()
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("Savings", "fa6s.piggy-bank", "#56c596", parent)
+        self.open_goals_button = self.add_header_action("Open Goals")
+        self.open_goals_button.clicked.connect(self.goals_requested.emit)
         self.goal_caption = QLabel("Monthly goal")
         self.goal_caption.setStyleSheet(
             f"color: {COLORS['text_muted']}; font-size: 11px;"
@@ -383,7 +416,7 @@ class SavingsCard(DashboardCard):
             "Work RRSP", format_currency(work_rrsp_employee)
         )
         self.actual_row.set_values(
-            "Personal savings total", format_currency(actual)
+            "Net savings toward goal", format_currency(actual)
         )
         match_text = format_currency(employer_match)
         if employer_match >= 0:
@@ -572,10 +605,14 @@ class CategoryCard(DashboardCard):
 
 
 class BudgetGoalsCard(DashboardCard):
+    goals_requested = Signal()
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(
             "Budget / Category Goals", "fa6s.bullseye", "#f2b84b", parent
         )
+        self.open_goals_button = self.add_header_action("Open Goals")
+        self.open_goals_button.clicked.connect(self.goals_requested.emit)
         self.summary_label = QLabel("No category goals set")
         self.summary_label.setStyleSheet(
             f"color: {COLORS['text_muted']}; font-size: 12px; font-weight: 650;"

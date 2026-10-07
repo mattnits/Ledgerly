@@ -1,8 +1,11 @@
 from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QFrame,
+    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -11,6 +14,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -28,7 +32,7 @@ from database.category_rules import (
 from database.db import SessionLocal
 from database.models import Account, Category
 from ui.components.generic_dialog import GenericDialog
-from ui.theme import brand_icon, set_button_icon, set_delete_button_icon
+from ui.theme import awesome_icon, brand_icon, set_button_icon, set_delete_button_icon
 from utils.constants import (
     CATEGORY_FREE_TRANSACTION_TYPES,
     INCOME_CATEGORY_NAMES,
@@ -62,10 +66,64 @@ class ClassificationRulesDialog(QDialog):
         self.setWindowTitle("Classification Rules")
         self.resize(1080, 560)
         self.setObjectName("classificationRulesDialog")
+        self.setModal(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 22, 24, 22)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(12, 12, 12, 12)
+        card = QFrame()
+        card.setObjectName("dialogCard")
+        outer.addWidget(card)
+        shadow = QGraphicsDropShadowEffect(card)
+        shadow.setBlurRadius(34)
+        shadow.setOffset(0, 8)
+        shadow.setColor(QColor(0, 0, 0, 165))
+        card.setGraphicsEffect(shadow)
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(28, 24, 28, 22)
         layout.setSpacing(16)
+
+        header = QHBoxLayout()
+        header.setSpacing(16)
+        icon_frame = QFrame()
+        icon_frame.setObjectName("dialogIconFrame")
+        icon_frame.setFixedSize(56, 56)
+        icon_layout = QVBoxLayout(icon_frame)
+        icon_layout.setContentsMargins(0, 0, 0, 0)
+        icon = QLabel()
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setPixmap(
+            awesome_icon("fa6s.wand-magic-sparkles", color="#56a9ff").pixmap(27, 27)
+        )
+        icon_layout.addWidget(icon)
+        header.addWidget(icon_frame, alignment=Qt.AlignmentFlag.AlignTop)
+        heading = QVBoxLayout()
+        heading.setSpacing(4)
+        title = QLabel("Classification Rules")
+        title.setObjectName("dialogTitle")
+        subtitle = QLabel("Automatically categorize transactions using reusable rules.")
+        subtitle.setObjectName("dialogSubtitle")
+        heading.addWidget(title)
+        heading.addWidget(subtitle)
+        header.addLayout(heading, 1)
+        header_close = QToolButton()
+        header_close.setObjectName("dialogCloseButton")
+        header_close.setFixedSize(34, 34)
+        header_close.setToolTip("Close")
+        header_close.setAccessibleName("Close classification rules")
+        set_button_icon(
+            header_close,
+            "fa6s.xmark",
+            color="#9eacc0",
+            active_color="#ffffff",
+            size=18,
+        )
+        header_close.clicked.connect(self.accept)
+        header.addWidget(header_close, alignment=Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(header)
+
         description = QLabel(
             "The highest-priority active matching rule assigns the transaction type "
             "and optional category. At the same priority, account-specific rules win "
@@ -75,6 +133,11 @@ class ClassificationRulesDialog(QDialog):
         )
         description.setObjectName("mutedLabel")
         description.setWordWrap(True)
+        description.setContentsMargins(14, 12, 14, 12)
+        description.setStyleSheet(
+            "background:#132238; border:1px solid #284d72; border-radius:10px; "
+            "color:#afc6e8;"
+        )
         layout.addWidget(description)
 
         self.table = QTableWidget(0, 7)
@@ -101,6 +164,7 @@ class ClassificationRulesDialog(QDialog):
         delete_button.setObjectName("dangerButton")
         delete_button.setToolTip("Delete selected categorization rule")
         close_button = QPushButton("Close")
+        close_button.setObjectName("dialogCancelButton")
         set_button_icon(
             add_button, "fa6s.plus", color="#ffffff", active_color="#ffffff"
         )
@@ -120,6 +184,21 @@ class ClassificationRulesDialog(QDialog):
         self.reload()
         if prefill is not None:
             QTimer.singleShot(0, lambda: self._open_editor(prefill=prefill))
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt API spelling
+        super().showEvent(event)
+        parent = self.parentWidget()
+        target = (
+            parent.window().frameGeometry()
+            if parent is not None
+            else self.screen().availableGeometry()
+        )
+        frame = self.frameGeometry()
+        frame.moveCenter(target.center())
+        available = self.screen().availableGeometry()
+        x = max(available.left(), min(frame.left(), available.right() - frame.width() + 1))
+        y = max(available.top(), min(frame.top(), available.bottom() - frame.height() + 1))
+        self.move(x, y)
 
     def reload(self) -> None:
         with self.session_factory() as session:
@@ -200,11 +279,21 @@ class ClassificationRulesDialog(QDialog):
 
         content = QWidget()
         layout = QVBoxLayout(content)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        def field_label(text: str, field: QWidget) -> QLabel:
+            label = QLabel(text)
+            label.setObjectName("dialogFieldLabel")
+            label.setBuddy(field)
+            return label
+
         pattern = rule.pattern if rule else prefill.pattern.upper() if prefill else ""
         pattern_input = QLineEdit(pattern)
         pattern_input.setMaxLength(255)
-        layout.addWidget(QLabel("Keyword / Pattern"))
+        layout.addWidget(field_label("Keyword / Pattern", pattern_input))
         layout.addWidget(pattern_input)
+        layout.addSpacing(6)
 
         account_input = QComboBox()
         account_input.addItem("All Accounts", None)
@@ -217,8 +306,9 @@ class ClassificationRulesDialog(QDialog):
         account_input.setCurrentIndex(
             max(0, account_input.findData(rule.account_id if rule else None))
         )
-        layout.addWidget(QLabel("Account"))
+        layout.addWidget(field_label("Account", account_input))
         layout.addWidget(account_input)
+        layout.addSpacing(6)
 
         match_type_input = QComboBox()
         for match_type, label in MATCH_TYPE_LABELS.items():
@@ -230,8 +320,9 @@ class ClassificationRulesDialog(QDialog):
             if prefill
             else MatchType.CONTAINS
         ))
-        layout.addWidget(QLabel("Match Type"))
+        layout.addWidget(field_label("Match Type", match_type_input))
         layout.addWidget(match_type_input)
+        layout.addSpacing(6)
 
         transaction_type_input = QComboBox()
         if rule is not None and rule.transaction_type is None:
@@ -248,12 +339,14 @@ class ClassificationRulesDialog(QDialog):
         transaction_type_input.setCurrentIndex(
             transaction_type_input.findData(selected_type)
         )
-        layout.addWidget(QLabel("Transaction Type"))
+        layout.addWidget(field_label("Transaction Type", transaction_type_input))
         layout.addWidget(transaction_type_input)
+        layout.addSpacing(6)
 
         category_input = QComboBox()
-        layout.addWidget(QLabel("Category"))
+        layout.addWidget(field_label("Category", category_input))
         layout.addWidget(category_input)
+        layout.addSpacing(6)
         category_initialized = False
 
         def refresh_categories() -> None:
@@ -296,7 +389,7 @@ class ClassificationRulesDialog(QDialog):
         priority_input = QSpinBox()
         priority_input.setRange(-100000, 100000)
         priority_input.setValue(rule.priority if rule else 0)
-        layout.addWidget(QLabel("Priority (higher wins)"))
+        layout.addWidget(field_label("Priority (higher wins)", priority_input))
         layout.addWidget(priority_input)
 
         active_input = QCheckBox("Active")
@@ -309,8 +402,15 @@ class ClassificationRulesDialog(QDialog):
             "Edit Classification Rule" if rule else "Add Classification Rule",
             content,
             self,
+            submit_label="Save Rule",
+            subtitle="Automatically classify transactions that match this rule.",
+            icon_name="fa6s.wand-magic-sparkles",
+            info_text=(
+                "Higher-priority rules run first. Account-specific and more exact "
+                "matches take precedence when priorities are equal."
+            ),
         )
-        dialog.resize(540, 620)
+        dialog.resize(660, 720)
 
         def update_match_count() -> None:
             try:

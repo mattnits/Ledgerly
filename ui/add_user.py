@@ -27,7 +27,7 @@ from database.groups import create_group, get_group, update_group
 from database.models import User
 from database.user_management import create_user, update_group_as_admin, update_user
 from ui.sidebar import ElidedLabel, avatar_icon
-from ui.theme import COLORS, set_button_icon
+from ui.theme import COLORS, awesome_icon, set_button_icon
 
 
 PROFILE_COLORS = (
@@ -136,7 +136,19 @@ class AddUserDialog(QDialog):
         layout.setContentsMargins(28, 24, 28, 22)
         layout.setSpacing(0)
         header = QHBoxLayout()
-        header.setSpacing(12)
+        header.setSpacing(16)
+        icon_frame = QFrame()
+        icon_frame.setObjectName("dialogIconFrame")
+        icon_frame.setFixedSize(56, 56)
+        icon_layout = QVBoxLayout(icon_frame)
+        icon_layout.setContentsMargins(0, 0, 0, 0)
+        icon = QLabel()
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setPixmap(
+            awesome_icon("fa6s.user-plus", color="#56a9ff").pixmap(27, 27)
+        )
+        icon_layout.addWidget(icon)
+        header.addWidget(icon_frame, alignment=Qt.AlignmentFlag.AlignTop)
         heading = QVBoxLayout()
         heading.setSpacing(5)
         self.title_label = QLabel("Add User")
@@ -711,15 +723,15 @@ class AddUserDialog(QDialog):
         return f"""
             QDialog#addUserDialog {{ background: transparent; }}
             QFrame#addUserDialogCard {{
-                background: #11171e;
-                border: 1px solid #34404c;
-                border-radius: 14px;
+                background: #111820;
+                border: 1px solid #344351;
+                border-radius: 16px;
             }}
             QLabel#addUserDialogTitle {{
-                color: {COLORS['text']}; font-size: 22px; font-weight: 700;
+                color: {COLORS['text']}; font-size: 24px; font-weight: 750;
             }}
             QLabel#addUserDialogSubtitle {{
-                color: {COLORS['text_muted']}; font-size: 13px;
+                color: #aebbd0; font-size: 14px;
             }}
             QLabel#addUserFieldLabel, QLabel#addUserPreviewTitle {{
                 color: #eef1f5; font-size: 13px; font-weight: 500;

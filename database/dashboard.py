@@ -37,6 +37,7 @@ from database.profiles import (
     visible_account_scope,
     visible_owner_scope,
 )
+from database.transactions import get_transaction_months
 from utils.constants import TransactionType
 
 
@@ -225,6 +226,40 @@ def _summarize_by_month(
     for item in transactions:
         grouped[(item.transaction_date.year, item.transaction_date.month)].append(item)
     return combine_financial_summaries(_summarize(items) for items in grouped.values())
+
+
+def get_dashboard_months(
+    user_id: str | None,
+    session_factory=SessionLocal,
+    *,
+    group_id: int | None = None,
+) -> set[tuple[int, int]]:
+    """Include months that have transactions or explicit goal/budget changes."""
+    months = get_transaction_months(
+        user_id,
+        session_factory,
+        group_id=group_id,
+    )
+    if user_id is None and group_id is None:
+        return months
+    validate_owner(user_id, group_id)
+    with session_factory() as session:
+        goal_months = session.execute(
+            select(SavingsGoal.year, SavingsGoal.month).where(
+                direct_owner_scope(SavingsGoal, user_id, group_id)
+            )
+        ).all()
+        budget_months = session.execute(
+            select(MonthlyCategoryBudget.year, MonthlyCategoryBudget.month).where(
+                direct_owner_scope(MonthlyCategoryBudget, user_id, group_id)
+            )
+        ).all()
+    configured_months = set(goal_months) | set(budget_months)
+    months.update(configured_months)
+    if configured_months:
+        today = date.today()
+        months.add((today.year, today.month))
+    return months
 
 
 def get_dashboard_data(
@@ -470,7 +505,7 @@ def get_dashboard_data(
     )
 
     category_totals: defaultdict[tuple[str, str], Decimal] = defaultdict(Decimal)
-    category_totals_by_id: defaultdict[int, Decimal] = defaultdict(Decimal)
+    budget_spending_by_id: defaultdict[int, Decimal] = defaultdict(Decimal)
     for item in selected:
         if item.category_name is None:
             continue
@@ -478,11 +513,9 @@ def get_dashboard_data(
         if item.transaction_type == TransactionType.EXPENSE:
             category_totals[key] += abs(item.amount)
             if item.category_id is not None:
-                category_totals_by_id[item.category_id] += abs(item.amount)
+                budget_spending_by_id[item.category_id] += abs(item.amount)
         elif item.transaction_type == TransactionType.REFUND_REIMBURSEMENT:
             category_totals[key] -= item.amount
-            if item.category_id is not None:
-                category_totals_by_id[item.category_id] -= item.amount
 
     if summary.e_transfer_spending_adjustment > 0:
         category_totals[
@@ -498,21 +531,45 @@ def get_dashboard_data(
         if amount > 0
     )
 
-    selected_budget_rows = [
-        row for row in budget_rows
-        if period == "all" or (row[2], row[3]) == selected_month
-    ]
-    budget_targets: dict[int, tuple[str, Decimal]] = {}
-    for category_id, name, _, _, target in selected_budget_rows:
-        previous_name, previous_target = budget_targets.get(
-            category_id, (name, Decimal())
+    budget_history: defaultdict[
+        int, list[tuple[tuple[int, int], str, Decimal]]
+    ] = defaultdict(list)
+    for category_id, name, budget_year, budget_month, target in budget_rows:
+        budget_history[category_id].append(
+            ((budget_year, budget_month), name, target)
         )
-        budget_targets[category_id] = (previous_name, previous_target + target)
+    for history in budget_history.values():
+        history.sort(key=lambda item: item[0])
+
+    def effective_budget_targets(month_key: tuple[int, int]) -> dict[int, tuple[str, Decimal]]:
+        effective: dict[int, tuple[str, Decimal]] = {}
+        for category_id, history in budget_history.items():
+            latest = next(
+                (item for item in reversed(history) if item[0] <= month_key),
+                None,
+            )
+            if latest is not None and latest[2] > 0:
+                effective[category_id] = (latest[1], latest[2])
+        return effective
+
+    if period == "monthly":
+        budget_targets = effective_budget_targets(selected_month)
+    else:
+        budget_targets: dict[int, tuple[str, Decimal]] = {}
+        for month_key in timeline:
+            for category_id, (name, target) in effective_budget_targets(month_key).items():
+                previous_name, previous_target = budget_targets.get(
+                    category_id, (name, Decimal())
+                )
+                budget_targets[category_id] = (
+                    previous_name,
+                    previous_target + target,
+                )
     budget_progress = tuple(
         BudgetProgress(
             category_id,
             name,
-            max(category_totals_by_id.get(category_id, Decimal()), Decimal()),
+            budget_spending_by_id.get(category_id, Decimal()),
             target,
         )
         for category_id, (name, target) in sorted(
@@ -520,15 +577,30 @@ def get_dashboard_data(
         )
     )
 
-    selected_goal_rows = [
-        row for row in savings_goal_rows
-        if period == "all" or (row[0], row[1]) == selected_month
-    ]
-    savings_goal = (
-        sum((row[2] for row in selected_goal_rows), Decimal())
-        if selected_goal_rows
-        else None
+    goal_history = sorted(
+        (((row[0], row[1]), row[2]) for row in savings_goal_rows),
+        key=lambda item: item[0],
     )
+
+    def effective_savings_goal(month_key: tuple[int, int]) -> Decimal | None:
+        latest = next(
+            (target for effective_month, target in reversed(goal_history)
+             if effective_month <= month_key),
+            None,
+        )
+        return latest
+
+    if period == "monthly":
+        savings_goal = effective_savings_goal(selected_month)
+    else:
+        effective_goals = [
+            effective_savings_goal(month_key) for month_key in timeline
+        ]
+        savings_goal = (
+            sum((target for target in effective_goals if target is not None), Decimal())
+            if any(target is not None for target in effective_goals)
+            else None
+        )
     selected_savings_rows = [
         row for row in savings_rows
         if period == "all" or (row[0].year, row[0].month) == selected_month
@@ -598,7 +670,13 @@ def get_dashboard_data(
         )
         work_rrsp_employee = contribution_summary.work_rrsp_employee
         employer_rrsp_match = contribution_summary.work_rrsp_employer
-    savings_actual = cash_savings_actual + work_rrsp_employee
+    # Keep Dashboard goal progress identical to the Goals page formula.
+    savings_actual = (
+        summary.total_income
+        - summary.total_spending
+        + work_rrsp_employee
+        + employer_rrsp_match
+    )
     investing_total = (
         manual_investing_total + work_rrsp_employee + employer_rrsp_match
     )

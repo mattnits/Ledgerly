@@ -70,12 +70,16 @@ class CategoriesPage(QWidget):
     def open_add_dialog(self):
         content = QWidget()
         layout = QVBoxLayout(content)
-        layout.addWidget(QLabel("Name"))
+        name_label = QLabel("Name")
+        name_label.setObjectName("dialogFieldLabel")
+        layout.addWidget(name_label)
         name_input = QLineEdit()
         name_input.setMaxLength(100)
         name_input.setPlaceholderText("Category name")
         layout.addWidget(name_input)
-        layout.addWidget(QLabel("Color"))
+        color_label = QLabel("Color")
+        color_label.setObjectName("dialogFieldLabel")
+        layout.addWidget(color_label)
 
         color = QColor("#64748b")
         color_row = QHBoxLayout()
@@ -101,7 +105,14 @@ class CategoriesPage(QWidget):
         layout.addLayout(color_row)
         layout.addStretch()
 
-        dialog = GenericDialog("Add Category", content, self)
+        dialog = GenericDialog(
+            "Add Category",
+            content,
+            self,
+            submit_label="Add Category",
+            subtitle="Create a category to organize and budget your transactions.",
+            icon_name="fa6s.tag",
+        )
         update_preview()
 
         def submit():

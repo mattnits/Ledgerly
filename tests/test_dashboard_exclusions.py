@@ -6,7 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from database.dashboard import get_dashboard_data
+from database.dashboard import get_dashboard_data, get_dashboard_months
 from database.db import Base
 from database.models import (
     Account,
@@ -143,6 +143,9 @@ class DashboardTransactionTypesTest(unittest.TestCase):
             ))
 
         monthly = get_dashboard_data("test-user", "monthly", (2026, 8), sessions)
+        available_months = get_dashboard_months("test-user", sessions)
+        self.assertIn((2026, 8), available_months)
+        self.assertIn((date.today().year, date.today().month), available_months)
         self.assertEqual(monthly.regular_income, Decimal("100.00"))
         self.assertEqual(monthly.additional_income, Decimal("35.00"))
         self.assertEqual(monthly.income_total, Decimal("135.00"))
@@ -158,10 +161,16 @@ class DashboardTransactionTypesTest(unittest.TestCase):
         )
         self.assertEqual(monthly.investing_total, Decimal("10.00"))
         self.assertEqual(monthly.savings_goal, Decimal("200.00"))
-        self.assertEqual(monthly.savings_actual, Decimal("150.00"))
+        self.assertEqual(monthly.savings_actual, Decimal("118.00"))
         self.assertEqual(monthly.savings_balance, Decimal("750.00"))
-        self.assertEqual(monthly.budget_progress[0].spent, Decimal("17.00"))
+        self.assertEqual(monthly.budget_progress[0].spent, Decimal("20.00"))
         self.assertEqual(monthly.budget_progress[0].target, Decimal("25.00"))
+        carried = get_dashboard_data(
+            "test-user", "monthly", (2026, 9), sessions
+        )
+        self.assertEqual(carried.budget_progress[0].target, Decimal("25.00"))
+        self.assertEqual(carried.budget_progress[0].spent, Decimal("0"))
+        self.assertEqual(carried.savings_goal, Decimal("200.00"))
         self.assertEqual(monthly.portfolio_value, Decimal("1000.00"))
         self.assertEqual(monthly.portfolio_baseline_value, Decimal("800.00"))
         self.assertEqual(monthly.previous_portfolio_value, Decimal("800.00"))

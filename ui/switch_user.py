@@ -159,6 +159,19 @@ class SwitchUserDialog(QDialog):
         layout.setContentsMargins(28, 24, 28, 26)
         layout.setSpacing(0)
         header = QHBoxLayout()
+        header.setSpacing(16)
+        icon_frame = QFrame()
+        icon_frame.setObjectName("dialogIconFrame")
+        icon_frame.setFixedSize(56, 56)
+        icon_layout = QVBoxLayout(icon_frame)
+        icon_layout.setContentsMargins(0, 0, 0, 0)
+        icon = QLabel()
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setPixmap(
+            awesome_icon("fa6s.arrow-right-arrow-left", color="#56a9ff").pixmap(27, 27)
+        )
+        icon_layout.addWidget(icon)
+        header.addWidget(icon_frame, alignment=Qt.AlignmentFlag.AlignTop)
         heading = QVBoxLayout()
         heading.setSpacing(5)
         title = QLabel("Switch Profile")
@@ -270,15 +283,15 @@ class SwitchUserDialog(QDialog):
         return f"""
             QDialog#switchUserDialog {{ background: transparent; }}
             QFrame#switchUserDialogCard {{
-                background: #11171e;
-                border: 1px solid #34404c;
-                border-radius: 14px;
+                background: #111820;
+                border: 1px solid #344351;
+                border-radius: 16px;
             }}
             QLabel#switchUserTitle {{
-                color: {COLORS['text']}; font-size: 22px; font-weight: 700;
+                color: {COLORS['text']}; font-size: 24px; font-weight: 750;
             }}
             QLabel#switchUserSubtitle {{
-                color: {COLORS['text_muted']}; font-size: 13px;
+                color: #aebbd0; font-size: 14px;
             }}
             QToolButton#switchUserClose {{
                 background: transparent; border: none; border-radius: 7px;

@@ -40,6 +40,34 @@ def init_db(db_engine=engine):
     _migrate_work_rrsp_fields(db_engine)
     _migrate_investment_snapshots(db_engine)
     _migrate_category_rule_account_scope(db_engine)
+    _migrate_goal_unique_indexes(db_engine)
+
+
+def _migrate_goal_unique_indexes(db_engine) -> None:
+    """Make nullable-owner uniqueness effective in SQLite without changing rows."""
+    if db_engine.dialect.name != "sqlite":
+        return
+    table_names = set(inspect(db_engine).get_table_names())
+    statements = []
+    if "savings_goals" in table_names:
+        statements.extend((
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_user_savings_goal_month_nonnull "
+            "ON savings_goals (user_id, year, month) WHERE user_id IS NOT NULL",
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_group_savings_goal_month_nonnull "
+            "ON savings_goals (group_id, year, month) WHERE group_id IS NOT NULL",
+        ))
+    if "monthly_category_budgets" in table_names:
+        statements.extend((
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_user_category_budget_month_nonnull "
+            "ON monthly_category_budgets (user_id, category_id, year, month) "
+            "WHERE user_id IS NOT NULL",
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_group_category_budget_month_nonnull "
+            "ON monthly_category_budgets (group_id, category_id, year, month) "
+            "WHERE group_id IS NOT NULL",
+        ))
+    with db_engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
 
 
 def _migrate_user_permissions(db_engine) -> None:

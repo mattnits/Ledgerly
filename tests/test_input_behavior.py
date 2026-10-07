@@ -5,7 +5,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QDate, QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
-from PySide6.QtWidgets import QApplication, QComboBox, QDateEdit, QSpinBox
+from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QDateEdit,
+    QPushButton,
+    QSpinBox,
+)
 
 from ui.input_behavior import install_wheel_change_guard
 
@@ -78,6 +84,24 @@ class WheelChangeGuardTest(unittest.TestCase):
         )
 
         self.assertFalse(self.guard.eventFilter(combo.view().viewport(), event))
+
+    def test_button_cursor_tracks_enabled_state(self):
+        button = QPushButton("Action")
+        button.show()
+        self.app.processEvents()
+        self.assertEqual(
+            button.cursor().shape(), Qt.CursorShape.PointingHandCursor
+        )
+
+        button.setEnabled(False)
+        self.app.processEvents()
+        self.assertEqual(button.cursor().shape(), Qt.CursorShape.ArrowCursor)
+
+        button.setEnabled(True)
+        self.app.processEvents()
+        self.assertEqual(
+            button.cursor().shape(), Qt.CursorShape.PointingHandCursor
+        )
 
 
 if __name__ == "__main__":

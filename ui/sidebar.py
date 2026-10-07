@@ -1,6 +1,7 @@
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -19,6 +20,8 @@ from utils.constants import (
     CATEGORIES_PAGE,
     DASHBOARD_LABEL,
     DASHBOARD_PAGE,
+    GOALS_LABEL,
+    GOALS_PAGE,
     INVESTMENTS_LABEL,
     INVESTMENTS_PAGE,
     SETTINGS_LABEL,
@@ -104,6 +107,223 @@ def avatar_icon(
     return QIcon(pixmap)
 
 
+class ProfilePanel(QWidget):
+    """Informational while expanded and clickable while the sidebar is collapsed."""
+
+    clicked = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._interactive = False
+        self.setObjectName("currentUserPanel")
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+    def set_interactive(self, interactive: bool) -> None:
+        self._interactive = bool(interactive)
+        self.setProperty("interactive", self._interactive)
+        self.setCursor(
+            Qt.CursorShape.PointingHandCursor
+            if self._interactive
+            else Qt.CursorShape.ArrowCursor
+        )
+        self.setFocusPolicy(
+            Qt.FocusPolicy.StrongFocus
+            if self._interactive
+            else Qt.FocusPolicy.NoFocus
+        )
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 - Qt API spelling
+        if (
+            self._interactive
+            and event.button() == Qt.MouseButton.LeftButton
+            and self.rect().contains(event.position().toPoint())
+        ):
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt API spelling
+        if self._interactive and event.key() in (
+            Qt.Key.Key_Return,
+            Qt.Key.Key_Enter,
+            Qt.Key.Key_Space,
+        ):
+            self.clicked.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
+class ProfileMenu(QFrame):
+    """Styled, non-modal profile actions used only by the collapsed sidebar."""
+
+    add_user_clicked = Signal()
+    change_user_clicked = Signal()
+    closed = Signal()
+
+    def __init__(self, profile: dict, parent=None, *, anchor_widget=None) -> None:
+        super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        self._closed_notified = False
+        self._anchor_widget = anchor_widget
+        self._app_filter_installed = False
+        self.setObjectName("profileMenu")
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setMinimumWidth(238)
+        self.setMaximumWidth(320)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        surface = QFrame()
+        surface.setObjectName("profileMenuSurface")
+        layout = QVBoxLayout(surface)
+        layout.setContentsMargins(10, 10, 10, 9)
+        layout.setSpacing(5)
+
+        header = QWidget()
+        header.setObjectName("profileMenuHeader")
+        header.setCursor(Qt.CursorShape.ArrowCursor)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(4, 3, 4, 8)
+        header_layout.setSpacing(10)
+        avatar = QLabel()
+        avatar.setObjectName("profileMenuAvatar")
+        avatar.setProperty("profileType", profile.get("type", "user"))
+        avatar.setFixedSize(36, 36)
+        avatar.setPixmap(avatar_icon(
+            profile.get("name", ""),
+            profile.get("color", "#398cff"),
+            36,
+            profile_type=profile.get("type", "user"),
+        ).pixmap(36, 36))
+        text = QWidget()
+        text_layout = QVBoxLayout(text)
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(1)
+        self.name_label = ElidedLabel(str(profile.get("name", "")))
+        self.name_label.setObjectName("profileMenuName")
+        self.subtitle_label = ElidedLabel(
+            str(profile.get("subtitle") or "Personal")
+        )
+        self.subtitle_label.setObjectName("profileMenuSubtitle")
+        text_layout.addWidget(self.name_label)
+        text_layout.addWidget(self.subtitle_label)
+        header_layout.addWidget(avatar)
+        header_layout.addWidget(text, 1)
+        if profile.get("type") == "user" and profile.get("is_admin"):
+            star = QLabel()
+            star.setToolTip("Admin")
+            star.setPixmap(awesome_icon("fa6s.star", color="#f4c95d").pixmap(13, 13))
+            header_layout.addWidget(star, alignment=Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(header)
+
+        divider = QFrame()
+        divider.setObjectName("profileMenuDivider")
+        divider.setFrameShape(QFrame.Shape.HLine)
+        layout.addWidget(divider)
+
+        self.add_user_button = self._action_button(
+            "Add User", "fa6s.user-plus"
+        )
+        self.change_user_button = self._action_button(
+            "Change User", "fa6s.right-left"
+        )
+        self.add_user_button.clicked.connect(self._add_user)
+        self.change_user_button.clicked.connect(self._change_user)
+        layout.addWidget(self.add_user_button)
+        layout.addWidget(self.change_user_button)
+        outer.addWidget(surface)
+
+        self.setStyleSheet("""
+            QFrame#profileMenu { background: transparent; border: none; }
+            QFrame#profileMenuSurface {
+                background: #171b20;
+                border: 1px solid #3a424c;
+                border-radius: 11px;
+            }
+            QWidget#profileMenuHeader { background: transparent; border: none; }
+            QLabel#profileMenuName { color: #f2f4f7; font-size: 13px; font-weight: 650; }
+            QLabel#profileMenuSubtitle { color: #929ca9; font-size: 10px; }
+            QFrame#profileMenuDivider {
+                color: #303740;
+                background: transparent;
+                border: none;
+                border-top: 1px solid #303740;
+                max-height: 1px;
+            }
+            QPushButton#profileMenuAction {
+                color: #e2e7ed;
+                background: transparent;
+                border: none;
+                border-radius: 7px;
+                text-align: left;
+                min-height: 22px;
+                padding: 7px 9px;
+            }
+            QPushButton#profileMenuAction:hover { background: #24344f; color: #ffffff; }
+            QPushButton#profileMenuAction:pressed { background: #1c2c45; }
+        """)
+
+    @staticmethod
+    def _action_button(text: str, icon_name: str) -> QPushButton:
+        button = QPushButton(text)
+        button.setObjectName("profileMenuAction")
+        button.setAccessibleName(text)
+        button.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        set_button_icon(
+            button,
+            icon_name,
+            color="#b9c6d5",
+            active_color="#ffffff",
+            size=15,
+        )
+        return button
+
+    def _add_user(self) -> None:
+        self.close()
+        self.add_user_clicked.emit()
+
+    def _change_user(self) -> None:
+        self.close()
+        self.change_user_clicked.emit()
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt API spelling
+        super().showEvent(event)
+        app = QApplication.instance()
+        if app is not None and not self._app_filter_installed:
+            app.installEventFilter(self)
+            self._app_filter_installed = True
+
+    def hideEvent(self, event) -> None:  # noqa: N802 - Qt API spelling
+        app = QApplication.instance()
+        if app is not None and self._app_filter_installed:
+            app.removeEventFilter(self)
+            self._app_filter_installed = False
+        super().hideEvent(event)
+        if not self._closed_notified:
+            self._closed_notified = True
+            self.closed.emit()
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Escape:
+            self.close()
+            return True
+        if event.type() == QEvent.Type.MouseButtonPress and isinstance(watched, QWidget):
+            inside_menu = watched is self or self.isAncestorOf(watched)
+            anchor = self._anchor_widget
+            inside_anchor = anchor is not None and (
+                watched is anchor or anchor.isAncestorOf(watched)
+            )
+            if not inside_menu and not inside_anchor:
+                self.close()
+                return False
+        return super().eventFilter(watched, event)
+
+
 class Sidebar(QFrame):
     page_changed = Signal(str)
     user_changed = Signal(str)
@@ -122,6 +342,7 @@ class Sidebar(QFrame):
         self.profiles: list[dict] = []
         self.current_user_id: str | None = None
         self.current_profile_key: str | None = None
+        self.profile_menu: ProfileMenu | None = None
         self.setObjectName("sidebar")
         self.setFixedWidth(self.EXPANDED_WIDTH)
 
@@ -167,14 +388,16 @@ class Sidebar(QFrame):
         # visually centered between that divider and the bottom of the sidebar.
         self.user_bar_layout.setContentsMargins(6, 24, 6, 7)
         self.user_bar_layout.setSpacing(6)
-        self.current_user_panel = QWidget()
-        self.current_user_panel.setObjectName("currentUserPanel")
+        self.current_user_panel = ProfilePanel()
         self.current_user_layout = QHBoxLayout(self.current_user_panel)
         self.current_user_layout.setContentsMargins(0, 0, 0, 0)
         self.current_user_layout.setSpacing(8)
         self.current_user_avatar = QLabel()
         self.current_user_avatar.setObjectName("currentUserAvatar")
         self.current_user_avatar.setFixedSize(34, 34)
+        self.current_user_avatar.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents
+        )
         self.current_user_text = QWidget()
         self.current_user_text.setObjectName("currentUserText")
         self.current_user_text_layout = QVBoxLayout(self.current_user_text)
@@ -195,6 +418,7 @@ class Sidebar(QFrame):
         self.current_user_layout.addWidget(self.current_user_avatar)
         self.current_user_layout.addWidget(self.current_user_text, 1)
         self.user_bar_layout.addWidget(self.current_user_panel, 1)
+        self.current_user_panel.clicked.connect(self.toggle_profile_menu)
 
         self.add_user_button = self._user_action_button(
             "addUserButton", "Add user or group", "fa6s.user-plus"
@@ -222,6 +446,9 @@ class Sidebar(QFrame):
         self.categories_button = self.create_button(
             CATEGORIES_LABEL, CATEGORIES_PAGE, "fa6s.tags"
         )
+        self.goals_button = self.create_button(
+            GOALS_LABEL, GOALS_PAGE, "fa6s.bullseye"
+        )
         self.user_management_button = self.create_button(
             USER_MANAGEMENT_LABEL, USER_MANAGEMENT_PAGE, "fa6s.users-gear"
         )
@@ -234,6 +461,7 @@ class Sidebar(QFrame):
             self.investments_button,
             self.accounts_button,
             self.categories_button,
+            self.goals_button,
             self.user_management_button,
             self.settings_button,
         )
@@ -247,6 +475,7 @@ class Sidebar(QFrame):
         self.sidebar_layout.addWidget(self.investments_button)
         self.sidebar_layout.addWidget(self.accounts_button)
         self.sidebar_layout.addWidget(self.categories_button)
+        self.sidebar_layout.addWidget(self.goals_button)
         self.sidebar_layout.addWidget(self.management_divider)
         self.sidebar_layout.addWidget(self.user_management_button)
         self.sidebar_layout.addWidget(self.settings_button)
@@ -291,6 +520,13 @@ class Sidebar(QFrame):
                 color: #858f9c;
                 font-size: 10px;
                 font-weight: 400;
+            }
+            QWidget#currentUserPanel[interactive="true"] {
+                background-color: transparent;
+                border-radius: 8px;
+            }
+            QWidget#currentUserPanel[interactive="true"]:hover {
+                background-color: #252a31;
             }
             QFrame#sidebarDivider {
                 color: #2b3037;
@@ -346,6 +582,7 @@ class Sidebar(QFrame):
         collapsed = bool(collapsed)
         if collapsed == self.is_collapsed:
             return
+        self.close_profile_menu()
         self.is_collapsed = collapsed
         self.setFixedWidth(
             self.COLLAPSED_WIDTH if collapsed else self.EXPANDED_WIDTH
@@ -379,6 +616,12 @@ class Sidebar(QFrame):
         self.current_user_subtitle.setVisible(not collapsed)
         self.add_user_button.setVisible(not collapsed)
         self.switch_user_button.setVisible(not collapsed)
+        self.current_user_panel.set_interactive(collapsed)
+        self.current_user_avatar.setCursor(
+            Qt.CursorShape.PointingHandCursor
+            if collapsed
+            else Qt.CursorShape.ArrowCursor
+        )
         self.user_bar_layout.setContentsMargins(
             7 if collapsed else 6,
             24,
@@ -398,6 +641,7 @@ class Sidebar(QFrame):
         users: list[dict[str, str]],
         current_user_id: str | None = None,
     ):
+        self.close_profile_menu()
         self.users = users
         self.profiles = [
             {
@@ -420,6 +664,7 @@ class Sidebar(QFrame):
         profiles: list[dict],
         current_profile_key: str | None = None,
     ) -> None:
+        self.close_profile_menu()
         self.profiles = profiles
         self.users = [profile for profile in profiles if profile["type"] == "user"]
         keys = {profile["key"] for profile in profiles}
@@ -472,18 +717,68 @@ class Sidebar(QFrame):
         self.current_user_name.setAccessibleName(
             f"Current {profile_label}: {user_name}"
         )
+        self.current_user_panel.setAccessibleName(
+            f"Current {profile_label}: {user_name}"
+        )
 
-    # Kept as a compatibility entry point; it now opens the modal switcher.
+    def toggle_profile_menu(self) -> None:
+        """Open or close the collapsed-profile actions without changing profiles."""
+        if not self.is_collapsed or self.current_profile is None:
+            return
+        if self.profile_menu is not None and self.profile_menu.isVisible():
+            self.close_profile_menu()
+            return
+
+        menu = ProfileMenu(
+            self.current_profile,
+            self.window(),
+            anchor_widget=self.current_user_panel,
+        )
+        menu.add_user_clicked.connect(self.create_user_clicked.emit)
+        menu.change_user_clicked.connect(self.switch_user_clicked.emit)
+        menu.closed.connect(self._profile_menu_closed)
+        self.profile_menu = menu
+        menu.ensurePolished()
+        menu.adjustSize()
+        menu.resize(menu.sizeHint())
+        menu.move(self._profile_menu_position(menu.size()))
+        menu.show()
+        menu.raise_()
+        menu.add_user_button.setFocus(Qt.FocusReason.PopupFocusReason)
+
+    def _profile_menu_position(self, menu_size: QSize) -> QPoint:
+        anchor = self.current_user_avatar.mapToGlobal(QPoint(0, 0))
+        window = self.window()
+        window_top_left = window.mapToGlobal(QPoint(0, 0))
+        bounds = QRect(window_top_left, window.size())
+        padding = 8
+        x = anchor.x()
+        y = anchor.y() - menu_size.height() - padding
+        x = max(bounds.left() + padding, min(x, bounds.right() - menu_size.width() - padding + 1))
+        y = max(bounds.top() + padding, min(y, bounds.bottom() - menu_size.height() - padding + 1))
+        return QPoint(x, y)
+
+    def close_profile_menu(self) -> None:
+        menu = self.profile_menu
+        self.profile_menu = None
+        if menu is not None:
+            menu.close()
+
+    def _profile_menu_closed(self) -> None:
+        sender = self.sender()
+        if sender is self.profile_menu:
+            self.profile_menu = None
+
+    # Kept as a compatibility entry point for callers of the old dropdown API.
     def toggle_user_dropdown(self):
-        if self.is_collapsed:
-            self.set_collapsed(False)
-        self.switch_user_clicked.emit()
+        self.toggle_profile_menu()
 
     def select_user(self, user_id: str):
         if user_id == self.current_user_id:
             return
         if user_id not in {user["id"] for user in self.users}:
             return
+        self.close_profile_menu()
         self.current_user_id = user_id
         self.current_profile_key = user_id
         self.refresh_user_display()
@@ -498,6 +793,7 @@ class Sidebar(QFrame):
         )
         if profile is None:
             return
+        self.close_profile_menu()
         self.current_profile_key = profile_key
         self.current_user_id = (
             str(profile["id"]) if profile["type"] == "user" else None

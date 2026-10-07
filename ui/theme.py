@@ -8,6 +8,8 @@ from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import QApplication, QAbstractButton, QLabel
 
+from ui.input_behavior import apply_interactive_cursor
+
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 ICON_ROOT = APP_ROOT / "icons"
@@ -70,6 +72,7 @@ def set_button_icon(
     active_color: str = COLORS["text"],
     size: int = 18,
 ) -> None:
+    apply_interactive_cursor(button)
     button.setIcon(awesome_icon(name, color=color, active_color=active_color))
     button.setIconSize(QSize(size, size))
 
@@ -194,7 +197,7 @@ def transaction_type_icon(transaction_type, *, color: str = "#b2b8c1") -> QIcon:
 def category_icon_name(name: str | None) -> str:
     normalized = (name or "").casefold()
     mappings = (
-        (("food", "restaurant"), "fa6s.utensils"),
+        (("food", "restaurant", "dining"), "fa6s.utensils"),
         (("grocer",), "fa6s.cart-shopping"),
         (("housing", "rent", "home"), "fa6s.house-chimney"),
         (("bill", "utilit", "subscription"), "fa6s.file-invoice-dollar"),
@@ -258,13 +261,78 @@ QLabel#pageSubtitle, QLabel#mutedLabel, QLabel#emptyLabel {{
 }}
 QLabel#dialogTitle {{
     color: {COLORS['text']};
-    font-size: 20px;
-    font-weight: 700;
+    font-size: 24px;
+    font-weight: 750;
 }}
 QLabel#dialogSubtitle {{
-    color: {COLORS['text_muted']};
-    font-size: 13px;
+    color: #aebbd0;
+    font-size: 14px;
 }}
+QDialog#genericDialog {{ background: transparent; }}
+QFrame#dialogCard {{
+    background: #111820;
+    border: 1px solid #344351;
+    border-radius: 16px;
+}}
+QWidget#dialogHeader, QWidget#dialogContent, QWidget#dialogFooter {{
+    background: transparent;
+    border: none;
+}}
+QFrame#dialogIconFrame {{
+    background: #14243a;
+    border: 1px solid #23496f;
+    border-radius: 14px;
+}}
+QToolButton#dialogCloseButton {{
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+}}
+QToolButton#dialogCloseButton:hover {{ background: #25303b; }}
+QFrame#dialogInfoPanel {{
+    background: #132238;
+    border: 1px solid #284d72;
+    border-radius: 11px;
+}}
+QLabel#dialogInfoText {{ color: #afc6e8; font-size: 12px; }}
+QFrame#dialogFooterDivider {{
+    color: #2d3945;
+    border: none;
+    border-top: 1px solid #2d3945;
+    max-height: 1px;
+}}
+QPushButton#dialogCancelButton {{
+    color: #e0e6ed;
+    background: #18212b;
+    border: 1px solid #3a4857;
+    font-weight: 600;
+}}
+QPushButton#dialogCancelButton:hover {{
+    color: #ffffff;
+    background: #222e3a;
+    border-color: #536476;
+}}
+QDialog#genericDialog QLineEdit,
+QDialog#genericDialog QComboBox,
+QDialog#genericDialog QSpinBox,
+QDialog#genericDialog QDoubleSpinBox,
+QDialog#genericDialog QDateEdit {{
+    min-height: 30px;
+    padding: 9px 12px;
+    background: #111923;
+    border-color: #344657;
+}}
+QLabel#dialogFieldLabel {{
+    color: #e1e8f2;
+    font-size: 13px;
+    font-weight: 650;
+}}
+QFrame#dialogDisplayField {{
+    background: #111923;
+    border: 1px solid #344657;
+    border-radius: 10px;
+}}
+QLabel#dialogDisplayValue {{ color: #edf2f7; font-size: 14px; }}
 QLabel#investmentDialogSectionTitle {{
     color: {COLORS['text']};
     font-size: 14px;
@@ -314,12 +382,18 @@ QPushButton#primaryButton:hover, QPushButton#pageActionButton:hover {{
     background: {COLORS['primary_hover']};
 }}
 QPushButton#secondaryActionButton {{
-    color: #e3e5e8;
-    background: #1e2228;
-    border-color: #373d45;
-    font-weight: 500;
-    padding: 10px 16px;
+    color: #69b4ff;
+    background: #141c25;
+    border-color: #285f98;
+    font-weight: 550;
+    padding: 9px 15px;
 }}
+QPushButton#secondaryActionButton:hover {{
+    color: #ffffff;
+    background: #173152;
+    border-color: #3c8ee1;
+}}
+QPushButton#secondaryActionButton:pressed {{ background: #122844; }}
 QPushButton#dangerButton {{
     color: #ffced1;
     background: #321a24;

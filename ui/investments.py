@@ -547,6 +547,7 @@ class InvestmentAccountDialog(GenericDialog):
                 if account
                 else "Create an account and optionally add payroll tracking for work RRSPs."
             ),
+            icon_name="fa6s.chart-line",
         )
         self.setMinimumSize(520, 430)
         self.resize(660, 700 if account is None else 650)
@@ -704,6 +705,7 @@ class WorkRrspDetailDialog(GenericDialog):
             parent,
             submit_label="Close",
             subtitle="Payroll-derived contributions are separate from portfolio snapshots.",
+            icon_name="fa6s.piggy-bank",
         )
         self.cancel_button.hide()
         self.submitted.connect(self.accept)

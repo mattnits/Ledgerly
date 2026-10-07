@@ -11,10 +11,12 @@ from sqlalchemy import (
     DateTime,
     Enum as SqlEnum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -88,6 +90,9 @@ class User(Base):
     savings_goals: Mapped[list["SavingsGoal"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    long_term_savings_goals: Mapped[list["LongTermSavingsGoal"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
     category_budgets: Mapped[list["MonthlyCategoryBudget"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
@@ -137,6 +142,9 @@ class Group(Base):
     )
 
     savings_goals: Mapped[list["SavingsGoal"]] = relationship(
+        back_populates="group", cascade="all, delete-orphan"
+    )
+    long_term_savings_goals: Mapped[list["LongTermSavingsGoal"]] = relationship(
         back_populates="group", cascade="all, delete-orphan"
     )
     category_budgets: Mapped[list["MonthlyCategoryBudget"]] = relationship(
@@ -455,6 +463,18 @@ class SavingsGoal(_OwnedMonthlyMixin, Base):
         CheckConstraint("month BETWEEN 1 AND 12", name="ck_savings_goal_month"),
         UniqueConstraint("user_id", "year", "month", name="uq_user_savings_goal_month"),
         UniqueConstraint("group_id", "year", "month", name="uq_group_savings_goal_month"),
+        Index(
+            "ux_user_savings_goal_month_nonnull",
+            "user_id", "year", "month",
+            unique=True,
+            sqlite_where=text("user_id IS NOT NULL"),
+        ),
+        Index(
+            "ux_group_savings_goal_month_nonnull",
+            "group_id", "year", "month",
+            unique=True,
+            sqlite_where=text("group_id IS NOT NULL"),
+        ),
     )
 
 
@@ -483,6 +503,57 @@ class MonthlyCategoryBudget(_OwnedMonthlyMixin, Base):
             "group_id", "category_id", "year", "month",
             name="uq_group_category_budget_month",
         ),
+        Index(
+            "ux_user_category_budget_month_nonnull",
+            "user_id", "category_id", "year", "month",
+            unique=True,
+            sqlite_where=text("user_id IS NOT NULL"),
+        ),
+        Index(
+            "ux_group_category_budget_month_nonnull",
+            "group_id", "category_id", "year", "month",
+            unique=True,
+            sqlite_where=text("group_id IS NOT NULL"),
+        ),
+    )
+
+
+class LongTermSavingsGoal(Base):
+    """A manually tracked goal, separate from the calculated monthly target."""
+
+    __tablename__ = "long_term_savings_goals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id"), nullable=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    target_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    current_amount: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0.00"), server_default="0"
+    )
+    target_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    notes: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    is_archived: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.now, onupdate=datetime.now
+    )
+
+    user: Mapped["User | None"] = relationship(back_populates="long_term_savings_goals")
+    group: Mapped["Group | None"] = relationship(back_populates="long_term_savings_goals")
+
+    __table_args__ = (
+        CheckConstraint(
+            "(user_id IS NOT NULL AND group_id IS NULL) OR "
+            "(user_id IS NULL AND group_id IS NOT NULL)",
+            name="ck_long_term_goal_single_owner",
+        ),
+        CheckConstraint("target_amount > 0", name="ck_long_term_goal_positive_target"),
+        CheckConstraint("current_amount >= 0", name="ck_long_term_goal_nonnegative_current"),
     )
 
 

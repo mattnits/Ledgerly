@@ -1,3 +1,4 @@
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -7,9 +8,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from database.dashboard import get_dashboard_data
+from database.dashboard import get_dashboard_data, get_dashboard_months
 from database.db import SessionLocal
-from database.transactions import get_transaction_months
 from parsers.generic_parser import GenericParser
 from ui.components.dashboard_cards import (
     BudgetGoalsCard,
@@ -26,6 +26,8 @@ from utils.constants import ADD_STATMENT_LABEL
 
 
 class DashboardPage(QWidget):
+    goals_requested = Signal()
+
     def __init__(self, session_factory=SessionLocal):
         super().__init__()
         self.session_factory = session_factory
@@ -72,6 +74,8 @@ class DashboardPage(QWidget):
         self.category_card = CategoryCard()
         self.budget_card = BudgetGoalsCard()
         self.investing_card = InvestingCard()
+        self.savings_card.goals_requested.connect(self.goals_requested.emit)
+        self.budget_card.goals_requested.connect(self.goals_requested.emit)
 
         cards_layout.addWidget(self.income_card, 0, 0)
         cards_layout.addWidget(self.spending_card, 0, 1)
@@ -129,7 +133,7 @@ class DashboardPage(QWidget):
 
     def reload(self) -> None:
         self.period_selector.set_available_months(
-            get_transaction_months(
+            get_dashboard_months(
                 self.user_id,
                 self.session_factory,
                 group_id=self.group_id,

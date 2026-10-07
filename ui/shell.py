@@ -18,6 +18,7 @@ from ui.welcome import WelcomePage
 from ui.add_user import AddUserDialog
 from ui.switch_user import SwitchUserDialog
 from ui.dashboard import DashboardPage
+from ui.goals import GoalsPage
 from ui.investments import InvestmentsPage
 from ui.transactions import TransactionsPage
 from ui.settings import SettingsPage
@@ -26,6 +27,7 @@ from utils.constants import (
     ACCOUNTS_PAGE,
     CATEGORIES_PAGE,
     DASHBOARD_PAGE,
+    GOALS_PAGE,
     INVESTMENTS_PAGE,
     SETTINGS_PAGE,
     TRANSACTIONS_PAGE,
@@ -91,6 +93,7 @@ class ShellWindow(QMainWindow):
         self.accounts_page = AccountsPage()
         self.investments_page = InvestmentsPage()
         self.categories_page = CategoriesPage()
+        self.goals_page = GoalsPage()
         self.user_management_page = UserManagementPage()
 
         self.pages.addWidget(
@@ -112,6 +115,8 @@ class ShellWindow(QMainWindow):
         self.pages.addWidget(self.investments_page)
 
         self.pages.addWidget(self.categories_page)
+
+        self.pages.addWidget(self.goals_page)
 
         self.pages.addWidget(self.user_management_page)
 
@@ -158,6 +163,9 @@ class ShellWindow(QMainWindow):
         )
 
         self.settings_page.data_reset.connect(self.handle_data_reset)
+        self.dashboard_page.goals_requested.connect(
+            self._show_goals_from_dashboard
+        )
         self.settings_page.profile_deleted.connect(self.handle_profile_deleted)
         self.user_management_page.edit_user_requested.connect(self.show_edit_user)
         self.user_management_page.edit_group_requested.connect(
@@ -395,12 +403,14 @@ class ShellWindow(QMainWindow):
         self.transactions_page.set_profile(user_id=user_id, group_id=group_id)
         self.investments_page.set_profile(user_id=user_id, group_id=group_id)
         self.accounts_page.set_profile(user_id=user_id, group_id=group_id)
+        self.goals_page.set_profile(user_id=user_id, group_id=group_id)
 
     def handle_data_reset(self) -> None:
         self.dashboard_page.reload()
         self.transactions_page.reload()
         self.accounts_page.reload()
         self.investments_page.reload()
+        self.goals_page.reload()
 
     def change_page(self, page_name: str):
 
@@ -410,6 +420,7 @@ class ShellWindow(QMainWindow):
             ACCOUNTS_PAGE: self.accounts_page,
             INVESTMENTS_PAGE: self.investments_page,
             CATEGORIES_PAGE: self.categories_page,
+            GOALS_PAGE: self.goals_page,
             SETTINGS_PAGE: self.settings_page,
         }
         if hasattr(self, "user_management_page"):
@@ -429,8 +440,14 @@ class ShellWindow(QMainWindow):
                 self.investments_page.reload()
             if page is self.categories_page:
                 self.categories_page.reload()
+            if page is self.goals_page:
+                self.goals_page.reload()
             if (
                 hasattr(self, "user_management_page")
                 and page is self.user_management_page
             ):
                 self.user_management_page.reload()
+
+    def _show_goals_from_dashboard(self) -> None:
+        self.sidebar.set_current_page(GOALS_PAGE)
+        self.change_page(GOALS_PAGE)

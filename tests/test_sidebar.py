@@ -3,10 +3,11 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtTest import QSignalSpy
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtTest import QSignalSpy, QTest
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QWidget
 
-from ui.sidebar import Sidebar
+from ui.sidebar import Sidebar, avatar_icon
 from utils.constants import DASHBOARD_PAGE, USER_MANAGEMENT_PAGE
 
 
@@ -18,11 +19,18 @@ class SidebarTest(unittest.TestCase):
             [{"id": "user-1", "name": "Matt", "color": "#3b9de2"}],
             "user-1",
         )
-        self.sidebar.show()
+        self.host = QWidget()
+        self.host.resize(900, 760)
+        layout = QHBoxLayout(self.host)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.sidebar)
+        layout.addStretch()
+        self.host.show()
         self.app.processEvents()
 
     def tearDown(self):
-        self.sidebar.close()
+        self.sidebar.close_profile_menu()
+        self.host.close()
 
     def test_sidebar_collapses_to_icons_and_restores_labels(self):
         self.sidebar.transactions_button.setChecked(True)
@@ -60,14 +68,182 @@ class SidebarTest(unittest.TestCase):
         )
         self.assertTrue(self.sidebar.transactions_button.isChecked())
 
-    def test_user_icon_expands_sidebar_before_opening_switch_dialog(self):
-        switched = QSignalSpy(self.sidebar.switch_user_clicked)
+    def test_collapsed_profile_click_opens_menu_without_expanding(self):
         self.sidebar.set_collapsed(True)
-        self.sidebar.toggle_user_dropdown()
+        QTest.mouseClick(
+            self.sidebar.current_user_panel,
+            Qt.MouseButton.LeftButton,
+            pos=self.sidebar.current_user_panel.rect().center(),
+        )
         self.app.processEvents()
 
-        self.assertFalse(self.sidebar.is_collapsed)
+        self.assertTrue(self.sidebar.is_collapsed)
+        self.assertIsNotNone(self.sidebar.profile_menu)
+        self.assertTrue(self.sidebar.profile_menu.isVisible())
+
+    def test_expanded_profile_click_is_informational(self):
+        added = QSignalSpy(self.sidebar.create_user_clicked)
+        switched = QSignalSpy(self.sidebar.switch_user_clicked)
+        QTest.mouseClick(
+            self.sidebar.current_user_panel,
+            Qt.MouseButton.LeftButton,
+            pos=self.sidebar.current_user_panel.rect().center(),
+        )
+        self.app.processEvents()
+
+        self.assertIsNone(self.sidebar.profile_menu)
+        self.assertEqual(added.count(), 0)
+        self.assertEqual(switched.count(), 0)
+
+    def test_profile_panel_cursor_tracks_collapse_state(self):
+        self.assertEqual(
+            self.sidebar.current_user_panel.cursor().shape(),
+            Qt.CursorShape.ArrowCursor,
+        )
+        self.sidebar.set_collapsed(True)
+        self.assertEqual(
+            self.sidebar.current_user_panel.cursor().shape(),
+            Qt.CursorShape.PointingHandCursor,
+        )
+        self.assertEqual(
+            self.sidebar.current_user_avatar.cursor().shape(),
+            Qt.CursorShape.PointingHandCursor,
+        )
+        self.sidebar.set_collapsed(False)
+        self.assertEqual(
+            self.sidebar.current_user_panel.cursor().shape(),
+            Qt.CursorShape.ArrowCursor,
+        )
+        self.assertEqual(
+            self.sidebar.current_user_avatar.cursor().shape(),
+            Qt.CursorShape.ArrowCursor,
+        )
+
+    def test_popup_actions_reuse_sidebar_dialog_signals(self):
+        added = QSignalSpy(self.sidebar.create_user_clicked)
+        switched = QSignalSpy(self.sidebar.switch_user_clicked)
+        self.sidebar.set_collapsed(True)
+        self.sidebar.toggle_profile_menu()
+        self.app.processEvents()
+        QTest.mouseClick(
+            self.sidebar.profile_menu.add_user_button,
+            Qt.MouseButton.LeftButton,
+        )
+        self.app.processEvents()
+        self.assertEqual(added.count(), 1)
+        self.assertIsNone(self.sidebar.profile_menu)
+
+        self.sidebar.toggle_profile_menu()
+        self.app.processEvents()
+        QTest.mouseClick(
+            self.sidebar.profile_menu.change_user_button,
+            Qt.MouseButton.LeftButton,
+        )
+        self.app.processEvents()
         self.assertEqual(switched.count(), 1)
+        self.assertIsNone(self.sidebar.profile_menu)
+
+    def test_popup_closes_when_sidebar_expands(self):
+        self.sidebar.set_collapsed(True)
+        self.sidebar.toggle_profile_menu()
+        self.app.processEvents()
+        menu = self.sidebar.profile_menu
+        self.assertTrue(menu.isVisible())
+
+        self.sidebar.set_collapsed(False)
+        self.app.processEvents()
+        self.assertIsNone(self.sidebar.profile_menu)
+
+    def test_popup_closes_when_active_profile_changes(self):
+        self.sidebar.set_profiles(
+            [
+                {
+                    "key": "user:user-1", "type": "user", "id": "user-1",
+                    "name": "Matt", "color": "#3b9de2", "subtitle": "Personal",
+                },
+                {
+                    "key": "group:7", "type": "group", "id": 7,
+                    "name": "Household", "color": "#8844ff",
+                    "subtitle": "Group • 2 members", "member_count": 2,
+                },
+            ],
+            "user:user-1",
+        )
+        self.sidebar.set_collapsed(True)
+        self.sidebar.toggle_profile_menu()
+        self.app.processEvents()
+        self.assertIsNotNone(self.sidebar.profile_menu)
+
+        self.sidebar.select_profile("group:7")
+        self.app.processEvents()
+        self.assertIsNone(self.sidebar.profile_menu)
+        self.assertEqual(self.sidebar.current_profile_key, "group:7")
+
+    def test_popup_closes_on_outside_click(self):
+        self.sidebar.set_collapsed(True)
+        self.sidebar.toggle_profile_menu()
+        self.app.processEvents()
+        self.assertIsNotNone(self.sidebar.profile_menu)
+
+        QTest.mouseClick(
+            self.host,
+            Qt.MouseButton.LeftButton,
+            pos=QPoint(self.host.width() - 20, 20),
+        )
+        self.app.processEvents()
+        self.assertIsNone(self.sidebar.profile_menu)
+
+    def test_popup_shows_personal_profile_and_stays_inside_window(self):
+        self.sidebar.set_collapsed(True)
+        self.sidebar.toggle_profile_menu()
+        self.app.processEvents()
+        menu = self.sidebar.profile_menu
+        self.assertEqual(menu.name_label.fullText(), "Matt")
+        self.assertEqual(menu.subtitle_label.fullText(), "Personal")
+
+        host_top_left = self.host.mapToGlobal(QPoint(0, 0))
+        host_right = host_top_left.x() + self.host.width()
+        host_bottom = host_top_left.y() + self.host.height()
+        menu_rect = menu.frameGeometry()
+        self.assertGreaterEqual(menu_rect.left(), host_top_left.x())
+        self.assertGreaterEqual(menu_rect.top(), host_top_left.y())
+        self.assertLessEqual(menu_rect.right(), host_right)
+        self.assertLessEqual(menu_rect.bottom(), host_bottom)
+
+    def test_group_popup_uses_group_subtitle_and_avatar_shape(self):
+        self.sidebar.set_profiles(
+            [{
+                "key": "group:7",
+                "type": "group",
+                "id": 7,
+                "name": "Household",
+                "color": "#8844ff",
+                "subtitle": "Group • 3 members",
+                "member_count": 3,
+            }],
+            "group:7",
+        )
+        self.sidebar.set_collapsed(True)
+        self.sidebar.toggle_profile_menu()
+        self.app.processEvents()
+        self.assertEqual(self.sidebar.profile_menu.name_label.fullText(), "Household")
+        self.assertEqual(
+            self.sidebar.profile_menu.subtitle_label.fullText(),
+            "Group • 3 members",
+        )
+        self.assertEqual(
+            self.sidebar.current_user_avatar.property("profileType"), "group"
+        )
+
+    def test_user_avatar_is_circular_and_group_avatar_is_squircle(self):
+        user_image = avatar_icon(
+            "M", "#8844ff", 36, profile_type="user"
+        ).pixmap(36, 36).toImage()
+        group_image = avatar_icon(
+            "H", "#8844ff", 36, profile_type="group"
+        ).pixmap(36, 36).toImage()
+        self.assertEqual(user_image.pixelColor(4, 4).alpha(), 0)
+        self.assertGreater(group_image.pixelColor(4, 4).alpha(), 0)
 
     def test_user_bar_fills_expanded_sidebar_width(self):
         margins = self.sidebar.sidebar_layout.contentsMargins()

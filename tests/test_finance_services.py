@@ -128,6 +128,17 @@ class FinanceServicesTest(unittest.TestCase):
             ),
             Decimal("75.00"),
         )
+        carried_budget = monthly_budget_progress(
+            2026, 10, group_id=group_id, session_factory=sessions
+        )
+        self.assertEqual(carried_budget[0].target, Decimal("50.00"))
+        self.assertEqual(carried_budget[0].spent, Decimal("0"))
+        self.assertEqual(
+            savings_goal_progress(
+                2026, 10, group_id=group_id, session_factory=sessions
+            ).target,
+            Decimal("200.00"),
+        )
         engine.dispose()
 
 

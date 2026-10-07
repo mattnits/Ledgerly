@@ -13,6 +13,7 @@ class FileUploadDialog(GenericDialog):
             parent,
             submit_label="Import",
             subtitle="Import transaction files from your bank or credit card.",
+            icon_name="fa6s.file-arrow-up",
         )
         self.resize(940, 720)
         self.setMinimumSize(760, 560)
