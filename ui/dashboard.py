@@ -163,6 +163,10 @@ class DashboardPage(QWidget):
                 ("Positive e-transfers", data.e_transfer_income_adjustment),
             ),
             data.cash_flow_income,
+            tuple(
+                (person.name, person.income)
+                for person in data.person_breakdown
+            ) if self.group_id is not None else (),
         )
         self.spending_card.set_data(
             data.period_label,
@@ -177,6 +181,10 @@ class DashboardPage(QWidget):
                 ("Net negative e-transfers", data.e_transfer_spending_adjustment),
             ),
             data.cash_flow_spending,
+            tuple(
+                (person.name, person.spending)
+                for person in data.person_breakdown
+            ) if self.group_id is not None else (),
         )
         self.savings_card.set_data(
             data.period_label,

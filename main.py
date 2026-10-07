@@ -8,7 +8,9 @@ from PySide6.QtWidgets import QApplication, QSplashScreen
 def create_splash() -> QSplashScreen:
     """Create a lightweight splash that can be painted before app imports finish."""
     pixmap = QPixmap(520, 280)
-    pixmap.fill(QColor("#0d0f12"))
+    # Leave the area outside the rounded card transparent. An opaque pixmap
+    # background makes the frameless window's square corners visible.
+    pixmap.fill(Qt.GlobalColor.transparent)
 
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -50,6 +52,13 @@ def create_splash() -> QSplashScreen:
         | Qt.WindowType.WindowStaysOnTopHint
     )
     splash = QSplashScreen(pixmap, flags)
+    splash.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+    splash.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
+    splash.setAutoFillBackground(False)
+    # Some Windows compositors still draw the native splash surface as an
+    # opaque rectangle even when its pixmap has an alpha channel. Clip the
+    # actual window to the pixmap's non-transparent pixels as a backstop.
+    splash.setMask(pixmap.mask())
     splash.setObjectName("startupSplash")
     return splash
 

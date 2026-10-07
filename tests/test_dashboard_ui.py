@@ -7,7 +7,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication
 
 from database.dashboard import CategorySpending
-from ui.components.dashboard_cards import CategoryCard, DonutChart, InvestingCard
+from ui.components.dashboard_cards import (
+    CategoryCard,
+    DonutChart,
+    InvestingCard,
+    MetricCard,
+)
 
 
 class DashboardUiTest(unittest.TestCase):
@@ -82,6 +87,55 @@ class DashboardUiTest(unittest.TestCase):
 
         self.assertTrue(card._amounts_visible)
         self.assertTrue(all(not amount.isHidden() for amount in card.amount_labels))
+        card.close()
+
+    def test_metric_card_only_adds_person_rows_when_provided(self):
+        card = MetricCard("Income", "fa6s.briefcase", "#18d98b", False)
+        common_args = (
+            "September 2026",
+            "Total income",
+            Decimal("1000"),
+            Decimal("900"),
+            (("Regular income", Decimal("1000")),),
+            (Decimal("900"), Decimal("1000")),
+        )
+
+        card.set_data(*common_args)
+        self.assertEqual(card.person_rows, [])
+
+        card.set_data(
+            *common_args,
+            (("Alyssa", Decimal("400")), ("Matt", Decimal("600"))),
+        )
+        self.assertEqual(
+            [
+                (row.label_widget.text(), row.value_widget.text())
+                for row in card.person_rows
+            ],
+            [("Alyssa", "$400"), ("Matt", "$600")],
+        )
+        card.close()
+
+    def test_metric_person_breakdown_scrolls_without_growing_the_card(self):
+        card = MetricCard("Spending", "fa6s.credit-card", "#ff5b63", True)
+        card.resize(360, 360)
+        card.set_data(
+            "September 2026",
+            "Total spending (after adjustments)",
+            Decimal("2000"),
+            Decimal("1800"),
+            (("TD Credit", Decimal("2000")),),
+            (Decimal("1800"), Decimal("2000")),
+            tuple(
+                (f"Person {index}", Decimal("100"))
+                for index in range(20)
+            ),
+        )
+        card.show()
+        self.app.processEvents()
+
+        self.assertEqual(card.height(), 360)
+        self.assertGreater(card.rows_scroll.verticalScrollBar().maximum(), 0)
         card.close()
 
 

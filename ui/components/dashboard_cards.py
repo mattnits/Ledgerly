@@ -228,6 +228,8 @@ class MetricCard(DashboardCard):
         self.rows_layout = QVBoxLayout(self.rows)
         self.rows_layout.setContentsMargins(0, 0, 0, 0)
         self.rows_layout.setSpacing(4)
+        self.person_rows: list[SummaryRow] = []
+        self.rows_scroll = _transparent_scroll(self.rows)
 
         self.trend_frame = QFrame()
         self.trend_frame.setObjectName("metricTrend")
@@ -254,7 +256,7 @@ class MetricCard(DashboardCard):
         self.layout.addWidget(self.total_value)
         self.layout.addWidget(self.total_caption)
         self.layout.addWidget(divider)
-        self.layout.addWidget(_transparent_scroll(self.rows), 1)
+        self.layout.addWidget(self.rows_scroll, 1)
         self.layout.addWidget(self.trend_frame)
 
     def set_data(
@@ -265,13 +267,30 @@ class MetricCard(DashboardCard):
         previous: Decimal | None,
         rows: tuple[tuple[str, Decimal], ...],
         trend_values: tuple[Decimal, ...],
+        person_rows: tuple[tuple[str, Decimal], ...] = (),
     ) -> None:
         self.subtitle_label.setText(period_label)
         self.total_caption.setText(total_caption)
         self.total_value.setText(format_currency(total))
         _clear_layout(self.rows_layout)
+        self.person_rows = []
         for label, value in rows:
             self.rows_layout.addWidget(SummaryRow(label, format_currency(value)))
+        if person_rows:
+            section_divider = QFrame()
+            section_divider.setFrameShape(QFrame.Shape.HLine)
+            section_divider.setStyleSheet(f"color: {COLORS['border_soft']};")
+            self.rows_layout.addWidget(section_divider)
+            section_title = QLabel("By person")
+            section_title.setObjectName("metricSectionTitle")
+            section_title.setStyleSheet(
+                f"color: {COLORS['text_dim']}; font-size: 10px; font-weight: 700;"
+            )
+            self.rows_layout.addWidget(section_title)
+            for label, value in person_rows:
+                row = SummaryRow(label, format_currency(value))
+                self.person_rows.append(row)
+                self.rows_layout.addWidget(row)
         self.rows_layout.addStretch()
 
         if previous is None:

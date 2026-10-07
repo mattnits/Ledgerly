@@ -237,6 +237,24 @@ class GroupFeatureTest(unittest.TestCase):
         self.assertEqual(data.regular_income, Decimal("1000"))
         self.assertEqual(data.gross_expense_spending, Decimal("150"))
         self.assertEqual(data.total_spending, Decimal("150"))
+        self.assertEqual(
+            tuple(
+                (person.name, person.income, person.spending)
+                for person in data.person_breakdown
+            ),
+            (
+                ("Alyssa", Decimal("0"), Decimal("100")),
+                ("Matt", Decimal("1000"), Decimal("0")),
+            ),
+        )
+
+        individual = get_dashboard_data(
+            "matt",
+            "monthly",
+            (2026, 9),
+            self.sessions,
+        )
+        self.assertEqual(individual.person_breakdown, ())
 
     def test_profile_context_and_switcher_keep_group_typed(self):
         group_id = create_group(

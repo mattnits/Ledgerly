@@ -22,12 +22,14 @@ from database.investments import (
 from database.models import (
     Account,
     Category,
+    GroupMembership,
     InvestmentAccount,
     InvestmentSnapshot,
     MonthlyCategoryBudget,
     SavingsGoal,
     SavingsSnapshot,
     Transaction,
+    User,
 )
 from database.profiles import (
     direct_owner_scope,
@@ -69,6 +71,13 @@ class AccountSpending:
 
 
 @dataclass(frozen=True)
+class PersonBreakdown:
+    name: str
+    income: Decimal
+    spending: Decimal
+
+
+@dataclass(frozen=True)
 class RecentTransaction:
     description: str
     account_name: str
@@ -93,6 +102,7 @@ class DashboardData:
     total_income: Decimal
     total_spending: Decimal
     account_spending: tuple[AccountSpending, ...]
+    person_breakdown: tuple[PersonBreakdown, ...]
     manual_investing_total: Decimal
     investing_total: Decimal
     savings_goal: Decimal | None
@@ -145,6 +155,7 @@ class _TransactionData:
     transaction_type: TransactionType
     account_id: int
     account_name: str
+    account_user_id: str | None
     category_id: int | None
     category_name: str | None
     category_color: str | None
@@ -229,6 +240,7 @@ def get_dashboard_data(
 
     rows = []
     account_rows: list[tuple[int, str]] = []
+    member_rows: list[tuple[str, str]] = []
     investment_rows: list[_InvestmentData] = []
     savings_goal_rows: list[tuple[int, int, Decimal]] = []
     savings_rows: list[
@@ -243,6 +255,13 @@ def get_dashboard_data(
                 .where(visible_account_scope(user_id, group_id))
                 .order_by(Account.id)
             ).all())
+            if group_id is not None:
+                member_rows = list(session.execute(
+                    select(User.id, User.name)
+                    .join(GroupMembership, GroupMembership.user_id == User.id)
+                    .where(GroupMembership.group_id == group_id)
+                    .order_by(User.name, User.id)
+                ).all())
             rows = session.execute(
                 select(
                     Transaction.transaction_date,
@@ -251,6 +270,7 @@ def get_dashboard_data(
                     Transaction.transaction_type,
                     Account.id,
                     Account.name,
+                    Account.user_id,
                     Category.id,
                     Category.name,
                     Category.color,
@@ -415,6 +435,27 @@ def get_dashboard_data(
         if period == "monthly"
         else _summarize_by_month(selected)
     )
+
+    transactions_by_user: defaultdict[
+        str, list[_TransactionData]
+    ] = defaultdict(list)
+    for item in selected:
+        if item.account_user_id is not None:
+            transactions_by_user[item.account_user_id].append(item)
+    person_breakdown_items = []
+    for member_user_id, name in member_rows:
+        member_transactions = transactions_by_user[member_user_id]
+        member_summary = (
+            _summarize(member_transactions)
+            if period == "monthly"
+            else _summarize_by_month(member_transactions)
+        )
+        person_breakdown_items.append(PersonBreakdown(
+            name,
+            member_summary.total_income,
+            member_summary.total_spending,
+        ))
+    person_breakdown = tuple(person_breakdown_items)
 
     gross_spending_by_account: defaultdict[int, Decimal] = defaultdict(Decimal)
     for item in selected:
@@ -635,6 +676,7 @@ def get_dashboard_data(
         total_income=summary.total_income,
         total_spending=summary.total_spending,
         account_spending=account_spending,
+        person_breakdown=person_breakdown,
         manual_investing_total=manual_investing_total,
         investing_total=investing_total,
         savings_goal=savings_goal,
