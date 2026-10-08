@@ -5,7 +5,7 @@ from PyInstaller.utils.hooks import collect_data_files
 
 
 project_root = Path(SPECPATH)
-assets = [(str(project_root / "icons"), "icons")]
+assets = [(str(project_root / "assets" / "icons"), "assets/icons")]
 assets += collect_data_files("qtawesome")
 
 analysis = Analysis(

@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, call, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from ui.dashboard import DashboardPage
-from utils.import_archive import stage_import_files
+from app.ui.pages.dashboard import DashboardPage
+from app.utils.import_archive import stage_import_files
 
 
 class ImportArchiveTest(unittest.TestCase):
@@ -17,7 +17,7 @@ class ImportArchiveTest(unittest.TestCase):
             patch.object(Path, "resolve", autospec=True, side_effect=lambda path, strict: path),
             patch.object(Path, "is_file", return_value=True),
             patch.object(Path, "mkdir") as mkdir,
-            patch("utils.import_archive.shutil.copy2") as copy,
+            patch("app.utils.import_archive.shutil.copy2") as copy,
         ):
             archive = stage_import_files(
                 ["first.csv", "second.csv"],
@@ -35,8 +35,8 @@ class ImportArchiveTest(unittest.TestCase):
             patch.object(Path, "is_file", return_value=True),
             patch.object(Path, "mkdir"),
             patch.object(Path, "exists", return_value=True),
-            patch("utils.import_archive.shutil.copy2", side_effect=OSError("full")),
-            patch("utils.import_archive.shutil.rmtree") as remove_tree,
+            patch("app.utils.import_archive.shutil.copy2", side_effect=OSError("full")),
+            patch("app.utils.import_archive.shutil.rmtree") as remove_tree,
         ):
             with self.assertRaisesRegex(OSError, "full"):
                 stage_import_files(["first.csv"])
@@ -63,8 +63,8 @@ class ImportArchiveTest(unittest.TestCase):
         )
 
         with (
-            patch("ui.dashboard.stage_import_files", return_value=archive) as stage,
-            patch("ui.dashboard.GenericParser", return_value=parser),
+            patch("app.ui.pages.dashboard.stage_import_files", return_value=archive) as stage,
+            patch("app.ui.pages.dashboard.GenericParser", return_value=parser),
         ):
             DashboardPage._parse_selected_files(page, dialog)
 
@@ -89,8 +89,8 @@ class ImportArchiveTest(unittest.TestCase):
         page = SimpleNamespace(user_id="user-1")
 
         with (
-            patch("ui.dashboard.stage_import_files", return_value=archive),
-            patch("ui.dashboard.GenericParser", return_value=parser),
+            patch("app.ui.pages.dashboard.stage_import_files", return_value=archive),
+            patch("app.ui.pages.dashboard.GenericParser", return_value=parser),
         ):
             DashboardPage._parse_selected_files(page, dialog)
 

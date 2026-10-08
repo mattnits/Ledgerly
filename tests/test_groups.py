@@ -12,10 +12,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from database.dashboard import get_dashboard_data
-from database.db import Base, _migrate_group_color, get_profiles
-from database.groups import create_group, remove_membership, update_group
-from database.models import (
+from app.services.dashboard import get_dashboard_data
+from app.core.db import Base, _migrate_group_color, get_profiles
+from app.services.groups import create_group, remove_membership, update_group
+from app.models.models import (
     Account,
     Category,
     Group,
@@ -23,11 +23,11 @@ from database.models import (
     Transaction,
     User,
 )
-from database.profiles import ProfileContext, ProfileType
-from database.transactions import TransactionQueryParams, fetch_transactions
-from ui.add_user import AddUserDialog
-from ui.switch_user import SwitchUserDialog
-from utils.constants import TransactionType
+from app.services.profiles import ProfileContext, ProfileType
+from app.services.transactions import TransactionQueryParams, fetch_transactions
+from app.ui.dialogs.add_user import AddUserDialog
+from app.ui.dialogs.switch_user import SwitchUserDialog
+from app.utils.constants import TransactionType
 
 
 class GroupFeatureTest(unittest.TestCase):

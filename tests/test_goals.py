@@ -12,8 +12,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from database.db import Base
-from database.goals import (
+from app.core.db import Base
+from app.services.goals import (
     create_or_update_category_budget,
     create_savings_goal,
     delete_category_budget,
@@ -25,7 +25,7 @@ from database.goals import (
     set_monthly_savings_goal,
     update_savings_goal,
 )
-from database.models import (
+from app.models.models import (
     Account,
     Category,
     Group,
@@ -38,14 +38,14 @@ from database.models import (
     Transaction,
     User,
 )
-from ui.goals import (
+from app.ui.pages.goals import (
     GoalsPage,
     MonthlySavingsGoalDialog,
     ProgressRing,
     SavingsGoalCard,
 )
-from ui.theme import apply_theme
-from utils.constants import TransactionType
+from app.ui.theme import apply_theme
+from app.utils.constants import TransactionType
 
 
 class GoalsServiceTest(unittest.TestCase):

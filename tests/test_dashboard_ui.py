@@ -7,8 +7,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QSignalSpy
 
-from database.dashboard import CategorySpending
-from ui.components.dashboard_cards import (
+from app.services.dashboard import CategorySpending
+from app.ui.widgets.dashboard_cards import (
     BudgetGoalsCard,
     CategoryCard,
     DonutChart,

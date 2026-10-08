@@ -14,12 +14,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from database.db import Base
-from database.models import Account, Transaction, User
-from database.transactions import TransactionQueryResult, TransactionRowData
-from ui.components.statements_table import StatementsTable
-from ui.shell import ShellWindow
-from utils.constants import TRANSACTIONS_PAGE, TransactionType
+from app.core.db import Base
+from app.models.models import Account, Transaction, User
+from app.services.transactions import TransactionQueryResult, TransactionRowData
+from app.ui.widgets.statements_table import StatementsTable
+from app.ui.shell import ShellWindow
+from app.utils.constants import TRANSACTIONS_PAGE, TransactionType
 
 
 def _result(description: str) -> TransactionQueryResult:
@@ -131,7 +131,7 @@ class TransactionAsyncLoadingTest(unittest.TestCase):
 
         table = StatementsTable(query_loader=loader)
         table.show()
-        with self.assertLogs("ui.components.statements_table", level="ERROR"):
+        with self.assertLogs("app.ui.widgets.statements_table", level="ERROR"):
             table.set_user_id("test-user")
             self._wait_for(lambda: not table._loading)
 

@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication, QDialog
 
-from ui.switch_user import SwitchUserDialog
+from app.ui.dialogs.switch_user import SwitchUserDialog
 
 
 class SwitchUserDialogTest(unittest.TestCase):

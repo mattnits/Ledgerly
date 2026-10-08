@@ -13,8 +13,8 @@ from PySide6.QtWidgets import (
     QSpinBox,
 )
 
-from ui.input_behavior import install_wheel_change_guard
-from ui.theme import refresh_button_icon_spacing, set_button_icon
+from app.ui.widgets.input_behavior import install_wheel_change_guard
+from app.ui.theme import refresh_button_icon_spacing, set_button_icon
 
 
 def send_wheel(widget, vertical_delta: int) -> None:

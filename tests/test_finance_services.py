@@ -6,14 +6,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from database.db import Base
-from database.finance_services import (
+from app.core.db import Base
+from app.services.finance_services import (
     investment_contribution_totals,
     monthly_budget_progress,
     monthly_financial_summary,
     savings_goal_progress,
 )
-from database.models import (
+from app.models.models import (
     Account,
     Category,
     Group,
@@ -25,7 +25,7 @@ from database.models import (
     Transaction,
     User,
 )
-from utils.constants import TransactionType
+from app.utils.constants import TransactionType
 
 
 class FinanceServicesTest(unittest.TestCase):

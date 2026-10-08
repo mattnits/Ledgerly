@@ -6,8 +6,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
-from ui.components.date_dropdown import DateDropdown, DateDropdownItemDelegate
-from ui.components.period_selector import PeriodSelector
+from app.ui.widgets.date_dropdown import DateDropdown, DateDropdownItemDelegate
+from app.ui.widgets.period_selector import PeriodSelector
 
 
 class PeriodSelectorTest(unittest.TestCase):

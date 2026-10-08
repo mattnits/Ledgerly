@@ -17,7 +17,7 @@ from sqlalchemy import (
     select,
 )
 
-from database.db import init_db
+from app.core.db import init_db
 
 
 class DatabaseMigrationTest(unittest.TestCase):

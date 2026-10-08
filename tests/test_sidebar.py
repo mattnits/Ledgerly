@@ -7,8 +7,8 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication, QHBoxLayout, QWidget
 
-from ui.sidebar import Sidebar, avatar_icon
-from utils.constants import DASHBOARD_PAGE, USER_MANAGEMENT_PAGE
+from app.ui.sidebar import Sidebar, avatar_icon
+from app.utils.constants import DASHBOARD_PAGE, USER_MANAGEMENT_PAGE
 
 
 class SidebarTest(unittest.TestCase):

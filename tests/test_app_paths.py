@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from utils.app_paths import app_data_dir, import_archive_dir, import_archive_label
+from app.core.paths import app_data_dir, import_archive_dir, import_archive_label
 
 
 class AppPathsTest(unittest.TestCase):

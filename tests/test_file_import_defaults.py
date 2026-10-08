@@ -5,8 +5,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
-from ui.components.file_row import FileRow, infer_parse_type_from_filename
-from utils.constants import SUPPORTED_PARSE_TYPES
+from app.ui.widgets.file_row import FileRow, infer_parse_type_from_filename
+from app.utils.constants import SUPPORTED_PARSE_TYPES
 
 
 class FileImportDefaultTest(unittest.TestCase):

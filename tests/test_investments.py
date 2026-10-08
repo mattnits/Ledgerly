@@ -6,8 +6,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from database.db import Base
-from database.investments import (
+from app.core.db import Base
+from app.services.investments import (
     create_investment_account,
     create_investment_snapshot,
     delete_investment_account,
@@ -24,7 +24,7 @@ from database.investments import (
     set_investment_account_active,
     update_investment_account,
 )
-from database.models import Group, GroupMembership, InvestmentAccount, User
+from app.models.models import Group, GroupMembership, InvestmentAccount, User
 
 
 class InvestmentServicesTest(unittest.TestCase):

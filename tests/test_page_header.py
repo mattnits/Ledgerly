@@ -5,7 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QPushButton
 
-from ui.components.page_header import PageHeader
+from app.ui.widgets.page_header import PageHeader
 
 
 class PageHeaderTest(unittest.TestCase):

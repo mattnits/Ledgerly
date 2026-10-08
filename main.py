@@ -4,7 +4,7 @@ from PySide6.QtCore import QRectF, QTimer, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
 
-from utils.app_paths import app_data_dir, is_packaged
+from app.core.paths import app_data_dir, is_packaged
 
 
 def create_splash() -> QSplashScreen:
@@ -95,16 +95,16 @@ def main():
         # Keep these imports after the first paint. Importing the full UI pulls
         # in every page and icon dependency, which otherwise leaves the first
         # native window blank while Python finishes loading them.
-        from database.db import ensure_categories, init_db
+        from app.core.db import ensure_categories, init_db
 
         set_splash_status(app, splash, "Preparing your database...")
         init_db()
         ensure_categories()
 
         set_splash_status(app, splash, "Loading your dashboard...")
-        from ui.input_behavior import install_wheel_change_guard
-        from ui.shell import ShellWindow
-        from ui.theme import apply_theme
+        from app.ui.widgets.input_behavior import install_wheel_change_guard
+        from app.ui.shell import ShellWindow
+        from app.ui.theme import apply_theme
 
         apply_theme(app)
         install_wheel_change_guard(app)

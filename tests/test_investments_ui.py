@@ -11,14 +11,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from database.db import Base
-from database.investments import (
+from app.core.db import Base
+from app.services.investments import (
     create_investment_account,
     create_investment_snapshot,
 )
-from database.models import User
-from ui.investments import InvestmentsPage
-from ui.theme import APP_STYLESHEET
+from app.models.models import User
+from app.ui.pages.investments import InvestmentsPage
+from app.ui.theme import APP_STYLESHEET
 
 
 class InvestmentsPageUiTest(unittest.TestCase):

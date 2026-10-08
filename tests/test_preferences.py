@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtTest import QSignalSpy
 from PySide6.QtWidgets import QApplication
 
-from ui.preferences import (
+from app.ui.preferences import (
     last_user_id,
     open_fullscreen_enabled,
     save_imported_files_enabled,
@@ -15,7 +15,7 @@ from ui.preferences import (
     set_open_fullscreen,
     set_save_imported_files,
 )
-from ui.settings import SettingsPage
+from app.ui.pages.settings import SettingsPage
 
 
 class MemorySettings:
@@ -51,8 +51,8 @@ class PreferencesTest(unittest.TestCase):
 
     def test_settings_toggle_saves_and_announces_the_window_mode(self):
         with (
-            patch("ui.settings.open_fullscreen_enabled", return_value=True),
-            patch("ui.settings.set_open_fullscreen") as save_preference,
+            patch("app.ui.pages.settings.open_fullscreen_enabled", return_value=True),
+            patch("app.ui.pages.settings.set_open_fullscreen") as save_preference,
         ):
             page = SettingsPage()
             changes = QSignalSpy(page.fullscreen_preference_changed)
@@ -83,9 +83,9 @@ class PreferencesTest(unittest.TestCase):
 
     def test_settings_controls_the_import_dialog_default(self):
         with (
-            patch("ui.settings.open_fullscreen_enabled", return_value=True),
-            patch("ui.settings.save_imported_files_enabled", return_value=True),
-            patch("ui.settings.set_save_imported_files") as save_preference,
+            patch("app.ui.pages.settings.open_fullscreen_enabled", return_value=True),
+            patch("app.ui.pages.settings.save_imported_files_enabled", return_value=True),
+            patch("app.ui.pages.settings.set_save_imported_files") as save_preference,
         ):
             page = SettingsPage()
             self.assertTrue(page.save_import_files_toggle.isChecked())

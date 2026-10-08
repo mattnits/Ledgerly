@@ -19,9 +19,9 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from database.db import Base
-from database.models import User
-from ui.add_user import AddUserDialog
+from app.core.db import Base
+from app.models.models import User
+from app.ui.dialogs.add_user import AddUserDialog
 
 
 class AddUserDialogTest(unittest.TestCase):
@@ -87,14 +87,14 @@ class AddUserDialogTest(unittest.TestCase):
         dialog = AddUserDialog(session_factory=self.sessions)
         original = dialog.selected_color
         with patch(
-            "ui.add_user.QColorDialog.getColor",
+            "app.ui.dialogs.add_user.QColorDialog.getColor",
             return_value=QColor(),
         ):
             dialog.open_color_picker()
         self.assertEqual(dialog.selected_color, original)
 
         with patch(
-            "ui.add_user.QColorDialog.getColor",
+            "app.ui.dialogs.add_user.QColorDialog.getColor",
             return_value=QColor("#12ab34"),
         ):
             dialog.open_color_picker()

@@ -10,9 +10,9 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from database.dashboard import get_dashboard_data
-from database.db import Base
-from database.investments import (
+from app.services.dashboard import get_dashboard_data
+from app.core.db import Base
+from app.services.investments import (
     calculate_work_rrsp_for_salary,
     create_investment_account,
     create_investment_snapshot,
@@ -25,7 +25,7 @@ from database.investments import (
     get_work_rrsp_monthly_history,
     update_investment_account,
 )
-from database.models import (
+from app.models.models import (
     Account,
     Category,
     InvestmentAccount,
@@ -33,12 +33,12 @@ from database.models import (
     Transaction,
     User,
 )
-from ui.investments import (
+from app.ui.pages.investments import (
     InvestmentAccountDialog,
     InvestmentsPage,
     WorkRrspDetailDialog,
 )
-from utils.constants import TransactionType
+from app.utils.constants import TransactionType
 
 
 class WorkRrspFixture:

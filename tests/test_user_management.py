@@ -11,9 +11,9 @@ from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from database.db import Base, get_profiles
-from database.groups import create_group
-from database.models import (
+from app.core.db import Base, get_profiles
+from app.services.groups import create_group
+from app.models.models import (
     Account,
     Category,
     Group,
@@ -27,8 +27,8 @@ from database.models import (
     Transaction,
     User,
 )
-from database.session_context import CurrentSession
-from database.user_management import (
+from app.core.session_context import CurrentSession
+from app.services.user_management import (
     AuthorizationError,
     GroupHasOwnedDataError,
     LastAdminError,
@@ -39,9 +39,9 @@ from database.user_management import (
     management_snapshot,
     set_admin,
 )
-from ui.switch_user import SwitchUserDialog
-from ui.shell import ShellWindow
-from ui.user_management import UserManagementPage
+from app.ui.dialogs.switch_user import SwitchUserDialog
+from app.ui.shell import ShellWindow
+from app.ui.pages.user_management import UserManagementPage
 
 
 class UserManagementServiceTest(unittest.TestCase):
