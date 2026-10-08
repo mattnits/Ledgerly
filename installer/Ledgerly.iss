@@ -1,8 +1,8 @@
-; Finance Windows installer. Build after PyInstaller has populated dist\Finance.
+; Ledgerly Windows installer. Build after PyInstaller has populated dist\Ledgerly.
 
-#define MyAppName "Finance"
-#define MyAppExeName "Finance.exe"
-#define MyAppVersion GetEnv("FINANCE_VERSION")
+#define MyAppName "Ledgerly"
+#define MyAppExeName "Ledgerly.exe"
+#define MyAppVersion GetEnv("LEDGERLY_VERSION")
 #if MyAppVersion == ""
   #define MyAppVersion "0.1.0"
 #endif
@@ -20,7 +20,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 OutputDir=..\dist
-OutputBaseFilename=FinanceSetup
+OutputBaseFilename=LedgerlySetup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -34,9 +34,12 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 
 [InstallDelete]
 Type: filesandordirs; Name: "{app}\_internal"
+Type: files; Name: "{app}\Finance.exe"
+Type: files; Name: "{autoprograms}\Finance.lnk"
+Type: files; Name: "{autodesktop}\Finance.lnk"
 
 [Files]
-Source: "..\dist\Finance\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist\Ledgerly\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"

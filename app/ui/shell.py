@@ -42,7 +42,7 @@ class ShellWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("Finance")
+        self.setWindowTitle("Ledgerly")
         self.resize(1400, 850)
         self.setMinimumSize(1100, 700)
         self._active_user_dialog: QDialog | None = None

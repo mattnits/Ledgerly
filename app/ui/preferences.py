@@ -3,15 +3,26 @@ from __future__ import annotations
 from PySide6.QtCore import QSettings
 
 
-SETTINGS_ORGANIZATION = "Finance"
-SETTINGS_APPLICATION = "Finance"
+SETTINGS_ORGANIZATION = "Ledgerly"
+SETTINGS_APPLICATION = "Ledgerly"
+LEGACY_SETTINGS_ORGANIZATION = "Finance"
+LEGACY_SETTINGS_APPLICATION = "Finance"
 OPEN_FULLSCREEN_KEY = "display/open_fullscreen"
 SAVE_IMPORTED_FILES_KEY = "imports/save_source_files"
 LAST_USER_ID_KEY = "session/last_user_id"
 
 
 def application_settings() -> QSettings:
-    return QSettings(SETTINGS_ORGANIZATION, SETTINGS_APPLICATION)
+    settings = QSettings(SETTINGS_ORGANIZATION, SETTINGS_APPLICATION)
+    if not settings.allKeys():
+        legacy = QSettings(
+            LEGACY_SETTINGS_ORGANIZATION,
+            LEGACY_SETTINGS_APPLICATION,
+        )
+        for key in legacy.allKeys():
+            settings.setValue(key, legacy.value(key))
+        settings.sync()
+    return settings
 
 
 def _boolean_preference(

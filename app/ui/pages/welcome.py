@@ -23,7 +23,7 @@ class WelcomePage(QWidget):
         layout.setSpacing(20)
 
         header = PageHeader(
-            "Welcome to the Finance App",
+            "Welcome to Ledgerly",
             "Please click below to add a user.",
             centered=True,
         )

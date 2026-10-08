@@ -365,7 +365,7 @@ class Sidebar(QFrame):
             awesome_icon("fa6s.wallet", color="#55a8ff").pixmap(20, 20)
         )
         self.brand_icon.setFixedSize(20, 20)
-        self.brand_title = QLabel("Finance")
+        self.brand_title = QLabel("Ledgerly")
         self.brand_title.setObjectName("brandTitle")
         self.collapse_button = QToolButton()
         self.collapse_button.setObjectName("sidebarToggle")

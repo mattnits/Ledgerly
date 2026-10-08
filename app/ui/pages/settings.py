@@ -56,7 +56,7 @@ class SettingsPage(QWidget):
         fullscreen_label = QLabel("Open in fullscreen")
         fullscreen_label.setObjectName("settingsOptionTitle")
         fullscreen_description = QLabel(
-            "Use the entire screen when Finance starts. Turn this off for a windowed app."
+            "Use the entire screen when Ledgerly starts. Turn this off for a windowed app."
         )
         fullscreen_description.setObjectName("mutedLabel")
         fullscreen_description.setWordWrap(True)
@@ -66,7 +66,7 @@ class SettingsPage(QWidget):
         self.fullscreen_toggle = ToggleSwitch()
         self.fullscreen_toggle.setObjectName("fullscreenToggle")
         self.fullscreen_toggle.setAccessibleName("Open in fullscreen")
-        self.fullscreen_toggle.setToolTip("Open Finance in fullscreen")
+        self.fullscreen_toggle.setToolTip("Open Ledgerly in fullscreen")
         self.fullscreen_toggle.setChecked(open_fullscreen_enabled())
         self.fullscreen_toggle.toggled.connect(self._set_fullscreen_preference)
         fullscreen_row.addWidget(self.fullscreen_toggle, 0, Qt.AlignmentFlag.AlignVCenter)

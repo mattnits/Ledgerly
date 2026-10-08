@@ -4,7 +4,7 @@ from PySide6.QtCore import QRectF, QTimer, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
 
-from app.core.paths import app_data_dir, is_packaged
+from app.core.paths import is_packaged, prepare_app_data_dir
 
 
 def create_splash() -> QSplashScreen:
@@ -40,7 +40,7 @@ def create_splash() -> QSplashScreen:
     title_font.setBold(True)
     painter.setFont(title_font)
     painter.setPen(QColor("#f2f4f7"))
-    painter.drawText(QRectF(116, 57, 340, 42), "Finance")
+    painter.drawText(QRectF(116, 57, 340, 42), "Ledgerly")
 
     subtitle_font = QFont()
     subtitle_font.setPixelSize(13)
@@ -81,16 +81,16 @@ def set_splash_status(
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("Finance")
+    app.setApplicationName("Ledgerly")
 
     splash = create_splash()
     splash.show()
-    set_splash_status(app, splash, "Starting Finance...")
+    set_splash_status(app, splash, "Starting Ledgerly...")
 
     try:
         if is_packaged():
             set_splash_status(app, splash, "Setting up local storage...")
-            app_data_dir().mkdir(parents=True, exist_ok=True)
+            prepare_app_data_dir()
 
         # Keep these imports after the first paint. Importing the full UI pulls
         # in every page and icon dependency, which otherwise leaves the first
@@ -137,8 +137,8 @@ def main():
         if is_packaged():
             QMessageBox.critical(
                 None,
-                "Finance could not start",
-                f"Finance could not finish setup.\n\n{error}",
+                "Ledgerly could not start",
+                f"Ledgerly could not finish setup.\n\n{error}",
             )
             sys.exit(1)
         raise

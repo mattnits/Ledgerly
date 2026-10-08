@@ -1,0 +1,21 @@
+#!/bin/sh
+
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *)
+        echo "Skipping the Ledgerly Windows build on this operating system."
+        exit 0
+        ;;
+esac
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass \
+    -File "$repo_root/scripts/build-ledgerly-local.ps1"
+status=$?
+
+if [ "$status" -ne 0 ]; then
+    echo "Ledgerly's post-commit build failed; the Git commit was still created." >&2
+fi
+
+exit 0

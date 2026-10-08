@@ -1,4 +1,4 @@
-# Build separately on Windows and Linux: python -m PyInstaller --noconfirm Finance.spec
+# Build separately on Windows and Linux: python -m PyInstaller --noconfirm Ledgerly.spec
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files
@@ -26,7 +26,7 @@ program = EXE(
     analysis.scripts,
     [],
     exclude_binaries=True,
-    name="Finance",
+    name="Ledgerly",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -39,5 +39,5 @@ bundle = COLLECT(
     analysis.datas,
     strip=False,
     upx=False,
-    name="Finance",
+    name="Ledgerly",
 )
