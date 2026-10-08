@@ -4,12 +4,14 @@ A local PySide6 finance app for importing statements, reviewing transactions, an
 
 ## Download and run
 
-Download the release ZIP for your operating system, extract the **entire** `Finance` folder, and start the application from inside it:
+Download the release for your operating system:
 
-- Windows: double-click `Finance.exe`.
+- Windows: download and double-click `FinanceSetup.exe`. The per-user installer adds Finance to the Start menu, offers a desktop shortcut, and can launch the app when setup finishes. Administrator access is not required.
 - Linux: run `chmod +x Finance` once if needed, then run `./Finance` from a terminal or desktop file manager.
 
-The Windows and Linux downloads are separate, self-contained builds. They include Python and the three runtime packages, so users do **not** need to install Python, run `setup.bat`/`setup.sh`, or download packages on first launch. The startup window shows setup progress while Finance prepares local storage and its database; later launches open the same way without reinstalling anything. Keep the executable and its `_internal` folder together. A GitHub source-code ZIP is not a prebuilt download.
+The Windows installer and Linux download are separate, self-contained builds. They include Python and the runtime packages, so users do **not** need to install Python, run `setup.bat`/`setup.sh`, or download packages on first launch. The startup window shows setup progress while Finance prepares local storage and its database; later launches use the same local data. A portable `Finance-Windows-Portable.zip` is also published for Windows users who do not want to install the app; its executable and `_internal` folder must stay together. A GitHub source-code ZIP is not a prebuilt download.
+
+The installer is currently unsigned, so Windows may show an “unrecognized app” SmartScreen warning for a newly downloaded build. Production releases should be signed with a consistent trusted publisher certificate.
 
 Packaged builds store the database and saved imported statements in a writable user folder:
 
@@ -32,14 +34,24 @@ On Windows run `setup.bat`, then `.venv\Scripts\python.exe main.py`. On Linux ru
 
 ## Build desktop downloads
 
-On each target operating system, install Python 3.11 or newer and run:
+On each target operating system, install Python 3.11 or newer. To build the portable application, run:
 
 ```text
 python -m pip install -r requirements-build.txt
 python -m PyInstaller --noconfirm Finance.spec
 ```
 
-Distribute the **whole** `dist/Finance` folder, or zip that folder. Windows produces `Finance.exe`; Linux produces an executable named `Finance` (Linux does not run `.exe` files). PyInstaller cannot cross-build the Windows download from Linux or vice versa. The `Build desktop downloads` GitHub Actions workflow tests and builds both platforms. A `v*` tag publishes the ZIPs as release downloads; a manual workflow run keeps them as downloadable build artifacts.
+PyInstaller cannot cross-build the Windows download from Linux or vice versa.
+
+For the Windows installer, install [Inno Setup 6](https://jrsoftware.org/isdl.php), then double-click `build-windows-installer.bat` or run it with an optional version:
+
+```text
+build-windows-installer.bat 1.0.0
+```
+
+This creates `dist/FinanceSetup.exe`. It wraps the complete `dist/Finance` PyInstaller bundle, installs under `%LOCALAPPDATA%\Programs\Finance`, and does not delete the database or imported statements when upgrading or uninstalling.
+
+The `Build desktop downloads` GitHub Actions workflow builds and smoke-tests the portable applications and Windows installer. A `v*` tag publishes `FinanceSetup.exe`, the Windows portable ZIP, and the Linux ZIP as release downloads; a manual workflow run keeps them as downloadable build artifacts.
 
 ## Investment schema migration
 

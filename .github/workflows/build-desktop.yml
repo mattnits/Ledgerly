@@ -13,7 +13,7 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact: Finance-Windows
+            artifact: Finance-Windows-Portable
           - os: ubuntu-22.04
             artifact: Finance-Linux
     runs-on: ${{ matrix.os }}
@@ -35,10 +35,49 @@ jobs:
       - name: Smoke-test Linux app
         if: runner.os == 'Linux'
         run: python tests/smoke_packaged.py dist/Finance/Finance
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:FINANCE_VERSION = if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $env:GITHUB_REF_NAME.TrimStart('v')
+          } else {
+            '0.1.0-dev'
+          }
+          $isccCandidates = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+            "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+          )
+          $iscc = $isccCandidates |
+            Where-Object { Test-Path -LiteralPath $_ } |
+            Select-Object -First 1
+          if (-not $iscc) {
+            throw 'Inno Setup compiler was not found.'
+          }
+          & $iscc installer\Finance.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Smoke-test Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installRoot = Join-Path $env:RUNNER_TEMP 'FinanceInstall'
+          $arguments = @(
+            '/VERYSILENT',
+            '/SUPPRESSMSGBOXES',
+            '/NORESTART',
+            "/DIR=$installRoot"
+          )
+          $process = Start-Process -FilePath 'dist\FinanceSetup.exe' -ArgumentList $arguments -Wait -PassThru
+          if ($process.ExitCode -ne 0) { exit $process.ExitCode }
+          python tests/smoke_packaged.py "$installRoot\Finance.exe"
+          $uninstaller = Join-Path $installRoot 'unins000.exe'
+          $process = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { exit $process.ExitCode }
       - name: Archive Windows app
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -LiteralPath dist/Finance -DestinationPath dist/Finance-Windows.zip
+        run: Compress-Archive -LiteralPath dist/Finance -DestinationPath dist/Finance-Windows-Portable.zip
       - name: Archive Linux app
         if: runner.os == 'Linux'
         working-directory: dist
@@ -47,6 +86,13 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: dist/${{ matrix.artifact }}.zip
+          if-no-files-found: error
+      - name: Upload Windows installer
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Finance-Windows-Installer
+          path: dist/FinanceSetup.exe
           if-no-files-found: error
 
   release:
@@ -65,4 +111,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh release create "$GITHUB_REF_NAME" release/*.zip --verify-tag --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" release/* --verify-tag --generate-notes

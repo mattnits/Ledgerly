@@ -83,6 +83,26 @@ class DateDropdown(QComboBox):
         popup.setItemDelegate(DateDropdownItemDelegate(popup))
         self.setView(popup)
 
+        # QComboBox wraps custom views in a platform popup window. On Windows,
+        # that wrapper otherwise paints an opaque grey rectangle around the
+        # rounded list, so leave it transparent and let the list draw itself.
+        popup_container = popup.window()
+        popup_container.setObjectName("dateDropdownPopup")
+        popup_container.setAttribute(
+            Qt.WidgetAttribute.WA_TranslucentBackground, True
+        )
+        popup_container.setWindowFlags(
+            popup_container.windowFlags()
+            | Qt.WindowType.NoDropShadowWindowHint
+        )
+        popup_container.setAutoFillBackground(False)
+        popup_container.setStyleSheet("""
+            QFrame#dateDropdownPopup {
+                background: transparent;
+                border: none;
+            }
+        """)
+
         self.setStyleSheet("""
             QComboBox#dateDropdown {
                 color: #e8ebf1;

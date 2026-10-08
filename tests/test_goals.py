@@ -40,6 +40,7 @@ from app.models.models import (
 )
 from app.ui.pages.goals import (
     GoalsPage,
+    MonthNavigator,
     MonthlySavingsGoalDialog,
     ProgressRing,
     SavingsGoalCard,
@@ -382,6 +383,32 @@ class GoalsPageLayoutTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
+
+    def test_month_navigator_has_independent_month_and_year_dropdowns(self):
+        navigator = MonthNavigator()
+        navigator.set_month(2026, 10)
+        changes = []
+        navigator.month_changed.connect(
+            lambda year, month: changes.append((year, month))
+        )
+
+        self.assertEqual(navigator.month_selector.currentData(), 10)
+        self.assertEqual(navigator.year_selector.currentData(), 2026)
+        self.assertEqual(navigator.month_selector.accessibleName(), "Month")
+        self.assertEqual(navigator.year_selector.accessibleName(), "Year")
+
+        navigator.month_selector.setCurrentIndex(
+            navigator.month_selector.findData(11)
+        )
+        self.assertEqual(navigator.selected_month, (2026, 11))
+        self.assertEqual(changes[-1], (2026, 11))
+
+        navigator.year_selector.setCurrentIndex(
+            navigator.year_selector.findData(2027)
+        )
+        self.assertEqual(navigator.selected_month, (2027, 11))
+        self.assertEqual(changes[-1], (2027, 11))
+        navigator.close()
 
     def setUp(self):
         self.engine = create_engine(
