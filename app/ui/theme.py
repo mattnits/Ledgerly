@@ -5,7 +5,7 @@ import re
 import qtawesome as qta
 from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPixmap
-from PySide6.QtWidgets import QApplication, QAbstractButton, QLabel
+from PySide6.QtWidgets import QApplication, QAbstractButton, QLabel, QMenu
 
 from app.core.paths import ICONS_DIR, PROJECT_ROOT
 from app.ui.widgets.input_behavior import apply_interactive_cursor
@@ -174,6 +174,16 @@ def set_delete_button_icon(button: QAbstractButton, *, size: int = 15) -> None:
         icon_size=size,
         button_size=max(38, size + 22),
     )
+
+
+def prepare_popup_menu(menu: QMenu) -> QMenu:
+    """Apply the shared flush popup treatment without a native drop shadow."""
+    menu.setWindowFlags(
+        menu.windowFlags() | Qt.WindowType.NoDropShadowWindowHint
+    )
+    menu.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+    menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+    return menu
 
 
 def set_label_icon(
@@ -538,6 +548,22 @@ QPushButton#tableIconButton:hover {{
     background: {COLORS['surface_hover']};
     border-color: {COLORS['border']};
 }}
+QPushButton#transactionActionButton,
+QToolButton#goalsMenuButton {{
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    padding: 0;
+}}
+QPushButton#transactionActionButton:hover,
+QToolButton#goalsMenuButton:hover {{
+    background: {COLORS['surface_hover']};
+    border-color: {COLORS['border']};
+}}
+QPushButton#transactionActionButton:pressed,
+QToolButton#goalsMenuButton:pressed {{
+    background: #15181d;
+}}
 QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit {{
     color: #e5e7ea;
     background: #15191e;
@@ -665,12 +691,12 @@ QMenu {{
     color: #e5e7ea;
     background: #20242a;
     border: 1px solid #3a4048;
-    padding: 0;
+    padding: 4px 6px;
     margin: 0;
 }}
 QMenu::item {{
     background: transparent;
-    padding: 8px 24px 8px 10px;
+    padding: 8px 24px 8px 12px;
     margin: 0;
 }}
 QMenu::item:selected {{ background: #315f94; }}

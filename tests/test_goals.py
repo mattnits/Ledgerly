@@ -14,6 +14,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.db import Base
 from app.services.goals import (
+    CategoryBudgetProgress,
     MonthlySavingsBreakdown,
     create_or_update_category_budget,
     create_savings_goal,
@@ -40,6 +41,7 @@ from app.models.models import (
     User,
 )
 from app.ui.pages.goals import (
+    BudgetRow,
     GoalsPage,
     MonthNavigator,
     MonthlySavingsCard,
@@ -569,6 +571,77 @@ class GoalsPageLayoutTest(unittest.TestCase):
             page.add_goal_button.objectName(), "secondaryActionButton"
         )
         page.close()
+
+    def test_budget_values_remain_centered_under_headers_when_resized(self):
+        page = GoalsPage(session_factory=self.sessions)
+        page._budget_items = tuple(
+            CategoryBudgetProgress(
+                category_id=index,
+                category_name=name,
+                category_color=color,
+                spent=Decimal("210.59"),
+                target=Decimal("200"),
+            )
+            for index, (name, color) in enumerate(
+                (
+                    ("Food", "#d66a1f"),
+                    ("Groceries", "#18b86f"),
+                    ("Household Shopping", "#9b45d4"),
+                ),
+                start=1,
+            )
+        )
+
+        def center_x(widget: QWidget) -> float:
+            left = widget.mapTo(page, QPoint(0, 0)).x()
+            return left + widget.width() / 2
+
+        try:
+            page.show()
+            for width, height in ((950, 650), (1400, 900)):
+                page.resize(width, height)
+                self.app.processEvents()
+                page._reflow()
+                self.app.processEvents()
+
+                self.assertFalse(page._budget_compact)
+                rows = [
+                    page.budget_rows_layout.itemAt(index).widget()
+                    for index in range(page.budget_rows_layout.count())
+                ]
+                self.assertTrue(all(isinstance(row, BudgetRow) for row in rows))
+                row = rows[0]
+                pairs = (
+                    ("category", row.category_cell),
+                    ("spent", row.spent),
+                    ("budget", row.target),
+                    ("remaining", row.remaining),
+                )
+                for name, value in pairs:
+                    with self.subTest(width=width, height=height, column=name):
+                        self.assertAlmostEqual(
+                            center_x(page.budget_header_labels[name]),
+                            center_x(value),
+                            delta=1.0,
+                        )
+
+                self.assertAlmostEqual(
+                    center_x(page.budget_header_labels["progress"]),
+                    center_x(row.progress),
+                    delta=1.0,
+                )
+                icon_lefts = {
+                    row.category_icon.mapTo(page, QPoint(0, 0)).x()
+                    for row in rows
+                }
+                text_lefts = {
+                    row.category.mapTo(page, QPoint(0, 0)).x()
+                    for row in rows
+                }
+                self.assertEqual(len(icon_lefts), 1)
+                self.assertEqual(len(text_lefts), 1)
+        finally:
+            page.close()
 
     def test_fullscreen_720p_layout_fits_populated_sections_without_scrolling(self):
         with self.sessions.begin() as session:

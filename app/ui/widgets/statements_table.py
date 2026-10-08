@@ -643,6 +643,22 @@ class StatementsTable(QWidget):
         self._set_date_range_choice()
         self._apply_filters()
 
+    def set_selected_month(
+        self,
+        month: tuple[int, int],
+        *,
+        reload: bool = False,
+    ) -> None:
+        """Synchronize the visible picker and the transaction query month."""
+        changed = self.selected_month != month
+        self.selected_month = month
+        self.period_selector.set_selected_month(month, emit=False)
+        if self.period_filter == "monthly":
+            self.date_range_filter = self._month_range_key()
+            self._set_date_range_choice()
+            if reload and changed:
+                self._apply_filters()
+
     def _select_account(self, index: int) -> None:
         value = self.account_selector.itemData(index)
         if value is not None:

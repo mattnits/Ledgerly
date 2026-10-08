@@ -17,6 +17,7 @@ from app.ui.widgets.combo_box import FramelessPopupComboBox
 from app.ui.theme import (
     awesome_icon,
     category_icon_name,
+    prepare_popup_menu,
     set_label_icon,
     spaced_text_icon,
     spaced_text_icon_size,
@@ -233,15 +234,6 @@ class TransactionRow(QObject):
         self.action_button.setFixedSize(
             self.ACTION_BUTTON_SIZE, self.ACTION_BUTTON_SIZE
         )
-        self.action_button.setStyleSheet("""
-            QPushButton#transactionActionButton {
-                background: #20242a;
-                border: 1px solid #3a414a;
-                border-radius: 8px;
-                padding: 0;
-            }
-            QPushButton#transactionActionButton:hover { background: #2b3036; }
-        """)
         self.action_button.clicked.connect(self._show_actions)
         self.action_cell = QWidget()
         action_layout = QHBoxLayout(self.action_cell)
@@ -268,7 +260,7 @@ class TransactionRow(QObject):
         if self.is_deleted:
             self.deletion_changed.emit(self.transaction_id, False)
             return
-        menu = QMenu(self.action_button)
+        menu = prepare_popup_menu(QMenu(self.action_button))
         create_rule = menu.addAction(
             awesome_icon("fa6s.wand-magic-sparkles", color="#b9bec5"),
             "Create Rule From Transaction",

@@ -51,6 +51,7 @@ from app.ui.theme import (
     COLORS,
     awesome_icon,
     category_icon_name,
+    prepare_popup_menu,
     set_button_icon,
     spaced_text_icon,
     spaced_text_icon_size,
@@ -620,6 +621,13 @@ class BudgetRow(QFrame):
     edit_requested = Signal(int)
     delete_requested = Signal(int)
 
+    COLUMN_STRETCHES = (3, 1, 1, 1, 3, 0, 0)
+    PERCENT_COLUMN_WIDTH = 48
+    ACTION_COLUMN_WIDTH = 34
+    DENSE_ACTION_COLUMN_WIDTH = 22
+    LEFT_MARGIN = 9
+    RIGHT_MARGIN = 7
+
     def __init__(self, item: CategoryBudgetProgress, compact: bool, dense: bool = False) -> None:
         super().__init__()
         self.item = item
@@ -628,23 +636,30 @@ class BudgetRow(QFrame):
             self.setFixedHeight(22)
         else:
             self.setMinimumHeight(46)
+        self.dense = dense
         self.layout = QGridLayout(self)
-        self.layout.setContentsMargins(9, 2 if dense else 6, 7, 2 if dense else 6)
+        self.layout.setContentsMargins(
+            self.LEFT_MARGIN,
+            2 if dense else 6,
+            self.RIGHT_MARGIN,
+            2 if dense else 6,
+        )
         self.layout.setHorizontalSpacing(12)
         self.layout.setVerticalSpacing(6)
         self.category_cell = QWidget()
         category_layout = QHBoxLayout(self.category_cell)
         category_layout.setContentsMargins(0, 0, 0, 0)
         category_layout.setSpacing(8)
-        category_icon = QLabel()
+        self.category_icon = QLabel()
         badge_size = 18 if dense else 32
-        category_icon.setPixmap(_badge_pixmap(
+        self.category_icon.setPixmap(_badge_pixmap(
             category_icon_name(item.category_name), item.category_color, badge_size
         ))
-        category_icon.setFixedSize(badge_size, badge_size)
+        self.category_icon.setFixedSize(badge_size, badge_size)
         self.category = QLabel(item.category_name)
         self.category.setObjectName("goalsValue")
-        category_layout.addWidget(category_icon)
+        category_layout.addStretch()
+        category_layout.addWidget(self.category_icon)
         category_layout.addWidget(self.category)
         category_layout.addStretch()
         self.spent = QLabel(_money(item.spent))
@@ -656,6 +671,8 @@ class BudgetRow(QFrame):
         )
         self.compact_amount = QLabel(f"{_money(item.spent)} / {_money(item.target)}")
         self.compact_amount.setObjectName("goalsBudgetCompactAmount")
+        for value in (self.spent, self.target, self.remaining):
+            value.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.progress = QProgressBar()
         self.progress.setObjectName("goalsProgress")
         self.progress.setTextVisible(False)
@@ -666,10 +683,26 @@ class BudgetRow(QFrame):
             "QProgressBar { background:#27313c; border:none; border-radius:5px; }"
             f"QProgressBar::chunk {{ background:{color}; border-radius:5px; }}"
         )
+        for widget in (
+            self.category_cell,
+            self.spent,
+            self.target,
+            self.remaining,
+            self.progress,
+        ):
+            policy = widget.sizePolicy()
+            policy.setHorizontalPolicy(QSizePolicy.Policy.Ignored)
+            widget.setSizePolicy(policy)
+            widget.setMinimumWidth(0)
         self.percent = QLabel(f"{item.percent:.0f}%")
+        self.percent.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.percent.setFixedWidth(self.PERCENT_COLUMN_WIDTH)
         self.action = QToolButton()
         self.action.setObjectName("goalsMenuButton")
-        self.action.setFixedSize(22 if dense else 34, 20 if dense else 32)
+        action_width = (
+            self.DENSE_ACTION_COLUMN_WIDTH if dense else self.ACTION_COLUMN_WIDTH
+        )
+        self.action.setFixedSize(action_width, 20 if dense else 32)
         self.action.setToolTip(f"Actions for {item.category_name}")
         self.action.setAccessibleName(f"Actions for {item.category_name}")
         set_button_icon(self.action, "fa6s.ellipsis", color="#bbc6d3", active_color="#ffffff")
@@ -677,10 +710,34 @@ class BudgetRow(QFrame):
         self.compact = not compact
         self.set_compact(compact)
 
+    def set_category_text_width(self, width: int) -> None:
+        """Keep category icons aligned while names retain natural lengths."""
+        self.category.setFixedWidth(max(0, width))
+
+    @classmethod
+    def configure_wide_columns(
+        cls,
+        layout: QGridLayout,
+        *,
+        dense: bool,
+    ) -> None:
+        for column, stretch in enumerate(cls.COLUMN_STRETCHES):
+            layout.setColumnStretch(column, stretch)
+        layout.setColumnMinimumWidth(5, cls.PERCENT_COLUMN_WIDTH)
+        layout.setColumnMinimumWidth(
+            6,
+            cls.DENSE_ACTION_COLUMN_WIDTH if dense else cls.ACTION_COLUMN_WIDTH,
+        )
+
     def _set_column_stretches(self, compact: bool) -> None:
-        stretches = (3, 1, 1, 1, 3, 0, 0) if not compact else (1, 1, 0, 0, 0, 0, 0)
+        if not compact:
+            self.configure_wide_columns(self.layout, dense=self.dense)
+            return
+        stretches = (1, 1, 0, 0, 0, 0, 0)
         for column, stretch in enumerate(stretches):
             self.layout.setColumnStretch(column, stretch)
+        self.layout.setColumnMinimumWidth(5, 0)
+        self.layout.setColumnMinimumWidth(6, 0)
 
     def set_compact(self, compact: bool) -> None:
         if self.compact == compact:
@@ -705,14 +762,27 @@ class BudgetRow(QFrame):
             self.layout.addWidget(self.remaining, 0, 3)
             self.layout.addWidget(self.progress, 0, 4)
             self.layout.addWidget(self.percent, 0, 5)
-            self.layout.addWidget(self.action, 0, 6)
+            self.layout.addWidget(
+                self.action,
+                0,
+                6,
+                alignment=Qt.AlignmentFlag.AlignCenter,
+            )
         self._set_column_stretches(compact)
 
     def _show_menu(self) -> None:
-        menu = QMenu(self)
-        edit_action = menu.addAction("Edit budget")
-        delete_action = menu.addAction("Remove budget")
-        selected = menu.exec(self.action.mapToGlobal(self.action.rect().bottomLeft()))
+        menu = prepare_popup_menu(QMenu(self))
+        edit_action = menu.addAction(
+            awesome_icon("fa6s.gear", color=COLORS["text_muted"]),
+            "Edit budget",
+        )
+        delete_action = menu.addAction(
+            awesome_icon("fa6s.trash", color="#ff9da0"),
+            "Remove budget",
+        )
+        selected = menu.exec(
+            self.action.mapToGlobal(self.action.rect().bottomLeft())
+        )
         if selected is edit_action:
             self.edit_requested.emit(self.item.category_id)
         elif selected is delete_action:
@@ -817,10 +887,18 @@ class SavingsGoalCard(SectionCard):
         layout.addStretch()
 
     def _show_menu(self) -> None:
-        menu = QMenu(self)
-        edit_action = menu.addAction("Edit goal")
-        delete_action = menu.addAction("Delete goal")
-        selected = menu.exec(self.action.mapToGlobal(self.action.rect().bottomLeft()))
+        menu = prepare_popup_menu(QMenu(self))
+        edit_action = menu.addAction(
+            awesome_icon("fa6s.gear", color=COLORS["text_muted"]),
+            "Edit goal",
+        )
+        delete_action = menu.addAction(
+            awesome_icon("fa6s.trash", color="#ff9da0"),
+            "Delete goal",
+        )
+        selected = menu.exec(
+            self.action.mapToGlobal(self.action.rect().bottomLeft())
+        )
         if selected is edit_action:
             self.edit_requested.emit(self.item.id)
         elif selected is delete_action:
@@ -1056,18 +1134,52 @@ class GoalsPage(QWidget):
         self.budget_header = QWidget()
         self.budget_header.setObjectName("goalsBudgetHeader")
         self.budget_header_layout = QGridLayout(self.budget_header)
-        self.budget_header_layout.setContentsMargins(11, 8, 9, 7)
+        self.budget_header_layout.setContentsMargins(
+            BudgetRow.LEFT_MARGIN,
+            8,
+            BudgetRow.RIGHT_MARGIN,
+            7,
+        )
         self.budget_header_layout.setHorizontalSpacing(12)
         headers = (
             (0, "Category"), (1, "Spent"), (2, "Budget"),
             (3, "Remaining"), (4, "Progress"),
         )
+        self.budget_header_labels: dict[str, QLabel] = {}
         for column, text in headers:
             label = QLabel(text)
             label.setObjectName("goalsTableHeader")
-            self.budget_header_layout.addWidget(label, 0, column, 1, 2 if column == 4 else 1)
-        for column, stretch in enumerate((3, 1, 1, 1, 3, 0, 0)):
-            self.budget_header_layout.setColumnStretch(column, stretch)
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            policy = label.sizePolicy()
+            policy.setHorizontalPolicy(QSizePolicy.Policy.Ignored)
+            label.setSizePolicy(policy)
+            label.setMinimumWidth(0)
+            self.budget_header_layout.addWidget(label, 0, column)
+            self.budget_header_labels[text.casefold()] = label
+        # Keep the percentage sub-column in the header's grid calculation so
+        # its geometry is identical to every data row.
+        self.budget_percent_header_spacer = QWidget()
+        self.budget_percent_header_spacer.setFixedWidth(
+            BudgetRow.PERCENT_COLUMN_WIDTH
+        )
+        self.budget_header_layout.addWidget(
+            self.budget_percent_header_spacer,
+            0,
+            5,
+        )
+        self.budget_action_header_spacer = QWidget()
+        self.budget_action_header_spacer.setFixedWidth(
+            BudgetRow.ACTION_COLUMN_WIDTH
+        )
+        self.budget_header_layout.addWidget(
+            self.budget_action_header_spacer,
+            0,
+            6,
+        )
+        BudgetRow.configure_wide_columns(
+            self.budget_header_layout,
+            dense=False,
+        )
         self.budget_layout.addWidget(self.budget_header)
         self.budget_rows = QWidget()
         self.budget_rows.setObjectName("goalsBudgetTable")
@@ -1252,10 +1364,19 @@ class GoalsPage(QWidget):
                 )
                 section_layout.setSpacing(7 if dense else 12)
             self.budget_header_layout.setContentsMargins(
-                8 if dense else 11,
+                BudgetRow.LEFT_MARGIN,
                 4 if dense else 8,
-                7 if dense else 9,
+                BudgetRow.RIGHT_MARGIN,
                 4 if dense else 7,
+            )
+            BudgetRow.configure_wide_columns(
+                self.budget_header_layout,
+                dense=dense,
+            )
+            self.budget_action_header_spacer.setFixedWidth(
+                BudgetRow.DENSE_ACTION_COLUMN_WIDTH
+                if dense
+                else BudgetRow.ACTION_COLUMN_WIDTH
             )
             self.budget_subtitle.setVisible(not dense)
             self.goals_subtitle.setVisible(not dense)
@@ -1331,10 +1452,17 @@ class GoalsPage(QWidget):
             empty.setMinimumHeight(34 if self._dense else 70)
             self.budget_rows_layout.addWidget(empty)
             return
+        rows: list[BudgetRow] = []
         for item in self._budget_items:
             row = BudgetRow(item, bool(self._budget_compact), bool(self._dense))
             row.edit_requested.connect(self._edit_budget)
             row.delete_requested.connect(self._delete_budget)
+            rows.append(row)
+        category_text_width = max(
+            row.category.sizeHint().width() for row in rows
+        )
+        for row in rows:
+            row.set_category_text_width(category_text_width)
             self.budget_rows_layout.addWidget(row)
 
     def _render_goal_cards(self) -> None:

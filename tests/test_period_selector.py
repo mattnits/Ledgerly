@@ -1,6 +1,7 @@
 import os
 import unittest
 from datetime import date, timedelta
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -17,6 +18,7 @@ from app.ui.widgets.statements_table import StatementsTable
 from app.ui.pages.dashboard import DashboardPage
 from app.ui.pages.goals import GoalsPage
 from app.ui.pages.investments import InvestmentsPage
+from app.ui.shell import ShellWindow
 
 
 class PeriodSelectorTest(unittest.TestCase):
@@ -135,6 +137,46 @@ class PeriodSelectorTest(unittest.TestCase):
             ) for page in pages))
         finally:
             for page in pages:
+                page.close()
+
+    def test_explicit_month_is_not_replaced_when_months_load_later(self):
+        selector = PeriodSelector()
+        selector.set_selected_month((2026, 8), emit=False)
+
+        selector.set_available_months({(2026, 9), (2026, 10)})
+
+        self.assertEqual(selector.selected_month, (2026, 8))
+
+    def test_shell_applies_selected_month_to_every_monthly_page(self):
+        dashboard = DashboardPage()
+        statements = StatementsTable()
+        investments = InvestmentsPage()
+        goals = GoalsPage()
+        shell = SimpleNamespace(
+            _syncing_month_selection=False,
+            _selected_month=None,
+            dashboard_page=dashboard,
+            transactions_page=SimpleNamespace(statements_table=statements),
+            investments_page=investments,
+            goals_page=goals,
+        )
+        try:
+            ShellWindow._set_selected_month(shell, (2026, 8))
+
+            self.assertEqual(shell._selected_month, (2026, 8))
+            self.assertEqual(dashboard.selected_month, (2026, 8))
+            self.assertEqual(statements.selected_month, (2026, 8))
+            self.assertEqual(
+                statements.period_selector.selected_month,
+                (2026, 8),
+            )
+            self.assertEqual(
+                investments.period_selector.selected_month,
+                (2026, 8),
+            )
+            self.assertEqual(goals.selected_month, (2026, 8))
+        finally:
+            for page in (dashboard, statements, investments, goals):
                 page.close()
 
 

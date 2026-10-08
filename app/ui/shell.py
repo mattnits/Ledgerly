@@ -98,6 +98,25 @@ class ShellWindow(QMainWindow):
         self.goals_page = GoalsPage()
         self.user_management_page = UserManagementPage()
 
+        # Month/year navigation is shared across the monthly pages.  The
+        # value is initialized from the dashboard once the active profile is
+        # loaded, then retained while the user moves around the app.
+        self._selected_month: tuple[int, int] | None = None
+        self._syncing_month_selection = False
+        self.dashboard_page.period_selector.selection_changed.connect(
+            self._handle_period_selection_changed
+        )
+        (
+            self.transactions_page.statements_table.period_selector
+            .selection_changed.connect(self._handle_period_selection_changed)
+        )
+        self.investments_page.period_selector.selection_changed.connect(
+            self._handle_period_selection_changed
+        )
+        self.goals_page.month_navigator.period_changed.connect(
+            self._handle_goal_month_changed
+        )
+
         self.pages.addWidget(
             self.welcome_page
         )
@@ -452,6 +471,7 @@ class ShellWindow(QMainWindow):
         self.load_profiles()
 
     def _apply_profile(self, profile_key: str | None) -> None:
+        preserved_month = self._selected_month
         if profile_key is None:
             user_id = group_id = None
         else:
@@ -462,6 +482,50 @@ class ShellWindow(QMainWindow):
         self.investments_page.set_profile(user_id=user_id, group_id=group_id)
         self.accounts_page.set_profile(user_id=user_id, group_id=group_id)
         self.goals_page.set_profile(user_id=user_id, group_id=group_id)
+
+        selected_month = preserved_month or self.dashboard_page.selected_month
+        self._set_selected_month(selected_month)
+        if preserved_month is not None:
+            # Dashboard set_profile() resets its selector before loading. Load
+            # it once more after restoring the app-wide month.
+            self.dashboard_page.reload()
+
+    def _handle_period_selection_changed(
+        self,
+        _period: str,
+        selected_month: tuple[int, int],
+    ) -> None:
+        self._set_selected_month(selected_month)
+
+    def _handle_goal_month_changed(self, year: int, month: int) -> None:
+        self._set_selected_month((year, month))
+
+    def _set_selected_month(self, selected_month: tuple[int, int]) -> None:
+        """Apply one month/year selection to every monthly page."""
+        if self._syncing_month_selection:
+            return
+
+        self._syncing_month_selection = True
+        try:
+            self._selected_month = selected_month
+            self.dashboard_page.period_selector.set_selected_month(
+                selected_month,
+                emit=False,
+            )
+            self.transactions_page.statements_table.set_selected_month(
+                selected_month,
+                reload=True,
+            )
+            self.investments_page.period_selector.set_selected_month(
+                selected_month,
+                emit=False,
+            )
+            self.goals_page.month_navigator.set_period(
+                *selected_month,
+                emit=False,
+            )
+        finally:
+            self._syncing_month_selection = False
 
     def handle_data_reset(self) -> None:
         self.dashboard_page.reload()

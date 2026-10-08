@@ -105,6 +105,9 @@ class PeriodSelector(QWidget):
     def set_selected_month(self, month: Month, *, emit: bool = True) -> None:
         changed = self.selected_month != month
         self.selected_month = month
+        # An explicitly assigned month must not be replaced later when an
+        # asynchronous page finishes loading its list of available months.
+        self._months_initialized = True
         self._refresh_month_choices()
         if emit and changed:
             self.selection_changed.emit(self.period, self.selected_month)
