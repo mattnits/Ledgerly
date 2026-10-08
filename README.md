@@ -1,93 +1,216 @@
+<div align="center">
+
 # Ledgerly
 
-Ledgerly is a private, easy-to-use finance tracker built with PySide6. The goal was to have one secure place to understand my spending trends, set financial goals, and track my investments, all without sending my financial data to the cloud. Everything stays offline on my computer, with as little manual input as possible. Ledgerly was created because I couldn't find an app with all the features, safety, and security requirements I wanted.
+**Private, local-first personal finance tracking for your desktop.**
 
-## Download and run
+[Highlights](#highlights) · [Screenshots](#a-closer-look) ·
+[Download](#download-and-install) · [Privacy](#local-data-and-privacy) ·
+[Development](#run-from-source)
 
-Download the Ledgerly release for your operating system:
+[![Desktop builds](https://github.com/mattnits/FinancesApp/actions/workflows/build-desktop.yml/badge.svg)](https://github.com/mattnits/FinancesApp/actions/workflows/build-desktop.yml)
+![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![PySide6](https://img.shields.io/badge/Desktop-PySide6-41CD52?logo=qt&logoColor=white)
+![Windows and Linux](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux-4A90E2)
+![Local first](https://img.shields.io/badge/Data-local--first-16A085)
 
-- Windows: Download and double-click `LedgerlySetup.exe`. The installer adds Ledgerly to the Start menu, offers an optional desktop shortcut, and can launch the app when setup finishes. Administrator access is not required.
-- Linux: Download and extract `Ledgerly-Linux.zip`, then open the extracted `Ledgerly` folder. If needed, run `chmod +x Ledgerly` once, then launch the app with `./Ledgerly` or from your desktop file manager.
+Ledgerly brings transactions, spending trends, budgets, savings goals, and
+investments together in one focused desktop app. Your financial data stays on
+your computer—no cloud account, subscription, or internet connection required.
 
-The Windows and Linux downloads are separate, self-contained builds. They include Python and all required runtime packages, so users do **not** need to install Python, run `setup.bat`/`setup.sh`, or download anything else on first launch. The startup window shows setup progress while Ledgerly prepares local storage and its database; later launches use the same local data. A portable `Ledgerly-Windows-Portable.zip` is also available for Windows users who do not want to install the app; its executable and `_internal` folder must stay together. A GitHub source-code ZIP is not a prebuilt download.
+</div>
 
-The installer is currently unsigned, so Windows may show an “unrecognized app” SmartScreen warning for a newly downloaded build. Production releases should be signed with a consistent trusted publisher certificate.
+![Ledgerly dashboard showing income, spending, savings, budgets, and investments](assets/readme-assets/dashboard.png)
 
-Packaged builds store the database and saved imported statements in a writable user folder:
+## Why Ledgerly?
 
-| Platform | Database location |
-| --- | --- |
-| Windows | `%LOCALAPPDATA%\Ledgerly\finance.db` |
-| Linux | `$XDG_DATA_HOME/ledgerly/finance.db`, or `~/.local/share/ledgerly/finance.db` when unset |
+Most finance tools require a cloud account or constant manual entry. Ledgerly
+is designed for people who want a clear view of their finances while keeping
+control of their data. Import supported bank statements, review the results,
+and let Ledgerly turn them into useful monthly and all-time insights.
 
-Imported statement copies are under `imported_statements` beside the database. Existing source-checkout data stays in its original location; it is **not** moved automatically into a packaged build. To carry it over, close Ledgerly first, back up your existing database, then copy it to the packaged location above.
+## Highlights
 
-On its first packaged launch, Ledgerly copies an existing legacy Finance profile into the new Ledgerly user-data folder when the Ledgerly folder does not yet exist. The legacy profile is left in place as a backup.
+- **Private by design** — Ledgerly stores its SQLite database and optional
+  statement copies locally. The app does not upload your financial data.
+- **Fast statement imports** — Import supported TD and American Express CSV
+  statements, review possible duplicates, and retain a clean transaction history.
+- **Useful transaction tools** — Search, filter, categorize, restore removed
+  entries, and create reusable classification rules.
+- **Clear financial reporting** — Compare income, spending, savings, category
+  totals, budgets, and investments across monthly and all-time views.
+- **Goals that stay visible** — Track monthly savings targets, category budgets,
+  and longer-term goals with progress indicators.
+- **Investment tracking** — Record TFSA, FHSA, RRSP, and general investment
+  accounts, including payroll-based work RRSP contribution estimates.
+- **Multiple profiles and groups** — Keep personal finances separate or create
+  shared group views with configurable membership and permissions.
+- **Self-contained desktop builds** — Windows and Linux downloads include
+  Python and all required runtime packages.
 
-## Minimum requirements
+## A closer look
 
-- Windows 10 or 11, 64-bit; or 64-bit Linux with a graphical desktop, glibc 2.35 or newer (for example Ubuntu 22.04 or newer), and Qt's XCB runtime libraries.
-- Permission to write to your user data folder. No network connection is needed after downloading the release ZIP.
-- For running **from source only**: Python 3.11 or newer with `venv` and `pip`, plus the packages in `requirements.txt`: PySide6 (`>=6.8,<7`), QtAwesome (`>=1.3,<2`), and SQLAlchemy (`>=2,<3`). Their transitive dependencies are installed by pip. `pandas` and `matplotlib` are not required.
+### Review and organize transactions
+
+Search across imported activity, filter by account, category, type, or date,
+and correct classifications directly in the table.
+
+![Ledgerly transactions page with filters and categorized statement activity](assets/readme-assets/transactions.png)
+
+### Set budgets and savings goals
+
+See how income and spending affect monthly savings, monitor category limits,
+and track longer-term goals from a single page.
+
+![Ledgerly goals page showing a monthly savings target, category budgets, and long-term goals](assets/readme-assets/goals.png)
+
+### Manage personal and shared profiles
+
+Create users and groups, review memberships, and control who can manage shared
+financial views.
+
+![Ledgerly user management page showing profiles, groups, and permissions](assets/readme-assets/user-management.png)
+
+## Download and install
+
+Download the files from the
+[latest GitHub release](https://github.com/mattnits/FinancesApp/releases/latest).
+Choose the package that matches your system:
+
+| Package | Best for | How to launch |
+| --- | --- | --- |
+| `LedgerlySetup.exe` | Most Windows users | Run the installer, then open Ledgerly from the Start menu or optional desktop shortcut. |
+| `Ledgerly-Windows-Portable.zip` | Windows users who prefer a portable app | Extract the entire archive and run `Ledgerly.exe`. Keep the executable and `_internal` folder together. |
+| `Ledgerly-Linux.zip` | 64-bit Linux desktops | Extract the archive, open the `Ledgerly` folder, and run `./Ledgerly`. If needed, run `chmod +x Ledgerly` once first. |
+
+These downloads are self-contained. You do **not** need to install Python, run
+`setup.bat` or `setup.sh`, or download dependencies. The first launch prepares
+Ledgerly's local storage and database; later launches reuse the same data.
+
+> [!NOTE]
+> The Windows installer is currently unsigned. Windows SmartScreen may show an
+> “unrecognized app” message for a newly downloaded release.
+
+The source-code archives automatically offered by GitHub are not prebuilt app
+downloads. Use one of the Ledgerly packages listed above unless you intend to
+run the project from source.
+
+## System requirements
+
+### Packaged application
+
+- Windows 10 or 11, 64-bit; or
+- 64-bit Linux with a graphical desktop, glibc 2.35 or newer (for example,
+  Ubuntu 22.04 or newer), and Qt's XCB runtime libraries;
+- permission to write to your user-data folder.
+
+No network connection is required after downloading Ledgerly.
+
+### Running from source
+
+- Python 3.11 or newer with `venv` and `pip`;
+- the packages declared in `requirements.txt`:
+  PySide6 (`>=6.8,<7`), QtAwesome (`>=1.3,<2`), and SQLAlchemy (`>=2,<3`).
+
+`pandas` and `matplotlib` are not required.
+
+## Local data and privacy
+
+Packaged builds use the operating system's writable user-data directory:
+
+| Platform | Database | Saved statement copies |
+| --- | --- | --- |
+| Windows | `%LOCALAPPDATA%\Ledgerly\finance.db` | `%LOCALAPPDATA%\Ledgerly\imported_statements` |
+| Linux | `$XDG_DATA_HOME/ledgerly/finance.db`, or `~/.local/share/ledgerly/finance.db` when `XDG_DATA_HOME` is unset | `imported_statements` beside the database |
+
+Statement files are copied only when the save option is enabled during import.
+Ledgerly keeps this information local, but it does not replace normal device
+security. Protect your operating-system account, use disk encryption when
+appropriate, and keep regular backups of `finance.db`.
 
 ## Run from source
 
-On Windows run `setup.bat`, then `.venv\Scripts\python.exe main.py`. On Linux run `bash setup.sh`, then `.venv/bin/python main.py`. Source runs keep using the existing `data/finance.db` location.
+Clone the repository, then use the setup script for your platform.
 
-## Build desktop downloads
+### Windows
 
-On each target operating system, install Python 3.11 or newer. To build the portable application, run:
+```powershell
+setup.bat
+.venv\Scripts\python.exe main.py
+```
+
+### Linux
+
+```bash
+bash setup.sh
+.venv/bin/python main.py
+```
+
+## Build desktop packages
+
+Install the build dependencies and run PyInstaller on the operating system you
+want to target:
 
 ```text
 python -m pip install -r requirements-build.txt
 python -m PyInstaller --noconfirm Ledgerly.spec
 ```
 
-PyInstaller cannot cross-build the Windows download from Linux or vice versa.
+The portable application is created in `dist/Ledgerly`:
 
-For the Windows installer, install [Inno Setup 6](https://jrsoftware.org/isdl.php), then double-click `build-windows-installer.bat` or run it with an optional version:
+- Windows executable: `dist\Ledgerly\Ledgerly.exe`
+- Linux executable: `./dist/Ledgerly/Ledgerly`
+
+Distribute the **entire** `dist/Ledgerly` directory because the executable
+depends on its adjacent `_internal` folder. PyInstaller cannot cross-build the
+Windows package from Linux or the Linux package from Windows.
+
+### Build the Windows installer
+
+Install [Inno Setup 6](https://jrsoftware.org/isdl.php), then double-click
+`build-windows-installer.bat` or run it with an optional version number:
 
 ```text
 build-windows-installer.bat 1.0.0
 ```
 
-This creates `dist/LedgerlySetup.exe`. It wraps the complete `dist/Ledgerly` PyInstaller bundle, installs under `%LOCALAPPDATA%\Programs\Ledgerly`, and does not delete the database or imported statements when upgrading or uninstalling.
+The resulting installer is written to `dist/LedgerlySetup.exe` and installs
+Ledgerly under `%LOCALAPPDATA%\Programs\Ledgerly` without requiring
+administrator access.
 
-### Automatic local Windows builds after commits
+### Automatic local builds after commits
 
-To rebuild Ledgerly after every local Git commit, enable the repository's hook once:
+Windows contributors can enable the repository's post-commit build hook once:
 
 ```text
 git config --local core.hooksPath .githooks
 ```
 
-After each commit on Windows, the hook runs `build-windows-installer.bat` and creates or updates `Ledgerly.lnk` in the repository root. The shortcut points to `dist\Ledgerly\Ledgerly.exe`. Generated builds and the machine-specific shortcut remain local and are not committed.
+After each local commit, the hook runs `build-windows-installer.bat` and creates
+or updates `Ledgerly.lnk` in the repository root. The shortcut targets
+`dist\Ledgerly\Ledgerly.exe`. Generated builds and the machine-specific shortcut
+remain local and are not committed.
 
-The `Build desktop downloads` GitHub Actions workflow builds and smoke-tests the portable applications and Windows installer. A `v*` tag publishes `LedgerlySetup.exe`, the Windows portable ZIP, and the Linux ZIP as release downloads; a manual workflow run keeps them as downloadable build artifacts.
+### Continuous delivery
 
-## Investment schema migration
-
-On startup, `init_db()` safely upgrades the original `investment_snapshots` table to the normalized investment schema when required:
-
-- one `investment_accounts` row is created for each distinct legacy owner/account name;
-- every legacy snapshot keeps its original ID, date, contribution, value, and user/group owner;
-- legacy accounts use `Imported legacy data` as their institution so they are easy to identify and edit;
-- account numbers retain their final seven alphanumeric characters only;
-- installations that previously stored four masked digits preserve those digits in the new field;
-- work RRSP configuration columns are added in place with `false`/`NULL`
-  defaults, so no existing RRSP is opted in automatically;
-- the old table is removed only after its rows have been copied inside the migration transaction.
-
-Before the first launch after upgrading, make a normal backup copy of the SQLite database in the appropriate location above. Do not delete or recreate it. Then run Ledgerly; no separate migration command is required.
-
-Work RRSP contribution history is derived at read time from non-deleted `INCOME`
-transactions in the `Salary` category. The migration does not rewrite transactions,
-create contribution rows, or alter portfolio snapshots. Editing a work RRSP rate
-therefore recalculates its history without changing the source data.
+The **Build desktop downloads** GitHub Actions workflow builds and smoke-tests
+Windows and Linux packages. Pushing a `v*` tag publishes the Windows installer,
+Windows portable ZIP, and Linux ZIP to GitHub Releases. Manual workflow runs
+retain the packages as downloadable workflow artifacts.
 
 ## Tests
 
+Run the test suite without opening desktop windows:
+
+### PowerShell
+
 ```powershell
-$env:QT_QPA_PLATFORM='offscreen'
+$env:QT_QPA_PLATFORM = 'offscreen'
 python -m unittest discover -s tests -v
+```
+
+### Bash
+
+```bash
+QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests -v
 ```

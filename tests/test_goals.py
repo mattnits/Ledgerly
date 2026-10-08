@@ -44,8 +44,10 @@ from app.ui.pages.goals import (
     MonthlySavingsGoalDialog,
     ProgressRing,
     SavingsGoalCard,
+    SavingsGoalDialog,
 )
 from app.ui.theme import apply_theme
+from app.ui.widgets.date_picker import DatePickerCalendar, DatePickerEdit
 from app.utils.constants import TransactionType
 
 
@@ -434,6 +436,20 @@ class GoalsPageLayoutTest(unittest.TestCase):
         self.assertTrue(
             dialog.windowFlags() & Qt.WindowType.FramelessWindowHint
         )
+        dialog.close()
+
+    def test_savings_goal_dialog_uses_shared_calendar_design(self):
+        dialog = SavingsGoalDialog()
+
+        self.assertIsInstance(dialog.date, DatePickerEdit)
+        self.assertIsInstance(dialog.date.calendarWidget(), DatePickerCalendar)
+        self.assertEqual(dialog.date.objectName(), "datePickerEdit")
+        self.assertFalse(dialog.date.isEnabled())
+
+        dialog.has_date.setChecked(True)
+        self.assertTrue(dialog.date.isEnabled())
+        self.assertEqual(dialog.date.calendarWidget().today_button.text(), "Today")
+        self.assertEqual(dialog.date.calendarWidget().done_button.text(), "Done")
         dialog.close()
 
     def test_savings_goal_card_construction_never_shows_child_windows(self):

@@ -335,6 +335,7 @@ class Sidebar(QFrame):
     profile_changed = Signal(str)
     create_user_clicked = Signal()
     switch_user_clicked = Signal()
+    exit_requested = Signal()
     collapsed_changed = Signal(bool)
 
     EXPANDED_WIDTH = 260
@@ -460,6 +461,19 @@ class Sidebar(QFrame):
         self.settings_button = self.create_button(
             SETTINGS_LABEL, SETTINGS_PAGE, "fa6s.gear"
         )
+        self.exit_button = QPushButton("Exit")
+        self.exit_button.setObjectName("sidebarExitButton")
+        self.exit_button.setProperty("sidebarLabel", "Exit")
+        self.exit_button.setToolTip("Exit Ledgerly")
+        self.exit_button.setAccessibleName("Exit Ledgerly")
+        set_button_icon(
+            self.exit_button,
+            "fa6s.right-from-bracket",
+            color="#b2b8c1",
+            active_color="#ff8a8a",
+            size=20,
+        )
+        self.exit_button.clicked.connect(self.exit_requested.emit)
         self.navigation_buttons = (
             self.dashboard_button,
             self.transactions_button,
@@ -485,6 +499,7 @@ class Sidebar(QFrame):
         self.sidebar_layout.addWidget(self.user_management_button)
         self.sidebar_layout.addWidget(self.settings_button)
         self.sidebar_layout.addStretch()
+        self.sidebar_layout.addWidget(self.exit_button)
         self.sidebar_layout.addWidget(self.user_bar)
 
         self.setStyleSheet("""
@@ -558,6 +573,19 @@ class Sidebar(QFrame):
                 color: #ffffff;
                 font-weight: 600;
             }
+            QPushButton#sidebarExitButton {
+                background-color: transparent;
+                color: #bfc4ca;
+                border: none;
+                border-radius: 9px;
+                text-align: left;
+                padding: 11px 14px;
+                font-size: 14px;
+            }
+            QPushButton#sidebarExitButton:hover {
+                background-color: #321f24;
+                color: #ffb4b4;
+            }
         """)
         self.dashboard_button.setChecked(True)
 
@@ -617,6 +645,11 @@ class Sidebar(QFrame):
             button.setText("" if collapsed else label)
             refresh_button_icon_spacing(button)
             button.setMaximumWidth(48 if collapsed else 16777215)
+        self.exit_button.setText(
+            "" if collapsed else self.exit_button.property("sidebarLabel")
+        )
+        refresh_button_icon_spacing(self.exit_button)
+        self.exit_button.setMaximumWidth(48 if collapsed else 16777215)
         self.current_user_text.setVisible(not collapsed)
         self.current_user_name.setVisible(not collapsed)
         self.current_user_subtitle.setVisible(not collapsed)

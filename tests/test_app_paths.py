@@ -2,7 +2,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from app.core.paths import (
     app_data_dir,
@@ -31,20 +31,16 @@ class AppPathsTest(unittest.TestCase):
             )
             self.assertEqual(import_archive_dir(), app_data_dir() / "imported_statements")
 
-    def test_packaged_build_copies_legacy_profile_to_ledgerly_location(self):
-        target = MagicMock(spec=Path)
-        target.exists.return_value = False
-        legacy = MagicMock(spec=Path)
-        legacy.is_dir.return_value = True
+    def test_prepare_app_data_dir_creates_the_current_storage_location(self):
+        target = Path("C:/example/Ledgerly")
         with (
             patch("app.core.paths.app_data_dir", return_value=target),
-            patch("app.core.paths._legacy_app_data_dir", return_value=legacy),
-            patch("app.core.paths.shutil.copytree") as copytree,
+            patch.object(Path, "mkdir") as mkdir,
         ):
             result = prepare_app_data_dir()
 
-        self.assertIs(result, target)
-        copytree.assert_called_once_with(legacy, target)
+        self.assertEqual(result, target)
+        mkdir.assert_called_once_with(parents=True, exist_ok=True)
 
     def test_linux_build_uses_xdg_data_home(self):
         absolute_data_home = Path(Path.cwd().anchor) / "example-data"

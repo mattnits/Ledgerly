@@ -8,7 +8,6 @@ from PySide6.QtCore import QDate, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDateEdit,
     QDoubleSpinBox,
     QFormLayout,
@@ -46,6 +45,7 @@ from app.services.investments import (
     update_investment_account,
 )
 from app.ui.widgets.account_badge import AccountBadge
+from app.ui.widgets.combo_box import AppComboBox
 from app.ui.widgets.date_picker import DatePickerEdit
 from app.ui.dialogs.generic_dialog import GenericDialog
 from app.ui.widgets.generic_table import GenericTable
@@ -386,7 +386,7 @@ class InvestmentAccountDialog(GenericDialog):
         self.institution.setPlaceholderText("e.g. Wealthsimple")
         self.account_name = QLineEdit(account.account_name if account else "")
         self.account_name.setPlaceholderText("e.g. TFSA")
-        self.account_type = QComboBox()
+        self.account_type = AppComboBox()
         existing_type = (account.account_type or "").strip() if account else ""
         supported_types = {"tfsa": "TFSA", "fhsa": "FHSA", "rrsp": "RRSP"}
         selected_type = supported_types.get(existing_type.casefold())
@@ -434,7 +434,7 @@ class InvestmentAccountDialog(GenericDialog):
         self.initial_date = DatePickerEdit(_qdate(date.today()))
         self.initial_section, initial_layout = section(
             "Initial Setup",
-            "Set the initial value and date for this account (optional).",
+            "Set the account start date and optional initial value.",
             "fa6s.chart-line",
         )
         initial_form = QFormLayout()
@@ -517,7 +517,8 @@ class InvestmentAccountDialog(GenericDialog):
         note = QLabel(
             "Salary deposits are treated as take-home pay after the configured "
             "RRSP deduction. The app estimates your employee contribution by "
-            "reversing that deduction. Tracking starts on the account creation date."
+            "reversing that deduction. Tracking starts on the Initial date and "
+            "includes Salary transactions from that date onward, even for past months."
         )
         note.setObjectName("workRrspInfoNote")
         note.setWordWrap(True)
@@ -857,7 +858,7 @@ class InvestmentsPage(QWidget):
             QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
         )
         form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
-        self.entry_account = QComboBox()
+        self.entry_account = AppComboBox()
         self.entry_date = DatePickerEdit(_qdate(date.today()))
         self.entry_total = QLineEdit()
         self.entry_total.setPlaceholderText("0.00")

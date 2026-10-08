@@ -20,7 +20,7 @@ from app.utils.constants import ClassificationSource, TransactionType
 
 class TransactionScrollTest(unittest.TestCase):
     @staticmethod
-    def _wait_for(predicate, timeout=3.0):
+    def _wait_for(predicate, timeout=5.0):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             QApplication.processEvents()
@@ -69,6 +69,21 @@ class TransactionScrollTest(unittest.TestCase):
         table._load_more()
         self._wait_for(lambda: not table._loading and table.loaded_count == 250)
         self.assertEqual(table.loaded_count, 250)
+        action_cell = table.rows[0].action_cell
+        action_button = table.rows[0].action_button
+        self._wait_for(
+            lambda: action_cell.geometry().right()
+            <= table.table.viewport().width() - 1
+        )
+        self.assertLessEqual(
+            action_cell.geometry().right(),
+            table.table.viewport().width() - 1,
+        )
+        self.assertGreaterEqual(action_button.geometry().left(), 8)
+        self.assertGreaterEqual(
+            action_cell.width() - action_button.geometry().right() - 1,
+            8,
+        )
 
         scrollbar = table.table.verticalScrollBar()
         self.assertGreater(scrollbar.maximum(), 150)

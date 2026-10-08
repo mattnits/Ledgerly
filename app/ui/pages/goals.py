@@ -7,8 +7,6 @@ from PySide6.QtCore import QDate, QRectF, QSignalBlocker, QSize, Qt, QTimer, Sig
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
-    QDateEdit,
     QDoubleSpinBox,
     QFormLayout,
     QFrame,
@@ -45,6 +43,8 @@ from app.services.goals import (
     update_savings_goal,
 )
 from app.ui.dialogs.generic_dialog import GenericDialog
+from app.ui.widgets.combo_box import AppComboBox
+from app.ui.widgets.date_picker import DatePickerEdit
 from app.ui.widgets.page_header import PageHeader
 from app.ui.theme import (
     awesome_icon,
@@ -152,7 +152,7 @@ def _style_form_labels(form: QFormLayout, fields: tuple[QWidget, ...]) -> None:
             label.setObjectName("dialogFieldLabel")
 
 
-class MonthChoiceComboBox(QComboBox):
+class MonthChoiceComboBox(AppComboBox):
     """Compact combo box with a consistently visible dropdown chevron."""
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt API spelling
@@ -975,7 +975,7 @@ class BudgetDialog(GenericDialog):
         form = QFormLayout(content)
         form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-        self.category = QComboBox()
+        self.category = AppComboBox()
         self.category.setIconSize(spaced_text_icon_size())
         for category_id, name, color in categories:
             self.category.addItem(
@@ -1019,9 +1019,7 @@ class SavingsGoalDialog(GenericDialog):
         self.target = _money_editor(existing.target_amount if existing else Decimal())
         self.current = _money_editor(existing.current_amount if existing else Decimal())
         self.has_date = QCheckBox("Set a target date")
-        self.date = QDateEdit()
-        self.date.setCalendarPopup(True)
-        self.date.setDisplayFormat("MMM d, yyyy")
+        self.date = DatePickerEdit()
         self.date.setDate(QDate.currentDate().addYears(1))
         if existing and existing.target_date:
             self.has_date.setChecked(True)
@@ -1301,6 +1299,8 @@ class GoalsPage(QWidget):
                 border:1px solid #343c48;
                 selection-color:#ffffff;
                 selection-background-color:#4468f2;
+                padding:0;
+                margin:0;
                 outline:none;
             }
             QFrame#goalsMonthDivider { background:#34404d; border:none; }

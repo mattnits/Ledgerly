@@ -564,8 +564,21 @@ QComboBox QAbstractItemView {{
     border: 1px solid #3a4048;
     selection-background-color: #315f94;
     selection-color: #ffffff;
-    padding: 4px;
+    padding: 0;
+    margin: 0;
     outline: none;
+}}
+QComboBox QAbstractItemView::item {{
+    color: #e5e7ea;
+    background: transparent;
+    border: none;
+    min-height: 24px;
+    padding: 7px 10px;
+}}
+QComboBox QAbstractItemView::item:hover {{ background: #2a3038; }}
+QComboBox QAbstractItemView::item:selected {{
+    color: #ffffff;
+    background: #315f94;
 }}
 QComboBox#transactionTypeCombo {{
     color: #e5e7ea;
@@ -652,9 +665,14 @@ QMenu {{
     color: #e5e7ea;
     background: #20242a;
     border: 1px solid #3a4048;
-    padding: 6px;
+    padding: 0;
+    margin: 0;
 }}
-QMenu::item {{ padding: 8px 24px 8px 10px; border-radius: 6px; }}
+QMenu::item {{
+    background: transparent;
+    padding: 8px 24px 8px 10px;
+    margin: 0;
+}}
 QMenu::item:selected {{ background: #315f94; }}
 QDialog {{ background: {COLORS['canvas']}; }}
 QMessageBox {{ background: {COLORS['canvas']}; }}

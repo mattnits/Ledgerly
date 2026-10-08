@@ -7,6 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
+from app.ui.widgets.combo_box import AppComboBox
 from app.ui.widgets.date_dropdown import DateDropdown, DateDropdownItemDelegate
 from app.ui.widgets.period_selector import PeriodSelector
 
@@ -53,6 +54,7 @@ class PeriodSelectorTest(unittest.TestCase):
         selector.set_available_months({(2026, 9), (2026, 10)})
 
         self.assertIsInstance(selector.month_selector, DateDropdown)
+        self.assertIsInstance(selector.month_selector, AppComboBox)
         self.assertIsInstance(
             selector.month_selector.view().itemDelegate(),
             DateDropdownItemDelegate,

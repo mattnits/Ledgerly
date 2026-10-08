@@ -608,6 +608,9 @@ class InvestmentAccount(Base):
     employer_match_percent: Mapped[Decimal | None] = mapped_column(
         Numeric(7, 4), nullable=True
     )
+    payroll_tracking_start_date: Mapped[date | None] = mapped_column(
+        Date, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, nullable=False
     )
@@ -675,41 +678,6 @@ class InvestmentSnapshot(Base):
             "total_value >= 0", name="ck_investment_snapshot_nonnegative_value"
         ),
     )
-
-    def __init__(self, **kwargs):
-        """Accept the pre-account snapshot keywords during the transition."""
-        legacy_keys = {
-            "user_id",
-            "group_id",
-            "account_name",
-            "snapshot_date",
-            "monthly_contribution",
-            "portfolio_value",
-        }
-        if legacy_keys.intersection(kwargs):
-            user_id = kwargs.pop("user_id", None)
-            group_id = kwargs.pop("group_id", None)
-            account_name = kwargs.pop("account_name")
-            snapshot_date = kwargs.pop("snapshot_date")
-            contribution = kwargs.pop("monthly_contribution", None)
-            portfolio_value = kwargs.pop("portfolio_value")
-            if kwargs:
-                unexpected = ", ".join(sorted(kwargs))
-                raise TypeError(f"Unexpected snapshot arguments: {unexpected}")
-            self.investment_account = InvestmentAccount(
-                user_id=user_id,
-                group_id=group_id,
-                institution="Manual",
-                account_name=account_name,
-                is_active=True,
-            )
-            self.snapshot_datetime = datetime.combine(snapshot_date, datetime.min.time())
-            self.contribution_amount = contribution
-            self.total_value = portfolio_value
-            return
-        for key, value in kwargs.items():
-            setattr(self, key, value)
-
 
 class SavingsSnapshot(Base):
     __tablename__ = "savings_snapshots"

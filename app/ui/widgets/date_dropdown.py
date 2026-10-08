@@ -3,13 +3,14 @@ from __future__ import annotations
 from PySide6.QtCore import QRect, QSize, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter
 from PySide6.QtWidgets import (
-    QComboBox,
     QListView,
     QStyle,
     QStyledItemDelegate,
     QStyleOptionViewItem,
     QWidget,
 )
+
+from app.ui.widgets.combo_box import AppComboBox
 
 
 class DateDropdownItemDelegate(QStyledItemDelegate):
@@ -28,7 +29,7 @@ class DateDropdownItemDelegate(QStyledItemDelegate):
 
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
-        row_rect = option.rect.adjusted(4, 2, -4, -2)
+        row_rect = option.rect.adjusted(4, 0, -4, 0)
         if selected:
             painter.setBrush(QColor("#4468f2"))
             painter.setPen(QColor("#5d7cff"))
@@ -66,7 +67,7 @@ class DateDropdownItemDelegate(QStyledItemDelegate):
         return size
 
 
-class DateDropdown(QComboBox):
+class DateDropdown(AppComboBox):
     """A compact dark date selector with a calendar-led popup list."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -129,7 +130,8 @@ class DateDropdown(QComboBox):
                 background: #171b21;
                 border: 1px solid #343c48;
                 border-radius: 9px;
-                padding: 4px;
+                padding: 0;
+                margin: 0;
                 outline: none;
             }
         """)

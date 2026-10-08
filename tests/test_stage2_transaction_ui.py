@@ -132,9 +132,38 @@ class Stage2TransactionUiTest(unittest.TestCase):
                 row.category_combo.view().minimumWidth(),
                 longest_category + 64,
             )
+        self.assertEqual(
+            table.table.columnWidth(StatementsTable.ACTION_COLUMN),
+            80,
+        )
+        action_button = table.rows[0].action_button
+        action_cell = table.rows[0].action_cell
+        self.assertGreaterEqual(action_button.geometry().left(), 8)
         self.assertGreaterEqual(
-            table.table.columnWidth(7),
-            StatementsTable.MINIMUM_COLUMN_WIDTHS[7],
+            action_cell.width() - action_button.geometry().right() - 1,
+            8,
+        )
+        imported_text_width = max(
+            table.table.fontMetrics().horizontalAdvance(text)
+            for text in StatementsTable.IMPORTED_AT_WIDTH_SAMPLES
+        )
+        self.assertEqual(
+            table.table.columnWidth(StatementsTable.IMPORTED_AT_COLUMN),
+            imported_text_width + 16,
+        )
+        imported_margins = table.rows[0].imported_label.contentsMargins()
+        self.assertEqual(imported_margins.left(), 8)
+        self.assertEqual(imported_margins.right(), 8)
+        self.assertEqual(
+            sum(
+                table.table.columnWidth(column)
+                for column in range(table.table.columnCount())
+            ),
+            table.table.viewport().width(),
+        )
+        self.assertLessEqual(
+            action_cell.geometry().right(),
+            table.table.viewport().width() - 1,
         )
         self.assertGreaterEqual(
             table.table.columnWidth(StatementsTable.DESCRIPTION_COLUMN),
@@ -161,6 +190,19 @@ class Stage2TransactionUiTest(unittest.TestCase):
         self.assertGreater(
             table.table.columnWidth(StatementsTable.DESCRIPTION_COLUMN),
             narrow_description_width,
+        )
+        self.assertEqual(
+            sum(
+                table.table.columnWidth(column)
+                for column in range(table.table.columnCount())
+            ),
+            table.table.viewport().width(),
+        )
+        self.assertGreater(
+            table.table.columnWidth(StatementsTable.DESCRIPTION_COLUMN),
+            StatementsTable.MAXIMUM_COLUMN_WIDTHS[
+                StatementsTable.DESCRIPTION_COLUMN
+            ],
         )
 
         table.needs_review_checkbox.setChecked(True)

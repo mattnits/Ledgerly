@@ -41,6 +41,7 @@ class InvestmentAccountSummary:
     employee_contribution_percent: Decimal | None
     employer_matching_enabled: bool
     employer_match_percent: Decimal | None
+    payroll_tracking_start_date: date | None
 
     @property
     def display_name(self) -> str:
@@ -214,6 +215,10 @@ def _as_datetime(value: date | datetime) -> datetime:
     return datetime.combine(value, time.min)
 
 
+def _as_date(value: date | datetime) -> date:
+    return value.date() if isinstance(value, datetime) else value
+
+
 def _date_range(
     start_date: date | datetime | None,
     end_date: date | datetime | None,
@@ -302,7 +307,9 @@ def _salary_rows_for_work_rrsp(
         Transaction.transaction_type == TransactionType.INCOME,
         func.lower(func.trim(Category.name)) == "salary",
         Transaction.amount > 0,
-        Transaction.transaction_date >= account.created_at.date(),
+        Transaction.transaction_date >= (
+            account.payroll_tracking_start_date or account.created_at.date()
+        ),
     ]
     if start is not None:
         conditions.append(Transaction.transaction_date >= start)
@@ -577,6 +584,7 @@ def get_account_summaries(
                 employee_contribution_percent=account.employee_contribution_percent,
                 employer_matching_enabled=account.employer_matching_enabled,
                 employer_match_percent=account.employer_match_percent,
+                payroll_tracking_start_date=account.payroll_tracking_start_date,
             ))
     return tuple(result)
 
@@ -924,6 +932,7 @@ def create_investment_account(
         employer_match_percent,
         group_id=group_id,
     )
+    tracking_start_date = _as_date(initial_date or date.today())
 
     with session_factory() as session, session.begin():
         candidates = session.scalars(
@@ -944,6 +953,9 @@ def create_investment_account(
             account_number_last7=last7,
             account_type=account_type,
             is_active=True,
+            payroll_tracking_start_date=(
+                tracking_start_date if work_settings["is_work_related"] else None
+            ),
             **work_settings,
         )
         session.add(account)

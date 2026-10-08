@@ -1,5 +1,5 @@
 import unittest
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import create_engine
@@ -18,6 +18,7 @@ from app.models.models import (
     Category,
     Group,
     GroupMembership,
+    InvestmentAccount,
     InvestmentSnapshot,
     MonthlyCategoryBudget,
     SavingsGoal,
@@ -66,6 +67,14 @@ class FinanceServicesTest(unittest.TestCase):
             session.add_all((first_account, second_account, joint_account, outside_account))
             session.flush()
 
+            investment_account = InvestmentAccount(
+                group_id=group.id,
+                institution="Test",
+                account_name="Joint brokerage",
+            )
+            session.add(investment_account)
+            session.flush()
+
             def add(account, amount, transaction_type, category=None):
                 session.add(Transaction(
                     account_id=account.id,
@@ -95,10 +104,10 @@ class FinanceServicesTest(unittest.TestCase):
                     amount_saved_this_month=Decimal("175.00"),
                 ),
                 InvestmentSnapshot(
-                    group_id=group.id, account_name="Joint brokerage",
-                    snapshot_date=date(2026, 9, 30),
-                    monthly_contribution=Decimal("75.00"),
-                    portfolio_value=Decimal("1200.00"),
+                    investment_account_id=investment_account.id,
+                    snapshot_datetime=datetime(2026, 9, 30),
+                    contribution_amount=Decimal("75.00"),
+                    total_value=Decimal("1200.00"),
                 ),
             ))
             group_id = group.id

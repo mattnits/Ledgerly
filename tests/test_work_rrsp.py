@@ -1,6 +1,6 @@
 import os
 import unittest
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -78,6 +78,7 @@ class WorkRrspFixture:
             employee_contribution_percent="5",
             employer_matching_enabled=True,
             employer_match_percent="50",
+            initial_date=date(2026, 1, 1),
             session_factory=self.sessions,
         )
         self.personal_id = create_investment_account(
@@ -87,13 +88,6 @@ class WorkRrspFixture:
             user_id="owner",
             session_factory=self.sessions,
         )
-        # Most service tests exercise historical fixtures. Individual start-date
-        # tests override this value explicitly.
-        with self.sessions.begin() as session:
-            session.get(InvestmentAccount, self.work_id).created_at = datetime(
-                2026, 1, 1
-            )
-
     def tearDown(self):
         self.engine.dispose()
 
@@ -156,11 +150,11 @@ class WorkRrspServiceTest(WorkRrspFixture, unittest.TestCase):
         self.assertEqual(summary.employer_match, Decimal("75.00"))
         self.assertEqual(summary.total_contribution, Decimal("225.00"))
 
-    def test_salary_before_account_creation_date_is_ignored(self):
+    def test_salary_before_payroll_tracking_start_date_is_ignored(self):
         with self.sessions.begin() as session:
-            session.get(InvestmentAccount, self.work_id).created_at = datetime(
-                2026, 8, 10, 14, 30
-            )
+            session.get(
+                InvestmentAccount, self.work_id
+            ).payroll_tracking_start_date = date(2026, 8, 10)
         self.add_transaction(date(2026, 8, 9), "950")
         self.add_transaction(date(2026, 8, 10), "950")
         self.add_transaction(date(2026, 8, 20), "950")
@@ -169,6 +163,38 @@ class WorkRrspServiceTest(WorkRrspFixture, unittest.TestCase):
         )
         self.assertEqual(summary.salary_count, 2)
         self.assertEqual(summary.employee_contribution, Decimal("100.00"))
+
+    def test_retroactive_initial_date_calculates_each_elapsed_month(self):
+        self.add_transaction(date(2026, 5, 31), "950")
+        self.add_transaction(date(2026, 6, 15), "950")
+        self.add_transaction(date(2026, 7, 15), "950")
+        self.add_transaction(date(2026, 8, 15), "950")
+        retroactive_id = create_investment_account(
+            "Retroactive",
+            "Past Work RRSP",
+            account_type="RRSP",
+            initial_date=date(2026, 6, 1),
+            user_id="owner",
+            is_work_related=True,
+            auto_track_from_payroll=True,
+            employee_contribution_percent="5",
+            employer_matching_enabled=True,
+            employer_match_percent="50",
+            session_factory=self.sessions,
+        )
+
+        history = get_work_rrsp_monthly_history(
+            retroactive_id, session_factory=self.sessions
+        )
+
+        self.assertEqual(
+            [(item.year, item.month) for item in history],
+            [(2026, 8), (2026, 7), (2026, 6)],
+        )
+        self.assertEqual(
+            [item.summary.total_contribution for item in history],
+            [Decimal("75.00"), Decimal("75.00"), Decimal("75.00")],
+        )
 
     def test_other_income_and_e_transfer_are_ignored(self):
         self.add_transaction(date(2026, 8, 1), "950")
@@ -211,12 +237,9 @@ class WorkRrspServiceTest(WorkRrspFixture, unittest.TestCase):
             auto_track_from_payroll=True,
             employee_contribution_percent="10",
             employer_matching_enabled=False,
+            initial_date=date(2026, 1, 1),
             session_factory=self.sessions,
         )
-        with self.sessions.begin() as session:
-            session.get(InvestmentAccount, second_work_id).created_at = datetime(
-                2026, 1, 1
-            )
         summary = get_owner_work_rrsp_summary(
             2026, 8, user_id="owner", session_factory=self.sessions
         )

@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QHeaderView,
-    QComboBox,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -37,6 +36,7 @@ from app.services.transactions import (
     set_transaction_deleted,
 )
 from app.ui.widgets.date_dropdown import DateDropdown
+from app.ui.widgets.combo_box import AppComboBox
 from app.ui.widgets.generic_table import GenericTable
 from app.ui.widgets.loading_state import LoadingOverlay
 from app.ui.widgets.period_selector import PeriodSelector
@@ -121,6 +121,16 @@ class StatementsTable(QWidget):
         "Category", "Imported At", "Action",
     )
     DESCRIPTION_COLUMN = 1
+    IMPORTED_AT_COLUMN = 6
+    ACTION_COLUMN = 7
+    IMPORTED_AT_WIDTH_SAMPLES = tuple(
+        f"{month} 30, 11:59 {period}"
+        for month in (
+            "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+        )
+        for period in ("AM", "PM")
+    )
     MINIMUM_COLUMN_WIDTHS = {
         0: 100,
         1: 220,
@@ -128,8 +138,14 @@ class StatementsTable(QWidget):
         3: 130,
         4: 190,
         5: 145,
-        6: 120,
-        7: 56,
+    }
+    COMPACT_MINIMUM_COLUMN_WIDTHS = {
+        0: 88,
+        1: 120,
+        2: 82,
+        3: 105,
+        4: 140,
+        5: 110,
     }
     MAXIMUM_COLUMN_WIDTHS = {
         0: 124,
@@ -138,8 +154,6 @@ class StatementsTable(QWidget):
         3: 190,
         4: 232,
         5: 200,
-        6: 160,
-        7: 76,
     }
 
     def __init__(
@@ -166,6 +180,8 @@ class StatementsTable(QWidget):
         self.filtered_count = 0
         self.loaded_count = 0
         self._loading = False
+        self._column_fit_pending = False
+        self._imported_at_column_width: int | None = None
         self.sort_column = 0
         self.sort_order = Qt.SortOrder.DescendingOrder
         self.category_filter: int | str | None = "all"
@@ -227,7 +243,7 @@ class StatementsTable(QWidget):
         filter_layout.setContentsMargins(16, 13, 16, 13)
         filter_layout.setSpacing(14)
 
-        self.account_selector = QComboBox()
+        self.account_selector = AppComboBox()
         self.account_selector.setIconSize(spaced_text_icon_size())
         self.account_selector.addItem(
             spaced_text_icon(awesome_icon("fa6s.wallet", color="#b2b8c1")),
@@ -237,7 +253,7 @@ class StatementsTable(QWidget):
         self.account_selector.currentIndexChanged.connect(self._select_account)
         self._add_filter_field(filter_layout, "Account", self.account_selector)
 
-        self.category_selector = QComboBox()
+        self.category_selector = AppComboBox()
         self.category_selector.setIconSize(spaced_text_icon_size())
         self.category_selector.addItem(
             spaced_text_icon(awesome_icon("fa6s.tags", color="#ffffff")),
@@ -253,7 +269,7 @@ class StatementsTable(QWidget):
         self.category_selector.currentIndexChanged.connect(self._select_category)
         self._add_filter_field(filter_layout, "Category", self.category_selector)
 
-        self.transaction_type_selector = QComboBox()
+        self.transaction_type_selector = AppComboBox()
         self.transaction_type_selector.setIconSize(spaced_text_icon_size())
         self.transaction_type_selector.setFixedWidth(230)
         self.transaction_type_selector.addItem(
@@ -344,6 +360,9 @@ class StatementsTable(QWidget):
         table_header.sectionClicked.connect(self._sort_by_column)
         table_header.setSortIndicatorShown(False)
         self.table.verticalScrollBar().valueChanged.connect(self._on_scroll)
+        self.table.verticalScrollBar().rangeChanged.connect(
+            self._schedule_table_column_fit
+        )
         self.table.setHorizontalScrollMode(
             QAbstractItemView.ScrollMode.ScrollPerPixel
         )
@@ -353,6 +372,11 @@ class StatementsTable(QWidget):
         for column, width in self.MAXIMUM_COLUMN_WIDTHS.items():
             table_header.setSectionResizeMode(
                 column, QHeaderView.ResizeMode.Interactive
+            )
+            self.table.setColumnWidth(column, width)
+        for column, width in self._compact_column_widths().items():
+            table_header.setSectionResizeMode(
+                column, QHeaderView.ResizeMode.Fixed
             )
             self.table.setColumnWidth(column, width)
         self.table.horizontalHeaderItem(2).setTextAlignment(
@@ -448,6 +472,9 @@ class StatementsTable(QWidget):
                 background: #22262b;
                 border: 1px solid #40464e;
                 selection-background-color: #3b4858;
+                padding: 0;
+                margin: 0;
+                outline: none;
             }
             QFrame#filterDivider { color: #343a43; }
             QCheckBox#needsReviewFilter {
@@ -469,7 +496,7 @@ class StatementsTable(QWidget):
         self._show_empty_table()
 
     @staticmethod
-    def _add_filter_field(layout: QHBoxLayout, label: str, selector: QComboBox) -> None:
+    def _add_filter_field(layout: QHBoxLayout, label: str, selector: AppComboBox) -> None:
         field = QWidget()
         field_layout = QVBoxLayout(field)
         field_layout.setContentsMargins(0, 0, 0, 0)
@@ -499,27 +526,81 @@ class StatementsTable(QWidget):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         if hasattr(self, "table"):
-            QTimer.singleShot(0, self._fit_table_columns)
+            self._schedule_table_column_fit()
+
+    def _schedule_table_column_fit(self, *_args) -> None:
+        if self._column_fit_pending:
+            return
+        self._column_fit_pending = True
+        QTimer.singleShot(0, self._run_scheduled_table_column_fit)
+
+    def _run_scheduled_table_column_fit(self) -> None:
+        self._column_fit_pending = False
+        self._fit_table_columns()
 
     def _fit_table_columns(self) -> None:
         """Scale all columns while keeping every field within readable bounds."""
         if self.table.viewport().width() <= 0:
             return
 
-        available = self.table.viewport().width() - 2
+        compact_widths = self._compact_column_widths()
+        available = self.table.viewport().width() - sum(compact_widths.values())
+        compact_minimum_total = sum(self.COMPACT_MINIMUM_COLUMN_WIDTHS.values())
         minimum_total = sum(self.MINIMUM_COLUMN_WIDTHS.values())
         maximum_total = sum(self.MAXIMUM_COLUMN_WIDTHS.values())
-        scale = min(
-            1.0,
-            max(
-                0.0,
-                (available - minimum_total) / (maximum_total - minimum_total),
-            ),
-        )
-        for column, minimum in self.MINIMUM_COLUMN_WIDTHS.items():
-            maximum = self.MAXIMUM_COLUMN_WIDTHS[column]
-            width = round(minimum + (maximum - minimum) * scale)
+        widths: dict[int, int]
+        if available < minimum_total:
+            scale = min(
+                1.0,
+                max(
+                    0.0,
+                    (available - compact_minimum_total)
+                    / (minimum_total - compact_minimum_total),
+                ),
+            )
+            widths = {
+                column: round(
+                    compact_minimum
+                    + (self.MINIMUM_COLUMN_WIDTHS[column] - compact_minimum)
+                    * scale
+                )
+                for column, compact_minimum
+                in self.COMPACT_MINIMUM_COLUMN_WIDTHS.items()
+            }
+        elif available < maximum_total:
+            scale = (available - minimum_total) / (
+                maximum_total - minimum_total
+            )
+            widths = {
+                column: round(
+                    minimum
+                    + (self.MAXIMUM_COLUMN_WIDTHS[column] - minimum) * scale
+                )
+                for column, minimum in self.MINIMUM_COLUMN_WIDTHS.items()
+            }
+        else:
+            widths = dict(self.MAXIMUM_COLUMN_WIDTHS)
+
+        if available >= compact_minimum_total:
+            widths[self.DESCRIPTION_COLUMN] += available - sum(widths.values())
+        for column, width in widths.items():
             self.table.setColumnWidth(column, width)
+        for column, width in compact_widths.items():
+            self.table.setColumnWidth(column, width)
+
+    def _compact_column_widths(self) -> dict[int, int]:
+        padding = TransactionRow.COMPACT_CELL_HORIZONTAL_PADDING * 2
+        if self._imported_at_column_width is None:
+            metrics = self.table.fontMetrics()
+            imported_content_width = max(
+                metrics.horizontalAdvance(text)
+                for text in self.IMPORTED_AT_WIDTH_SAMPLES
+            )
+            self._imported_at_column_width = imported_content_width + padding
+        return {
+            self.IMPORTED_AT_COLUMN: self._imported_at_column_width,
+            self.ACTION_COLUMN: TransactionRow.ACTION_COLUMN_WIDTH,
+        }
 
     def _month_range_key(self) -> str:
         today = date.today()

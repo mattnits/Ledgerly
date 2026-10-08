@@ -4,7 +4,6 @@ from decimal import Decimal
 from PySide6.QtCore import QObject, QPoint, QSignalBlocker, QSize, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QComboBox,
     QHBoxLayout,
     QLabel,
     QMenu,
@@ -14,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui.widgets.account_badge import AccountBadge
+from app.ui.widgets.combo_box import AppComboBox
 from app.ui.theme import (
     awesome_icon,
     category_icon_name,
@@ -37,7 +37,7 @@ ROW_TRANSACTION_TYPE_LABELS = {
 }
 
 
-class WheelSafeComboBox(QComboBox):
+class WheelSafeComboBox(AppComboBox):
     """An inline editor that lets wheel events continue to the table."""
 
     def wheelEvent(self, event) -> None:
@@ -68,6 +68,10 @@ class TransactionRow(QObject):
     transaction_type_changed = Signal(int, object)
     deletion_changed = Signal(int, bool)
     create_rule_requested = Signal(int)
+
+    COMPACT_CELL_HORIZONTAL_PADDING = 8
+    ACTION_BUTTON_SIZE = 34
+    ACTION_COLUMN_WIDTH = 80
 
     def __init__(
         self,
@@ -136,6 +140,12 @@ class TransactionRow(QObject):
         self.account_cell = AccountBadge(account_name, institution, icon_size=22)
         self.imported_label = SelectableTextLabel(
             f"{imported_at:%b} {imported_at.day}, {imported_at:%I:%M %p}"
+        )
+        self.imported_label.setContentsMargins(
+            self.COMPACT_CELL_HORIZONTAL_PADDING,
+            0,
+            self.COMPACT_CELL_HORIZONTAL_PADDING,
+            0,
         )
         self.imported_label.setStyleSheet("color: #a8adb4;")
 
@@ -220,7 +230,9 @@ class TransactionRow(QObject):
         self.action_button.setToolTip(
             "Restore this transaction" if is_deleted else "Transaction actions"
         )
-        self.action_button.setFixedSize(34, 34)
+        self.action_button.setFixedSize(
+            self.ACTION_BUTTON_SIZE, self.ACTION_BUTTON_SIZE
+        )
         self.action_button.setStyleSheet("""
             QPushButton#transactionActionButton {
                 background: #20242a;
@@ -233,7 +245,12 @@ class TransactionRow(QObject):
         self.action_button.clicked.connect(self._show_actions)
         self.action_cell = QWidget()
         action_layout = QHBoxLayout(self.action_cell)
-        action_layout.setContentsMargins(4, 0, 4, 0)
+        action_layout.setContentsMargins(
+            self.COMPACT_CELL_HORIZONTAL_PADDING,
+            0,
+            self.COMPACT_CELL_HORIZONTAL_PADDING,
+            0,
+        )
         action_layout.addWidget(self.action_button, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.cells = (
@@ -364,6 +381,9 @@ class TransactionRow(QObject):
                 border: 1px solid #40464e;
                 selection-background-color: #3b4858;
                 selection-color: #ffffff;
+                padding: 0;
+                margin: 0;
+                outline: none;
             }}
         """)
 

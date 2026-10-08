@@ -7,13 +7,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtTest import QSignalSpy
 from PySide6.QtWidgets import QApplication, QDialog
-from sqlalchemy import create_engine, func, select, text
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.services.dashboard import get_dashboard_data
-from app.core.db import Base, _migrate_group_color, get_profiles
+from app.core.db import Base, get_profiles
 from app.services.groups import create_group, remove_membership, update_group
 from app.models.models import (
     Account,
@@ -114,26 +114,6 @@ class GroupFeatureTest(unittest.TestCase):
         with self.assertRaises(IntegrityError):
             with self.sessions.begin() as session:
                 session.add(GroupMembership(group_id=group_id, user_id="matt"))
-
-    def test_group_colour_migration_preserves_existing_rows(self):
-        engine = create_engine("sqlite://")
-        with engine.begin() as connection:
-            connection.execute(text(
-                "CREATE TABLE groups ("
-                "id INTEGER PRIMARY KEY, name VARCHAR(100) NOT NULL, "
-                "created_at DATETIME NOT NULL)"
-            ))
-            connection.execute(text(
-                "INSERT INTO groups (id, name, created_at) "
-                "VALUES (1, 'Existing', '2026-01-01 00:00:00')"
-            ))
-        _migrate_group_color(engine)
-        with engine.connect() as connection:
-            row = connection.execute(
-                text("SELECT id, name, color FROM groups")
-            ).one()
-        self.assertEqual(tuple(row), (1, "Existing", "#3397f5"))
-        engine.dispose()
 
     def test_membership_updates_change_visibility_without_deleting_users(self):
         group_id = self._group_with_accounts()

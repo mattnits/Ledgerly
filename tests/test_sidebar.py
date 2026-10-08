@@ -1,12 +1,14 @@
 import os
 import unittest
+from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QSignalSpy, QTest
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QMessageBox, QWidget
 
+from app.ui.shell import ShellWindow
 from app.ui.sidebar import Sidebar, avatar_icon
 from app.utils.constants import DASHBOARD_PAGE, USER_MANAGEMENT_PAGE
 
@@ -50,6 +52,8 @@ class SidebarTest(unittest.TestCase):
         for button in self.sidebar.navigation_buttons:
             self.assertEqual(button.text(), "")
             self.assertTrue(button.toolTip())
+        self.assertEqual(self.sidebar.exit_button.text(), "")
+        self.assertEqual(self.sidebar.exit_button.toolTip(), "Exit Ledgerly")
 
         self.sidebar.set_collapsed(False)
         self.app.processEvents()
@@ -67,6 +71,26 @@ class SidebarTest(unittest.TestCase):
             self.sidebar.transactions_button.property("sidebarLabel"),
         )
         self.assertTrue(self.sidebar.transactions_button.isChecked())
+        self.assertEqual(self.sidebar.exit_button.text(), "Exit")
+
+    def test_exit_button_emits_request(self):
+        requests = QSignalSpy(self.sidebar.exit_requested)
+        QTest.mouseClick(self.sidebar.exit_button, Qt.MouseButton.LeftButton)
+        self.assertEqual(requests.count(), 1)
+
+    def test_exit_confirmation_only_closes_after_yes(self):
+        shell = Mock()
+        with patch(
+            "app.ui.shell.QMessageBox.question",
+            side_effect=(
+                QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Yes,
+            ),
+        ):
+            ShellWindow.confirm_exit(shell)
+            shell.close.assert_not_called()
+            ShellWindow.confirm_exit(shell)
+            shell.close.assert_called_once_with()
 
     def test_collapsed_profile_click_opens_menu_without_expanding(self):
         self.sidebar.set_collapsed(True)
@@ -278,6 +302,10 @@ class SidebarTest(unittest.TestCase):
         )
         self.assertLess(
             layout.indexOf(self.sidebar.settings_button),
+            layout.indexOf(self.sidebar.exit_button),
+        )
+        self.assertLess(
+            layout.indexOf(self.sidebar.exit_button),
             layout.indexOf(self.sidebar.user_bar),
         )
         self.assertIs(layout.itemAt(layout.count() - 1).widget(), self.sidebar.user_bar)

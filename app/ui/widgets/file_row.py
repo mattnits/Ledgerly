@@ -3,7 +3,6 @@ import re
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -14,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui.theme import COLORS, awesome_icon, set_delete_button_icon, set_label_icon
+from app.ui.widgets.combo_box import AppComboBox
 from app.utils.constants import SUPPORTED_PARSE_TYPES
 
 
@@ -108,7 +108,7 @@ class FileRow(QFrame):
         status_layout.addWidget(self.status_detail)
         layout.addWidget(status, 2)
 
-        self.parse_type = QComboBox()
+        self.parse_type = AppComboBox()
         self.parse_type.setObjectName("statementTypeCombo")
         self.parse_type.addItems(SUPPORTED_PARSE_TYPES)
         self.parse_type.setFixedWidth(174)

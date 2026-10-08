@@ -2,7 +2,6 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDialog,
     QFrame,
     QGraphicsDropShadowEffect,
@@ -33,6 +32,7 @@ from app.core.db import SessionLocal
 from app.models.models import Account, Category
 from app.ui.dialogs.generic_dialog import GenericDialog
 from app.ui.theme import awesome_icon, brand_icon, set_button_icon, set_delete_button_icon
+from app.ui.widgets.combo_box import AppComboBox
 from app.utils.constants import (
     CATEGORY_FREE_TRANSACTION_TYPES,
     INCOME_CATEGORY_NAMES,
@@ -295,7 +295,7 @@ class ClassificationRulesDialog(QDialog):
         layout.addWidget(pattern_input)
         layout.addSpacing(6)
 
-        account_input = QComboBox()
+        account_input = AppComboBox()
         account_input.addItem("All Accounts", None)
         for account_id, name, institution in accounts:
             account_input.addItem(
@@ -310,7 +310,7 @@ class ClassificationRulesDialog(QDialog):
         layout.addWidget(account_input)
         layout.addSpacing(6)
 
-        match_type_input = QComboBox()
+        match_type_input = AppComboBox()
         for match_type, label in MATCH_TYPE_LABELS.items():
             match_type_input.addItem(label, match_type)
         match_type_input.setCurrentIndex(match_type_input.findData(
@@ -324,7 +324,7 @@ class ClassificationRulesDialog(QDialog):
         layout.addWidget(match_type_input)
         layout.addSpacing(6)
 
-        transaction_type_input = QComboBox()
+        transaction_type_input = AppComboBox()
         if rule is not None and rule.transaction_type is None:
             transaction_type_input.addItem("Not set (legacy rule)", None)
         for transaction_type, label in TRANSACTION_TYPE_LABELS.items():
@@ -343,7 +343,7 @@ class ClassificationRulesDialog(QDialog):
         layout.addWidget(transaction_type_input)
         layout.addSpacing(6)
 
-        category_input = QComboBox()
+        category_input = AppComboBox()
         layout.addWidget(field_label("Category", category_input))
         layout.addWidget(category_input)
         layout.addSpacing(6)

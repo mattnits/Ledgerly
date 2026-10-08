@@ -2,6 +2,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QDialog,
     QMainWindow,
+    QMessageBox,
     QWidget,
     QHBoxLayout,
     QStackedWidget,
@@ -158,6 +159,7 @@ class ShellWindow(QMainWindow):
             self.handle_user_changed
         )
         self.sidebar.profile_changed.connect(self.handle_profile_changed)
+        self.sidebar.exit_requested.connect(self.confirm_exit)
 
         self.welcome_page.add_user_clicked.connect(
             self.show_add_user
@@ -210,6 +212,17 @@ class ShellWindow(QMainWindow):
             self.showFullScreen()
         else:
             self.showNormal()
+
+    def confirm_exit(self) -> None:
+        answer = QMessageBox.question(
+            self,
+            "Exit Ledgerly?",
+            "Are you sure you want to exit Ledgerly?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self.close()
 
     def _handle_startup_loading_changed(self, loading: bool) -> None:
         if self._startup_setup_complete and not loading:
