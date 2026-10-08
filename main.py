@@ -2,7 +2,9 @@ import sys
 
 from PySide6.QtCore import QRectF, QTimer, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QApplication, QSplashScreen
+from PySide6.QtWidgets import QApplication, QMessageBox, QSplashScreen
+
+from utils.app_paths import app_data_dir, is_packaged
 
 
 def create_splash() -> QSplashScreen:
@@ -86,6 +88,10 @@ def main():
     set_splash_status(app, splash, "Starting Finance...")
 
     try:
+        if is_packaged():
+            set_splash_status(app, splash, "Setting up local storage...")
+            app_data_dir().mkdir(parents=True, exist_ok=True)
+
         # Keep these imports after the first paint. Importing the full UI pulls
         # in every page and icon dependency, which otherwise leaves the first
         # native window blank while Python finishes loading them.
@@ -126,8 +132,15 @@ def main():
             QTimer.singleShot(0, reveal_window)
         else:
             set_splash_status(app, splash, "Finishing startup...")
-    except Exception:
+    except Exception as error:
         splash.close()
+        if is_packaged():
+            QMessageBox.critical(
+                None,
+                "Finance could not start",
+                f"Finance could not finish setup.\n\n{error}",
+            )
+            sys.exit(1)
         raise
 
     sys.exit(app.exec())

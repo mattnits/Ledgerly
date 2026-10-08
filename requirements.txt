@@ -1,5 +1,3 @@
-PySide6
-QtAwesome
-SQLAlchemy
-pandas
-matplotlib
+PySide6>=6.8,<7
+QtAwesome>=1.3,<2
+SQLAlchemy>=2,<3

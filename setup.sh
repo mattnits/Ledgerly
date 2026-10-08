@@ -1,34 +1,23 @@
 #!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
 
-set -e
-
-echo "Setting up finance app..."
-
-if ! command -v python3 &> /dev/null
-then
-    echo "Python 3 is not installed."
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "Python 3.11 or newer is required for source setup."
+    echo "Download the Linux release ZIP to run without Python."
     exit 1
 fi
 
-if [ ! -d ".venv" ]; then
+if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))'; then
+    echo "Python 3.11 or newer is required for source setup."
+    exit 1
+fi
+
+if [[ ! -x .venv/bin/python ]]; then
     echo "Creating virtual environment..."
     python3 -m venv .venv
 fi
 
-echo "Activating virtual environment..."
-
-source .venv/bin/activate
-
-echo "Upgrading pip..."
-
-python -m pip install --upgrade pip
-
-echo "Installing requirements..."
-
-pip install -r requirements.txt
-
-echo ""
-echo "Setup complete."
-echo "To activate the environment later, run:"
-echo ""
-echo "source .venv/bin/activate"
+echo "Installing runtime packages..."
+.venv/bin/python -m pip install -r requirements.txt
+echo "Setup complete. Run: .venv/bin/python main.py"

@@ -1,14 +1,13 @@
 from datetime import datetime
-from pathlib import Path
 
 from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
+from utils.app_paths import app_data_dir
 from utils.constants import DEFAULT_CATEGORY_COLORS
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = BASE_DIR / "data" / "finance.db"
+DB_PATH = app_data_dir() / "finance.db"
 
 
 class Base(DeclarativeBase):

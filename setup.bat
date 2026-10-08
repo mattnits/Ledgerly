@@ -1,27 +1,36 @@
 @echo off
+setlocal
+cd /d "%~dp0"
 
-echo Setting up finance app...
-
-if not exist .venv (
-    echo Creating virtual environment...
-    python -m venv .venv
+echo Setting up Finance from source...
+where py >nul 2>nul
+if %errorlevel% equ 0 (
+    set "PYTHON=py -3"
+) else (
+    where python >nul 2>nul
+    if errorlevel 1 (
+        echo Python 3.11 or newer is required for source setup.
+        echo Download the Windows release ZIP to run without Python.
+        exit /b 1
+    )
+    set "PYTHON=python"
 )
 
-echo Activating virtual environment...
+%PYTHON% -c "import sys; sys.exit(sys.version_info < (3, 11))"
+if %errorlevel% neq 0 (
+    echo Python 3.11 or newer is required for source setup.
+    exit /b 1
+)
 
-call .venv\Scripts\activate
+if not exist ".venv\Scripts\python.exe" (
+    echo Creating virtual environment...
+    %PYTHON% -m venv .venv
+    if errorlevel 1 exit /b 1
+)
 
-echo Upgrading pip...
-
-python -m pip install --upgrade pip
-
-echo Installing requirements...
-
-pip install -r requirements.txt
+echo Installing runtime packages...
+".venv\Scripts\python.exe" -m pip install -r requirements.txt
+if %errorlevel% neq 0 exit /b 1
 
 echo.
-echo Setup complete.
-echo.
-echo To activate the environment later, run:
-echo.
-echo .venv\Scripts\activate
+echo Setup complete. Run: .venv\Scripts\python.exe main.py

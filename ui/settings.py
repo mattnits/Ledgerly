@@ -21,6 +21,7 @@ from ui.preferences import (
     set_save_imported_files,
 )
 from ui.theme import set_button_icon, set_delete_button_icon
+from utils.app_paths import import_archive_label
 
 
 class SettingsPage(QWidget):
@@ -88,7 +89,7 @@ class SettingsPage(QWidget):
         save_files_label.setObjectName("settingsOptionTitle")
         save_files_description = QLabel(
             "Default the import dialog to save every selected statement under "
-            "data/imported_statements."
+            f"{import_archive_label()}."
         )
         save_files_description.setObjectName("mutedLabel")
         save_files_description.setWordWrap(True)

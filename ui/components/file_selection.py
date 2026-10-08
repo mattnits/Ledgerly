@@ -19,6 +19,7 @@ from ui.components.file_row import FileRow
 from ui.components.toggle_switch import ToggleSwitch
 from ui.preferences import save_imported_files_enabled
 from ui.theme import COLORS, set_button_icon, set_label_icon
+from utils.app_paths import import_archive_label
 
 
 def previous_month_bounds(reference: date) -> tuple[date, date]:
@@ -216,7 +217,8 @@ class FileSelection(QWidget):
         storage_title = QLabel("Save source files")
         storage_title.setObjectName("statementStorageTitle")
         storage_description = QLabel(
-            "Save all selected statements to data/imported_statements after a successful import."
+            "Save all selected statements to "
+            f"{import_archive_label()} after a successful import."
         )
         storage_description.setObjectName("statementStorageDescription")
         storage_description.setWordWrap(True)

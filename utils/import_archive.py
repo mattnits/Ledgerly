@@ -6,9 +6,9 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
+from utils.app_paths import import_archive_dir
 
-APP_ROOT = Path(__file__).resolve().parent.parent
-IMPORT_ARCHIVE_ROOT = APP_ROOT / "data" / "imported_statements"
+IMPORT_ARCHIVE_ROOT = import_archive_dir()
 
 
 @dataclass
