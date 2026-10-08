@@ -6,7 +6,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from database.category_rules import (
+from app.services.category_rules import (
     RuleSpec,
     apply_rule_to_existing_transactions,
     category_rules_for_user,
@@ -18,9 +18,9 @@ from database.category_rules import (
     save_category_rule,
     transaction_needs_review,
 )
-from database.db import Base
-from database.models import Account, Category, CategoryRule, Transaction, User
-from utils.constants import ClassificationSource, MatchType, TransactionType
+from app.core.db import Base
+from app.models.models import Account, Category, CategoryRule, Transaction, User
+from app.utils.constants import ClassificationSource, MatchType, TransactionType
 
 
 class TransactionClassificationTest(unittest.TestCase):

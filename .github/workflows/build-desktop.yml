@@ -13,9 +13,9 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact: Finance-Windows
+            artifact: Ledgerly-Windows-Portable
           - os: ubuntu-22.04
-            artifact: Finance-Linux
+            artifact: Ledgerly-Linux
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -28,25 +28,71 @@ jobs:
       - name: Check app path behavior
         run: python -m unittest discover -s tests -p test_app_paths.py -v
       - name: Build self-contained desktop app
-        run: python -m PyInstaller --noconfirm Finance.spec
+        run: python -m PyInstaller --noconfirm Ledgerly.spec
       - name: Smoke-test Windows app
         if: runner.os == 'Windows'
-        run: python tests/smoke_packaged.py dist/Finance/Finance.exe
+        run: python tests/smoke_packaged.py dist/Ledgerly/Ledgerly.exe
       - name: Smoke-test Linux app
         if: runner.os == 'Linux'
-        run: python tests/smoke_packaged.py dist/Finance/Finance
+        run: python tests/smoke_packaged.py dist/Ledgerly/Ledgerly
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:LEDGERLY_VERSION = if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $env:GITHUB_REF_NAME.TrimStart('v')
+          } else {
+            '0.1.0-dev'
+          }
+          $isccCandidates = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+            "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+          )
+          $iscc = $isccCandidates |
+            Where-Object { Test-Path -LiteralPath $_ } |
+            Select-Object -First 1
+          if (-not $iscc) {
+            throw 'Inno Setup compiler was not found.'
+          }
+          & $iscc installer\Ledgerly.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Smoke-test Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installRoot = Join-Path $env:RUNNER_TEMP 'LedgerlyInstall'
+          $arguments = @(
+            '/VERYSILENT',
+            '/SUPPRESSMSGBOXES',
+            '/NORESTART',
+            "/DIR=$installRoot"
+          )
+          $process = Start-Process -FilePath 'dist\LedgerlySetup.exe' -ArgumentList $arguments -Wait -PassThru
+          if ($process.ExitCode -ne 0) { exit $process.ExitCode }
+          python tests/smoke_packaged.py "$installRoot\Ledgerly.exe"
+          $uninstaller = Join-Path $installRoot 'unins000.exe'
+          $process = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { exit $process.ExitCode }
       - name: Archive Windows app
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -LiteralPath dist/Finance -DestinationPath dist/Finance-Windows.zip
+        run: Compress-Archive -LiteralPath dist/Ledgerly -DestinationPath dist/Ledgerly-Windows-Portable.zip
       - name: Archive Linux app
         if: runner.os == 'Linux'
         working-directory: dist
-        run: zip -qr Finance-Linux.zip Finance
+        run: zip -qr Ledgerly-Linux.zip Ledgerly
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: dist/${{ matrix.artifact }}.zip
+          if-no-files-found: error
+      - name: Upload Windows installer
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ledgerly-Windows-Installer
+          path: dist/LedgerlySetup.exe
           if-no-files-found: error
 
   release:
@@ -58,11 +104,11 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: Finance-*
+          pattern: Ledgerly-*
           path: release
           merge-multiple: true
       - name: Publish desktop downloads
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh release create "$GITHUB_REF_NAME" release/*.zip --verify-tag --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" release/* --verify-tag --generate-notes

@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-echo Setting up Finance from source...
+echo Setting up Ledgerly from source...
 where py >nul 2>nul
 if %errorlevel% equ 0 (
     set "PYTHON=py -3"

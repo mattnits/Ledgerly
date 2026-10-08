@@ -9,9 +9,9 @@ from PySide6.QtTest import QSignalSpy
 from PySide6.QtCore import QPoint
 from PySide6.QtWidgets import QApplication, QDialog
 
-from ui.components.file_selection import FileSelection
-from ui.components.file_upload_dialog import FileUploadDialog
-from utils.constants import SUPPORTED_PARSE_TYPES
+from app.ui.widgets.file_selection import FileSelection
+from app.ui.dialogs.file_upload_dialog import FileUploadDialog
+from app.utils.constants import SUPPORTED_PARSE_TYPES
 
 
 class StatementDialogTest(unittest.TestCase):
@@ -134,11 +134,11 @@ class StatementDialogTest(unittest.TestCase):
     def test_save_files_is_one_batch_toggle_and_modal_changes_are_not_saved(self):
         with (
             patch(
-                "ui.components.file_selection.save_imported_files_enabled",
+                "app.ui.widgets.file_selection.save_imported_files_enabled",
                 return_value=True,
             ),
             patch(
-                "ui.preferences.set_save_imported_files"
+                "app.ui.preferences.set_save_imported_files"
             ) as save_preference,
         ):
             dialog = FileUploadDialog()

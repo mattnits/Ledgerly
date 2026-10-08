@@ -6,12 +6,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from database.category_rules import RuleAssignment, classify_description
-from database.dashboard import get_dashboard_data
-from database.db import Base
-from database.finance_services import monthly_financial_summary
-from database.models import Account, Category, Transaction, User
-from utils.constants import TransactionType
+from app.services.category_rules import RuleAssignment, classify_description
+from app.services.dashboard import get_dashboard_data
+from app.core.db import Base
+from app.services.finance_services import monthly_financial_summary
+from app.models.models import Account, Category, Transaction, User
+from app.utils.constants import TransactionType
 
 
 class ETransferClassificationTest(unittest.TestCase):

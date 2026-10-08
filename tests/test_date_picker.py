@@ -7,9 +7,9 @@ from PySide6.QtCore import QDate, QPoint, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QCalendarWidget, QToolButton
 
-from ui.components.date_picker import DatePickerCalendar, DatePickerEdit
-from ui.components.file_selection import FileSelection
-from ui.investments import InvestmentAccountDialog, InvestmentsPage
+from app.ui.widgets.date_picker import DatePickerCalendar, DatePickerEdit
+from app.ui.widgets.file_selection import FileSelection
+from app.ui.pages.investments import InvestmentAccountDialog, InvestmentsPage
 
 
 class DatePickerTest(unittest.TestCase):

@@ -7,8 +7,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QDate
 from PySide6.QtWidgets import QApplication
 
-from parsers.generic_parser import GenericParser
-from ui.components.file_selection import FileSelection, previous_month_bounds
+from app.parsers.generic_parser import GenericParser
+from app.ui.widgets.file_selection import FileSelection, previous_month_bounds
 
 
 class ImportDateRangeTest(unittest.TestCase):

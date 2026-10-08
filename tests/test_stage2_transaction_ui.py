@@ -14,10 +14,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from database.db import Base
-from database.models import Account, Category, Transaction, User
-from ui.components.statements_table import StatementsTable
-from utils.constants import TransactionType
+from app.core.db import Base
+from app.models.models import Account, Category, Transaction, User
+from app.ui.widgets.statements_table import StatementsTable
+from app.utils.constants import TransactionType
 
 
 class Stage2TransactionUiTest(unittest.TestCase):
@@ -203,7 +203,7 @@ class Stage2TransactionUiTest(unittest.TestCase):
             def ignore(self):
                 self.ignored = True
 
-        from ui.components.transaction_row import WheelSafeComboBox
+        from app.ui.widgets.transaction_row import WheelSafeComboBox
 
         app = QApplication.instance() or QApplication([])
         combo = WheelSafeComboBox()

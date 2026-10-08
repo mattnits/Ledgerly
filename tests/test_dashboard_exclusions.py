@@ -6,9 +6,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from database.dashboard import get_dashboard_data, get_dashboard_months
-from database.db import Base
-from database.models import (
+from app.services.dashboard import get_dashboard_data, get_dashboard_months
+from app.core.db import Base
+from app.models.models import (
     Account,
     Category,
     InvestmentAccount,
@@ -19,8 +19,8 @@ from database.models import (
     Transaction,
     User,
 )
-from database.transactions import get_transaction_months
-from utils.constants import TransactionType
+from app.services.transactions import get_transaction_months
+from app.utils.constants import TransactionType
 
 
 class DashboardTransactionTypesTest(unittest.TestCase):

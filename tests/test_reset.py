@@ -6,8 +6,8 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from database.db import Base
-from database.models import (
+from app.core.db import Base
+from app.models.models import (
     Account,
     Category,
     CategoryRule,
@@ -17,8 +17,8 @@ from database.models import (
     Transaction,
     User,
 )
-from database.reset import reset_financial_data
-from utils.constants import MatchType, TransactionType
+from app.services.reset import reset_financial_data
+from app.utils.constants import MatchType, TransactionType
 
 
 class ResetFinancialDataTest(unittest.TestCase):

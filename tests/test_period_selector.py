@@ -4,10 +4,11 @@ from datetime import date, timedelta
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
-from ui.components.date_dropdown import DateDropdown, DateDropdownItemDelegate
-from ui.components.period_selector import PeriodSelector
+from app.ui.widgets.date_dropdown import DateDropdown, DateDropdownItemDelegate
+from app.ui.widgets.period_selector import PeriodSelector
 
 
 class PeriodSelectorTest(unittest.TestCase):
@@ -57,6 +58,22 @@ class PeriodSelectorTest(unittest.TestCase):
             DateDropdownItemDelegate,
         )
         self.assertFalse(selector.month_selector.itemIcon(0).isNull())
+
+    def test_month_picker_popup_has_no_opaque_native_backplate(self):
+        selector = PeriodSelector()
+        popup_container = selector.month_selector.view().window()
+
+        self.assertEqual(popup_container.objectName(), "dateDropdownPopup")
+        self.assertTrue(
+            popup_container.testAttribute(
+                Qt.WidgetAttribute.WA_TranslucentBackground
+            )
+        )
+        self.assertTrue(
+            popup_container.windowFlags()
+            & Qt.WindowType.NoDropShadowWindowHint
+        )
+        self.assertFalse(popup_container.autoFillBackground())
 
     def test_no_data_does_not_create_a_phantom_month(self):
         selector = PeriodSelector()

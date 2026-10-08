@@ -12,8 +12,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from database.db import Base
-from database.goals import (
+from app.core.db import Base
+from app.services.goals import (
     create_or_update_category_budget,
     create_savings_goal,
     delete_category_budget,
@@ -25,7 +25,7 @@ from database.goals import (
     set_monthly_savings_goal,
     update_savings_goal,
 )
-from database.models import (
+from app.models.models import (
     Account,
     Category,
     Group,
@@ -38,14 +38,15 @@ from database.models import (
     Transaction,
     User,
 )
-from ui.goals import (
+from app.ui.pages.goals import (
     GoalsPage,
+    MonthNavigator,
     MonthlySavingsGoalDialog,
     ProgressRing,
     SavingsGoalCard,
 )
-from ui.theme import apply_theme
-from utils.constants import TransactionType
+from app.ui.theme import apply_theme
+from app.utils.constants import TransactionType
 
 
 class GoalsServiceTest(unittest.TestCase):
@@ -382,6 +383,32 @@ class GoalsPageLayoutTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
+
+    def test_month_navigator_has_independent_month_and_year_dropdowns(self):
+        navigator = MonthNavigator()
+        navigator.set_month(2026, 10)
+        changes = []
+        navigator.month_changed.connect(
+            lambda year, month: changes.append((year, month))
+        )
+
+        self.assertEqual(navigator.month_selector.currentData(), 10)
+        self.assertEqual(navigator.year_selector.currentData(), 2026)
+        self.assertEqual(navigator.month_selector.accessibleName(), "Month")
+        self.assertEqual(navigator.year_selector.accessibleName(), "Year")
+
+        navigator.month_selector.setCurrentIndex(
+            navigator.month_selector.findData(11)
+        )
+        self.assertEqual(navigator.selected_month, (2026, 11))
+        self.assertEqual(changes[-1], (2026, 11))
+
+        navigator.year_selector.setCurrentIndex(
+            navigator.year_selector.findData(2027)
+        )
+        self.assertEqual(navigator.selected_month, (2027, 11))
+        self.assertEqual(changes[-1], (2027, 11))
+        navigator.close()
 
     def setUp(self):
         self.engine = create_engine(

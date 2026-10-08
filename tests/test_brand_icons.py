@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QApplication
 
-from ui.theme import ICON_ROOT, brand_icon
+from app.ui.theme import ICON_ROOT, brand_icon
 
 
 class BrandIconTest(unittest.TestCase):
@@ -17,7 +17,7 @@ class BrandIconTest(unittest.TestCase):
 
     def assert_uses_asset(self, institution: str, filename: str) -> None:
         null_pixmap = QPixmap()
-        with patch("ui.theme.QPixmap", return_value=null_pixmap) as loader:
+        with patch("app.ui.theme.QPixmap", return_value=null_pixmap) as loader:
             brand_icon(institution)
         loader.assert_called_once_with(str(ICON_ROOT / filename))
 

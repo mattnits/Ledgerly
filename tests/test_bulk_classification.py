@@ -6,10 +6,10 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from database.db import Base
-from database.models import Account, Category, Transaction, User
-from database.transactions import bulk_classify_transactions
-from utils.constants import ClassificationSource, TransactionType
+from app.core.db import Base
+from app.models.models import Account, Category, Transaction, User
+from app.services.transactions import bulk_classify_transactions
+from app.utils.constants import ClassificationSource, TransactionType
 
 
 class BulkClassificationTest(unittest.TestCase):

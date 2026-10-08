@@ -10,8 +10,8 @@ from sqlalchemy.pool import StaticPool
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from database.db import Base
-from database.deduplication import (
+from app.core.db import Base
+from app.services.deduplication import (
     DuplicateDecision,
     ExistingDuplicateState,
     IncomingTransaction,
@@ -20,12 +20,12 @@ from database.deduplication import (
     find_existing_duplicate_candidates,
     load_existing_duplicate_state,
 )
-from database.models import Account, Import, Transaction, User
-from parsers.generic_parser import AMEX_COLUMNS, GenericParser
+from app.models.models import Account, Import, Transaction, User
+from app.parsers.generic_parser import AMEX_COLUMNS, GenericParser
 from PySide6.QtWidgets import QApplication, QLabel
-from ui.components.duplicate_review_dialog import DuplicateReviewDialog
-from ui.theme import APP_STYLESHEET
-from utils.constants import SUPPORTED_PARSE_TYPES, TransactionType
+from app.ui.dialogs.duplicate_review_dialog import DuplicateReviewDialog
+from app.ui.theme import APP_STYLESHEET
+from app.utils.constants import SUPPORTED_PARSE_TYPES, TransactionType
 
 
 class DeduplicationServiceTest(unittest.TestCase):
@@ -76,7 +76,7 @@ class DeduplicationServiceTest(unittest.TestCase):
         )
 
     def existing(self, incoming, *, row_id=1, source_id=None, file_hash=None):
-        from database.deduplication import ExistingTransactionSnapshot
+        from app.services.deduplication import ExistingTransactionSnapshot
         from datetime import datetime
 
         return ExistingTransactionSnapshot(
@@ -212,7 +212,7 @@ class ParserDeduplicationIntegrationTest(unittest.TestCase):
             "owner",
         )
         with (
-            patch("parsers.generic_parser.SessionLocal", self.sessions),
+            patch("app.parsers.generic_parser.SessionLocal", self.sessions),
             patch.object(
                 GenericParser,
                 "_open_file_contents",
@@ -370,7 +370,7 @@ class ParserDeduplicationIntegrationTest(unittest.TestCase):
             [("amex.csv", SUPPORTED_PARSE_TYPES.AMEX.value)], "owner"
         )
         with (
-            patch("parsers.generic_parser.SessionLocal", self.sessions),
+            patch("app.parsers.generic_parser.SessionLocal", self.sessions),
             patch.object(GenericParser, "_open_file_contents", return_value=contents),
         ):
             parser.parse()

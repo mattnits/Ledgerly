@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from database.session_context import CurrentSession
-from ui.shell import ShellWindow
+from app.core.session_context import CurrentSession
+from app.ui.shell import ShellWindow
 
 
 class SessionPersistenceTest(unittest.TestCase):
@@ -34,7 +34,7 @@ class SessionPersistenceTest(unittest.TestCase):
             _management_user_id=ShellWindow._management_user_id,
         )
 
-        with patch("ui.shell.set_last_user_id") as cache_user:
+        with patch("app.ui.shell.set_last_user_id") as cache_user:
             ShellWindow.handle_profile_changed(shell, "user:new-user")
 
         self.assertEqual(shell.session.current_user_id, "new-user")

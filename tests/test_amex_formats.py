@@ -12,17 +12,17 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
-from parsers.generic_parser import (
+from app.parsers.generic_parser import (
     AMEX_COLUMNS,
     AMEX_SHORT_COLUMNS,
     GenericParser,
     detect_amex_format,
     normalize_amex_fieldnames,
 )
-from database.db import Base
-from database.models import Account, Transaction, User
-from ui.components.file_row import FileRow
-from utils.constants import SUPPORTED_PARSE_TYPES
+from app.core.db import Base
+from app.models.models import Account, Transaction, User
+from app.ui.widgets.file_row import FileRow
+from app.utils.constants import SUPPORTED_PARSE_TYPES
 
 
 class AmexFormatTest(unittest.TestCase):
@@ -105,7 +105,7 @@ class AmexFormatTest(unittest.TestCase):
             ("detailed.csv", SUPPORTED_PARSE_TYPES.AMEX.value),
         ], "owner")
         with (
-            patch("parsers.generic_parser.SessionLocal", sessions),
+            patch("app.parsers.generic_parser.SessionLocal", sessions),
             patch.object(
                 GenericParser,
                 "_open_file_contents",

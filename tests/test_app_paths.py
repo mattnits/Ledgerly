@@ -2,9 +2,14 @@ import os
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from utils.app_paths import app_data_dir, import_archive_dir, import_archive_label
+from app.core.paths import (
+    app_data_dir,
+    import_archive_dir,
+    import_archive_label,
+    prepare_app_data_dir,
+)
 
 
 class AppPathsTest(unittest.TestCase):
@@ -22,9 +27,24 @@ class AppPathsTest(unittest.TestCase):
         ):
             self.assertEqual(
                 app_data_dir(),
-                Path("C:/Users/example/AppData/Local/Finance"),
+                Path("C:/Users/example/AppData/Local/Ledgerly"),
             )
             self.assertEqual(import_archive_dir(), app_data_dir() / "imported_statements")
+
+    def test_packaged_build_copies_legacy_profile_to_ledgerly_location(self):
+        target = MagicMock(spec=Path)
+        target.exists.return_value = False
+        legacy = MagicMock(spec=Path)
+        legacy.is_dir.return_value = True
+        with (
+            patch("app.core.paths.app_data_dir", return_value=target),
+            patch("app.core.paths._legacy_app_data_dir", return_value=legacy),
+            patch("app.core.paths.shutil.copytree") as copytree,
+        ):
+            result = prepare_app_data_dir()
+
+        self.assertIs(result, target)
+        copytree.assert_called_once_with(legacy, target)
 
     def test_linux_build_uses_xdg_data_home(self):
         absolute_data_home = Path(Path.cwd().anchor) / "example-data"
@@ -33,7 +53,7 @@ class AppPathsTest(unittest.TestCase):
             patch.object(sys, "platform", "linux"),
             patch.dict(os.environ, {"XDG_DATA_HOME": str(absolute_data_home)}),
         ):
-            self.assertEqual(app_data_dir(), absolute_data_home / "finance")
+            self.assertEqual(app_data_dir(), absolute_data_home / "ledgerly")
 
     def test_linux_build_ignores_relative_xdg_data_home(self):
         with (
@@ -42,7 +62,7 @@ class AppPathsTest(unittest.TestCase):
             patch.dict(os.environ, {"XDG_DATA_HOME": "relative-data"}),
             patch.object(Path, "home", return_value=Path("/home/example")),
         ):
-            self.assertEqual(app_data_dir(), Path("/home/example/.local/share/finance"))
+            self.assertEqual(app_data_dir(), Path("/home/example/.local/share/ledgerly"))
 
 
 if __name__ == "__main__":
