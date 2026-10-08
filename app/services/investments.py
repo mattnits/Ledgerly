@@ -310,6 +310,10 @@ def _salary_rows_for_work_rrsp(
         Transaction.transaction_date >= (
             account.payroll_tracking_start_date or account.created_at.date()
         ),
+        # Payroll-derived RRSP amounts are finalized one completed month at a
+        # time. Excluding the open month keeps Goals, Dashboard, and
+        # Investments from showing a partial contribution total.
+        Transaction.transaction_date < date.today().replace(day=1),
     ]
     if start is not None:
         conditions.append(Transaction.transaction_date >= start)

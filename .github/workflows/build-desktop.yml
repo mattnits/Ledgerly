@@ -28,7 +28,7 @@ jobs:
       - name: Check app path behavior
         run: python -m unittest discover -s tests -p test_app_paths.py -v
       - name: Build self-contained desktop app
-        run: python -m PyInstaller --noconfirm Ledgerly.spec
+        run: python -m PyInstaller --noconfirm packaging/Ledgerly.spec
       - name: Smoke-test Windows app
         if: runner.os == 'Windows'
         run: python tests/smoke_packaged.py dist/Ledgerly/Ledgerly.exe
@@ -55,7 +55,7 @@ jobs:
           if (-not $iscc) {
             throw 'Inno Setup compiler was not found.'
           }
-          & $iscc installer\Ledgerly.iss
+          & $iscc packaging\windows\Ledgerly.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Smoke-test Windows installer
         if: runner.os == 'Windows'

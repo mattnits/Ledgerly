@@ -9,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -257,7 +257,90 @@ class Stage2TransactionUiTest(unittest.TestCase):
 
         self.assertTrue(event.ignored)
         self.assertEqual(combo.currentIndex(), 0)
+
+        combo.resize(220, 34)
+        combo.show()
+        combo.showPopup()
+        app.processEvents()
+        popup = combo.view().window()
+        native_scrollers = [
+            child
+            for child in popup.findChildren(QWidget)
+            if child.metaObject().className() == "QComboBoxPrivateScroller"
+        ]
+        self.assertEqual(popup.objectName(), "framelessComboPopup")
+        self.assertEqual(native_scrollers, [])
+        self.assertEqual(popup.height(), combo.view().height())
+        self.assertEqual(combo.view().geometry().top(), 0)
+        viewport = combo.view().viewport().rect()
+        for row in range(combo.count()):
+            item = combo.model().index(row, 0)
+            self.assertTrue(viewport.contains(combo.view().visualRect(item)))
+
+        combo.hidePopup()
         combo.close()
+
+    def test_empty_selected_month_does_not_show_latest_month_rows(self):
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine)
+        sessions = sessionmaker(bind=engine)
+        with sessions.begin() as session:
+            user = User(id="test-user", name="Test", color="#123456")
+            session.add(user)
+            session.flush()
+            account = Account(
+                user_id=user.id,
+                name="TD Debit",
+                institution="TD",
+                account_type="debit",
+            )
+            session.add(account)
+            session.flush()
+            session.add(Transaction(
+                account_id=account.id,
+                transaction_date=date(2026, 9, 1),
+                description="September transaction",
+                amount=Decimal("5700.00"),
+                transaction_type=TransactionType.INCOME,
+            ))
+
+        app = QApplication.instance() or QApplication([])
+        table = StatementsTable(session_factory=sessions)
+        table.show()
+        table.set_user_id("test-user")
+        self._wait_for(
+            lambda: not table._loading
+            and table.selected_month == (2026, 9)
+            and table.loaded_count == 1
+        )
+
+        table.period_selector.month_picker.set_period(2026, 6, emit=True)
+        self._wait_for(
+            lambda: not table._loading
+            and table.selected_month == (2026, 6)
+            and table.filtered_count == 0
+        )
+
+        self.assertEqual(
+            table.period_selector.month_picker.selected_period,
+            (2026, 6),
+        )
+        self.assertEqual(table.rows, [])
+        self.assertEqual(table.date_range_filter, "selected_month")
+
+        table.period_selector.month_picker.set_period(2026, 9, emit=True)
+        self._wait_for(
+            lambda: not table._loading
+            and table.selected_month == (2026, 9)
+            and table.loaded_count == 1
+        )
+        self.assertEqual(table.rows[0].description, "September transaction")
+        table.close()
+        engine.dispose()
 
 
 if __name__ == "__main__":

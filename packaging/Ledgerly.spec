@@ -1,15 +1,16 @@
-# Build separately on Windows and Linux: python -m PyInstaller --noconfirm Ledgerly.spec
+# Build separately on Windows and Linux:
+# python -m PyInstaller --noconfirm packaging/Ledgerly.spec
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files
 
 
-project_root = Path(SPECPATH)
+project_root = Path(SPECPATH).parent
 assets = [(str(project_root / "assets" / "icons"), "assets/icons")]
 assets += collect_data_files("qtawesome")
 
 analysis = Analysis(
-    [str(project_root / "main.py")],
+    [str(project_root / "packaging" / "entrypoint.py")],
     pathex=[str(project_root)],
     binaries=[],
     datas=assets,

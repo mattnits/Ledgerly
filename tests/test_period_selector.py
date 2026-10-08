@@ -8,8 +8,15 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from app.ui.widgets.combo_box import AppComboBox
-from app.ui.widgets.date_dropdown import DateDropdown, DateDropdownItemDelegate
+from app.ui.widgets.month_year_picker import (
+    MonthYearItemDelegate,
+    MonthYearPicker,
+)
 from app.ui.widgets.period_selector import PeriodSelector
+from app.ui.widgets.statements_table import StatementsTable
+from app.ui.pages.dashboard import DashboardPage
+from app.ui.pages.goals import GoalsPage
+from app.ui.pages.investments import InvestmentsPage
 
 
 class PeriodSelectorTest(unittest.TestCase):
@@ -35,8 +42,8 @@ class PeriodSelectorTest(unittest.TestCase):
             for index in range(selector.month_selector.count())
         }
         self.assertEqual(selector.selected_month, previous_month)
-        self.assertEqual(choices, {older_month, previous_month})
-        self.assertNotIn(current_month, choices)
+        self.assertEqual(choices, set(range(1, 13)))
+        self.assertEqual(selector.year_selector.currentData(), previous_month[0])
 
     def test_current_month_is_shown_when_it_has_data(self):
         today = date.today()
@@ -46,27 +53,30 @@ class PeriodSelectorTest(unittest.TestCase):
         selector.set_available_months({current_month})
 
         self.assertEqual(selector.selected_month, current_month)
-        self.assertEqual(selector.month_selector.count(), 1)
-        self.assertEqual(selector.month_selector.currentData(), current_month)
+        self.assertEqual(selector.month_selector.count(), 12)
+        self.assertEqual(selector.month_selector.currentData(), current_month[1])
+        self.assertEqual(selector.year_selector.currentData(), current_month[0])
 
-    def test_month_picker_uses_checkmark_free_date_dropdown(self):
+    def test_period_selector_uses_shared_month_year_picker(self):
         selector = PeriodSelector()
         selector.set_available_months({(2026, 9), (2026, 10)})
 
-        self.assertIsInstance(selector.month_selector, DateDropdown)
+        self.assertIsInstance(selector.month_picker, MonthYearPicker)
         self.assertIsInstance(selector.month_selector, AppComboBox)
         self.assertIsInstance(
             selector.month_selector.view().itemDelegate(),
-            DateDropdownItemDelegate,
+            MonthYearItemDelegate,
         )
-        self.assertFalse(selector.month_selector.itemIcon(0).isNull())
 
-    def test_month_picker_popup_has_no_opaque_native_backplate(self):
+    def test_month_picker_popup_is_flush_to_its_list(self):
         selector = PeriodSelector()
+        selector.set_available_months({(2026, 10)})
+        selector.show()
+        selector.month_selector.showPopup()
+        self.app.processEvents()
         popup_container = selector.month_selector.view().window()
 
-        self.assertEqual(popup_container.objectName(), "dateDropdownPopup")
-        self.assertTrue(
+        self.assertFalse(
             popup_container.testAttribute(
                 Qt.WidgetAttribute.WA_TranslucentBackground
             )
@@ -75,16 +85,27 @@ class PeriodSelectorTest(unittest.TestCase):
             popup_container.windowFlags()
             & Qt.WindowType.NoDropShadowWindowHint
         )
-        self.assertFalse(popup_container.autoFillBackground())
+        self.assertTrue(
+            popup_container.testAttribute(
+                Qt.WidgetAttribute.WA_StyledBackground
+            )
+        )
+        self.assertEqual(popup_container.objectName(), "monthYearPopup")
+        self.assertEqual(
+            popup_container.height(), selector.month_selector.view().height()
+        )
+        self.assertEqual(selector.month_selector.view().geometry().top(), 0)
+        selector.month_selector.hidePopup()
+        selector.close()
 
     def test_no_data_does_not_create_a_phantom_month(self):
         selector = PeriodSelector()
         selector.set_available_months(set())
 
-        self.assertEqual(selector.month_selector.count(), 0)
-        self.assertFalse(selector.month_selector.isEnabled())
+        self.assertEqual(selector.month_selector.count(), 12)
+        self.assertFalse(selector.month_picker.isEnabled())
         self.assertEqual(selector.period, "all")
-        self.assertTrue(selector.month_selector.isHidden())
+        self.assertTrue(selector.month_picker.isHidden())
 
     def test_monthly_view_returns_when_data_becomes_available(self):
         today = date.today()
@@ -97,7 +118,24 @@ class PeriodSelectorTest(unittest.TestCase):
 
         self.assertEqual(selector.period, "monthly")
         self.assertEqual(selector.selected_month, previous_month)
-        self.assertFalse(selector.month_selector.isHidden())
+        self.assertFalse(selector.month_picker.isHidden())
+
+    def test_monthly_pages_share_the_month_year_picker(self):
+        pages = (
+            DashboardPage(),
+            StatementsTable(),
+            InvestmentsPage(),
+            GoalsPage(),
+        )
+        try:
+            self.assertTrue(all(isinstance(
+                getattr(page, "month_navigator", None)
+                or page.period_selector.month_picker,
+                MonthYearPicker,
+            ) for page in pages))
+        finally:
+            for page in pages:
+                page.close()
 
 
 if __name__ == "__main__":

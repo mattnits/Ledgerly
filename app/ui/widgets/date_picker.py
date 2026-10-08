@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QDate, QPointF, QRect, Qt
+from PySide6.QtCore import QDate, QPointF, QRect, Qt, QTimer
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -120,6 +120,25 @@ class DatePickerEdit(QDateEdit):
         calendar = DatePickerCalendar(self)
         self.setCalendarWidget(calendar)
         self._configure_calendar(calendar)
+
+    def showPopup(self) -> None:  # noqa: N802
+        super().showPopup()
+        self._finalize_popup_surface()
+        QTimer.singleShot(0, self._finalize_popup_surface)
+
+    def _finalize_popup_surface(self) -> None:
+        calendar = self.calendarWidget()
+        popup = calendar.window()
+        if popup is self or popup.metaObject().className() != "QCalendarPopup":
+            return
+        popup.setContentsMargins(0, 0, 0, 0)
+        if popup.layout() is not None:
+            popup.layout().setContentsMargins(0, 0, 0, 0)
+            popup.layout().setSpacing(0)
+        if not popup.isVisible():
+            return
+        popup.resize(calendar.size())
+        calendar.setGeometry(0, 0, popup.width(), popup.height())
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)

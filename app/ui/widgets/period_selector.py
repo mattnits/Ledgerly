@@ -1,11 +1,10 @@
 from datetime import date
 from typing import Iterable
 
-from PySide6.QtCore import QSignalBlocker, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QPushButton, QWidget
 
-from app.ui.widgets.date_dropdown import DateDropdown
-from app.ui.theme import awesome_icon, spaced_text_icon, spaced_text_icon_size
+from app.ui.widgets.month_year_picker import MonthYearPicker
 
 
 Month = tuple[int, int]
@@ -15,8 +14,6 @@ class PeriodSelector(QWidget):
     """Shared Monthly/All Time control with an optional month selection."""
 
     PERIOD_BUTTON_WIDTH = 126
-    MONTH_SELECTOR_WIDTH = 210
-
     selection_changed = Signal(str, object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -27,6 +24,7 @@ class PeriodSelector(QWidget):
         self.selected_month: Month = (today.year, today.month)
         self.available_months: set[Month] = set()
         self._empty_month_fallback = False
+        self._months_initialized = False
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -47,11 +45,12 @@ class PeriodSelector(QWidget):
         self.monthly_button.clicked.connect(lambda: self.set_period("monthly"))
         self.all_time_button.clicked.connect(lambda: self.set_period("all"))
 
-        self.month_selector = DateDropdown()
-        self.month_selector.setIconSize(spaced_text_icon_size())
-        self.month_selector.setFixedWidth(self.MONTH_SELECTOR_WIDTH)
-        self.month_selector.currentIndexChanged.connect(self._select_month)
-        layout.addWidget(self.month_selector)
+        self.month_picker = MonthYearPicker(compact=True)
+        self.month_picker.period_changed.connect(self._select_month)
+        # Expose the two selectors for callers that customize toolbar behavior.
+        self.month_selector = self.month_picker.month_selector
+        self.year_selector = self.month_picker.year_selector
+        layout.addWidget(self.month_picker)
         layout.addStretch()
 
         self._refresh_month_choices()
@@ -76,8 +75,12 @@ class PeriodSelector(QWidget):
     def set_available_months(self, months: Iterable[Month]) -> None:
         self.available_months = set(months)
         if self.available_months:
-            if self.selected_month not in self.available_months:
+            if (
+                not self._months_initialized
+                and self.selected_month not in self.available_months
+            ):
                 self.selected_month = max(self.available_months)
+            self._months_initialized = True
             if self._empty_month_fallback:
                 self.period = "monthly"
                 self._empty_month_fallback = False
@@ -94,6 +97,7 @@ class PeriodSelector(QWidget):
         changed = self.period != period
         self.period = period
         self._empty_month_fallback = False
+        self._months_initialized = False
         self._sync_period_controls()
         if emit and changed:
             self.selection_changed.emit(self.period, self.selected_month)
@@ -111,40 +115,20 @@ class PeriodSelector(QWidget):
         self.period = "monthly"
         self.selected_month = (today.year, today.month)
         self._empty_month_fallback = False
+        self._months_initialized = False
         self._sync_period_controls()
         self._refresh_month_choices()
         if emit and old_selection != (self.period, self.selected_month):
             self.selection_changed.emit(self.period, self.selected_month)
 
     def _refresh_month_choices(self) -> None:
-        months = self.available_months
-        with QSignalBlocker(self.month_selector):
-            self.month_selector.clear()
-            for year, month in sorted(months, reverse=True):
-                self.month_selector.addItem(
-                    spaced_text_icon(
-                        awesome_icon("fa6s.calendar-days", color="#b2b8c1")
-                    ),
-                    date(year, month, 1).strftime("%B %Y"),
-                    (year, month),
-                )
-            selected_index = next(
-                (
-                    index
-                    for index in range(self.month_selector.count())
-                    if self.month_selector.itemData(index) == self.selected_month
-                ),
-                -1,
-            )
-            self.month_selector.setCurrentIndex(selected_index)
-            self.month_selector.setEnabled(bool(months))
+        self.month_picker.set_period(*self.selected_month)
+        self.month_picker.setEnabled(bool(self.available_months))
 
     def _sync_period_controls(self) -> None:
         self.monthly_button.setChecked(self.period == "monthly")
         self.all_time_button.setChecked(self.period == "all")
-        self.month_selector.setVisible(self.period == "monthly")
+        self.month_picker.setVisible(self.period == "monthly")
 
-    def _select_month(self, index: int) -> None:
-        month = self.month_selector.itemData(index)
-        if month is not None:
-            self.set_selected_month(month)
+    def _select_month(self, year: int, month: int) -> None:
+        self.set_selected_month((year, month))

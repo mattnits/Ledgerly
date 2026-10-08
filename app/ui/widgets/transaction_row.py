@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui.widgets.account_badge import AccountBadge
-from app.ui.widgets.combo_box import AppComboBox
+from app.ui.widgets.combo_box import FramelessPopupComboBox
 from app.ui.theme import (
     awesome_icon,
     category_icon_name,
@@ -37,7 +37,7 @@ ROW_TRANSACTION_TYPE_LABELS = {
 }
 
 
-class WheelSafeComboBox(AppComboBox):
+class WheelSafeComboBox(FramelessPopupComboBox):
     """An inline editor that lets wheel events continue to the table."""
 
     def wheelEvent(self, event) -> None:

@@ -1,6 +1,6 @@
 @echo off
 setlocal
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 echo Setting up Ledgerly from source...
 where py >nul 2>nul
@@ -33,4 +33,4 @@ echo Installing runtime packages...
 if %errorlevel% neq 0 exit /b 1
 
 echo.
-echo Setup complete. Run: .venv\Scripts\python.exe main.py
+echo Setup complete. Run: .venv\Scripts\python.exe -m app

@@ -19,7 +19,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
-OutputDir=..\dist
+OutputDir=..\..\dist
 OutputBaseFilename=LedgerlySetup
 Compression=lzma2
 SolidCompression=yes
@@ -39,7 +39,7 @@ Type: files; Name: "{autoprograms}\Finance.lnk"
 Type: files; Name: "{autodesktop}\Finance.lnk"
 
 [Files]
-Source: "..\dist\Ledgerly\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\..\dist\Ledgerly\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"

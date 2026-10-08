@@ -24,10 +24,7 @@ your computer—no cloud account, subscription, or internet connection required.
 
 ## Why Ledgerly?
 
-Most finance tools require a cloud account or constant manual entry. Ledgerly
-is designed for people who want a clear view of their finances while keeping
-control of their data. Import supported bank statements, review the results,
-and let Ledgerly turn them into useful monthly and all-time insights.
+Ledgerly is a private, easy-to-use finance tracker built with PySide6. The goal was to have one secure place to understand my spending trends, set financial goals, and track my investments, all without sending my financial data to the cloud. Everything stays offline on my computer, with as little manual input as possible. Ledgerly was created because I couldn't find an app with all the features, safety, and security requirements I wanted for peace of mind.
 
 ## Highlights
 
@@ -84,7 +81,7 @@ Choose the package that matches your system:
 | `Ledgerly-Linux.zip` | 64-bit Linux desktops | Extract the archive, open the `Ledgerly` folder, and run `./Ledgerly`. If needed, run `chmod +x Ledgerly` once first. |
 
 These downloads are self-contained. You do **not** need to install Python, run
-`setup.bat` or `setup.sh`, or download dependencies. The first launch prepares
+the setup scripts in `scripts/`, or download dependencies. The first launch prepares
 Ledgerly's local storage and database; later launches reuse the same data.
 
 > [!NOTE]
@@ -135,15 +132,15 @@ Clone the repository, then use the setup script for your platform.
 ### Windows
 
 ```powershell
-setup.bat
-.venv\Scripts\python.exe main.py
+scripts\setup-windows.bat
+.venv\Scripts\python.exe -m app
 ```
 
 ### Linux
 
 ```bash
-bash setup.sh
-.venv/bin/python main.py
+bash scripts/setup-linux.sh
+.venv/bin/python -m app
 ```
 
 ## Build desktop packages
@@ -153,7 +150,7 @@ want to target:
 
 ```text
 python -m pip install -r requirements-build.txt
-python -m PyInstaller --noconfirm Ledgerly.spec
+python -m PyInstaller --noconfirm packaging/Ledgerly.spec
 ```
 
 The portable application is created in `dist/Ledgerly`:
@@ -168,10 +165,10 @@ Windows package from Linux or the Linux package from Windows.
 ### Build the Windows installer
 
 Install [Inno Setup 6](https://jrsoftware.org/isdl.php), then double-click
-`build-windows-installer.bat` or run it with an optional version number:
+`scripts\build-windows-installer.bat` or run it with an optional version number:
 
 ```text
-build-windows-installer.bat 1.0.0
+scripts\build-windows-installer.bat 1.0.0
 ```
 
 The resulting installer is written to `dist/LedgerlySetup.exe` and installs
@@ -186,8 +183,8 @@ Windows contributors can enable the repository's post-commit build hook once:
 git config --local core.hooksPath .githooks
 ```
 
-After each local commit, the hook runs `build-windows-installer.bat` and creates
-or updates `Ledgerly.lnk` in the repository root. The shortcut targets
+After each local commit, the hook runs `scripts\build-windows-installer.bat` and
+creates or updates `dist\Ledgerly.lnk`. The shortcut targets
 `dist\Ledgerly\Ledgerly.exe`. Generated builds and the machine-specific shortcut
 remain local and are not committed.
 

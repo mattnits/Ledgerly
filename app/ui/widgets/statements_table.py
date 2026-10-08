@@ -632,8 +632,9 @@ class StatementsTable(QWidget):
 
     def _select_month(self, index: int) -> None:
         month = self.month_selector.itemData(index)
-        if month is not None:
-            self.period_selector.set_selected_month(month)
+        year = self.period_selector.year_selector.currentData()
+        if month is not None and year is not None:
+            self.period_selector.set_selected_month((int(year), int(month)))
 
     def _select_period(self, period: str, month: tuple[int, int]) -> None:
         self.period_filter = period
@@ -960,6 +961,21 @@ class StatementsTable(QWidget):
             )
             return
 
+        if context.get("kind") != "append":
+            previous_selection = (self.period_filter, self.selected_month)
+            self._update_filter_options(
+                result.accounts,
+                result.categories,
+                result.available_months,
+            )
+            if previous_selection != (self.period_filter, self.selected_month):
+                # The first query discovers which months exist. If the shared
+                # selector initializes itself to the latest populated month,
+                # fetch that month before rendering so the picker and rows are
+                # guaranteed to describe the same period.
+                self._apply_filters()
+                return
+
         logger.debug(
             "Transaction query finished (generation=%s, offset=%s, rows=%s)",
             generation,
@@ -988,11 +1004,6 @@ class StatementsTable(QWidget):
             self.loading_overlay.hide_loading()
             return
 
-        self._update_filter_options(
-            result.accounts,
-            result.categories,
-            result.available_months,
-        )
         self._replace_rows(result, context)
         self._set_loading(False)
         self.loading_overlay.hide_loading()

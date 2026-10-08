@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-from PySide6.QtCore import QDate, QRectF, QSignalBlocker, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QDate, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -45,8 +45,10 @@ from app.services.goals import (
 from app.ui.dialogs.generic_dialog import GenericDialog
 from app.ui.widgets.combo_box import AppComboBox
 from app.ui.widgets.date_picker import DatePickerEdit
+from app.ui.widgets.month_year_picker import MonthYearPicker
 from app.ui.widgets.page_header import PageHeader
 from app.ui.theme import (
+    COLORS,
     awesome_icon,
     category_icon_name,
     set_button_icon,
@@ -68,6 +70,19 @@ def _money(value: Decimal, *, signed: bool = False) -> str:
     absolute = abs(value)
     formatted = f"{absolute:,.0f}" if absolute == absolute.to_integral() else f"{absolute:,.2f}"
     return f"{sign}${formatted}"
+
+
+def _set_signed_value_color(
+    label: QLabel,
+    value: Decimal,
+    *,
+    nonnegative_color: str | None = None,
+) -> None:
+    """Color negative monetary values red and reliably reset reused labels."""
+    negative = Decimal(value) < 0
+    label.setProperty("signState", "negative" if negative else "nonnegative")
+    color = COLORS["negative"] if negative else nonnegative_color
+    label.setStyleSheet(f"color: {color};" if color else "")
 
 
 def _badge_pixmap(icon_name: str, color: str, size: int = 34) -> QPixmap:
@@ -152,134 +167,9 @@ def _style_form_labels(form: QFormLayout, fields: tuple[QWidget, ...]) -> None:
             label.setObjectName("dialogFieldLabel")
 
 
-class MonthChoiceComboBox(AppComboBox):
-    """Compact combo box with a consistently visible dropdown chevron."""
-
-    def paintEvent(self, event) -> None:  # noqa: N802 - Qt API spelling
-        super().paintEvent(event)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(QPen(QColor("#aeb8c5"), 1.4))
-        center_x = self.width() - 12
-        center_y = self.height() // 2
-        painter.drawLine(center_x - 3, center_y - 2, center_x, center_y + 1)
-        painter.drawLine(center_x, center_y + 1, center_x + 3, center_y - 2)
-
-
-class MonthNavigator(QWidget):
-    month_changed = Signal(int, int)
-
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        today = date.today()
-        self.year = today.year
-        self.month = today.month
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        self.previous_button = QToolButton()
-        self.next_button = QToolButton()
-        self.display = QFrame()
-        self.display.setObjectName("goalsMonthDisplay")
-        self.display.setFixedHeight(38)
-        display_layout = QHBoxLayout(self.display)
-        display_layout.setContentsMargins(10, 0, 6, 0)
-        display_layout.setSpacing(2)
-        calendar_icon = QLabel()
-        calendar_icon.setPixmap(
-            awesome_icon("fa6s.calendar-days", color="#d5dde7").pixmap(15, 15)
-        )
-        calendar_icon.setFixedWidth(20)
-        self.month_selector = MonthChoiceComboBox()
-        self.month_selector.setObjectName("goalsMonthSelector")
-        self.month_selector.setAccessibleName("Month")
-        self.month_selector.setToolTip("Select month")
-        self.month_selector.setFixedWidth(148)
-        self.month_selector.setMaxVisibleItems(12)
-        for month in range(1, 13):
-            self.month_selector.addItem(
-                date(2000, month, 1).strftime("%B"),
-                month,
-            )
-        divider = QFrame()
-        divider.setObjectName("goalsMonthDivider")
-        divider.setFixedSize(1, 22)
-        self.year_selector = MonthChoiceComboBox()
-        self.year_selector.setObjectName("goalsYearSelector")
-        self.year_selector.setAccessibleName("Year")
-        self.year_selector.setToolTip("Select year")
-        self.year_selector.setFixedWidth(114)
-        for year in range(today.year + 10, today.year - 21, -1):
-            self.year_selector.addItem(str(year), year)
-        display_layout.addWidget(calendar_icon)
-        display_layout.addWidget(self.month_selector)
-        display_layout.addWidget(divider)
-        display_layout.addWidget(self.year_selector)
-        for button, icon, tooltip in (
-            (self.previous_button, "fa6s.chevron-left", "Previous month"),
-            (self.next_button, "fa6s.chevron-right", "Next month"),
-        ):
-            button.setObjectName("goalsMonthButton")
-            button.setFixedSize(38, 38)
-            button.setToolTip(tooltip)
-            button.setAccessibleName(tooltip)
-            set_button_icon(button, icon, color="#c7d0db", active_color="#ffffff", size=13)
-        self.previous_button.clicked.connect(lambda: self.step(-1))
-        self.next_button.clicked.connect(lambda: self.step(1))
-        self.month_selector.currentIndexChanged.connect(self._select_date)
-        self.year_selector.currentIndexChanged.connect(self._select_date)
-        layout.addWidget(self.previous_button)
-        layout.addWidget(self.display)
-        layout.addWidget(self.next_button)
-        self._sync()
-
-    @property
-    def selected_month(self) -> tuple[int, int]:
-        return self.year, self.month
-
-    def set_month(self, year: int, month: int, *, emit: bool = False) -> None:
-        self.year, self.month = year, month
-        self._sync()
-        if emit:
-            self.month_changed.emit(year, month)
-
-    def step(self, direction: int) -> None:
-        value = self.year * 12 + self.month - 1 + direction
-        self.year, zero_month = divmod(value, 12)
-        self.month = zero_month + 1
-        self._sync()
-        self.month_changed.emit(self.year, self.month)
-
-    def _sync(self) -> None:
-        month_blocker = QSignalBlocker(self.month_selector)
-        year_blocker = QSignalBlocker(self.year_selector)
-        if self.year_selector.findData(self.year) < 0:
-            years = {
-                self.year_selector.itemData(index)
-                for index in range(self.year_selector.count())
-            }
-            years.add(self.year)
-            self.year_selector.clear()
-            for year in sorted(years, reverse=True):
-                self.year_selector.addItem(str(year), year)
-        self.month_selector.setCurrentIndex(
-            self.month_selector.findData(self.month)
-        )
-        self.year_selector.setCurrentIndex(
-            self.year_selector.findData(self.year)
-        )
-        del month_blocker, year_blocker
-
-    def _select_date(self, _index: int) -> None:
-        month = self.month_selector.currentData()
-        year = self.year_selector.currentData()
-        if month is None or year is None:
-            return
-        selected = int(year), int(month)
-        if selected == (self.year, self.month):
-            return
-        self.year, self.month = selected
-        self.month_changed.emit(self.year, self.month)
+# Backward-compatible name for integrations that imported the Goals-local
+# navigator before it became the shared application component.
+MonthNavigator = MonthYearPicker
 
 
 class SectionCard(QFrame):
@@ -403,6 +293,7 @@ class MetricTile(QFrame):
 
     def set_data(self, value: Decimal, detail: str = "") -> None:
         self.value_label.setText(_money(value))
+        _set_signed_value_color(self.value_label, value)
         self.detail_label.setText(detail)
         self.detail_label.setVisible(bool(detail) and not self._dense)
 
@@ -599,11 +490,21 @@ class MonthlySavingsCard(SectionCard):
 
     def set_data(self, data: MonthlySavingsBreakdown, month_label: str) -> None:
         self.actual_label.setText(_money(data.net_savings))
+        _set_signed_value_color(
+            self.actual_label,
+            data.net_savings,
+            nonnegative_color="#4fd594",
+        )
         self.breakdown_values["income"].setText(_money(data.income))
         self.breakdown_values["spending"].setText(f"−{_money(data.spending)}")
         self.breakdown_values["employee"].setText(_money(data.work_rrsp_employee))
         self.breakdown_values["employer"].setText(_money(data.work_rrsp_employer))
         self.breakdown_values["net"].setText(_money(data.net_savings))
+        _set_signed_value_color(
+            self.breakdown_values["net"],
+            data.net_savings,
+            nonnegative_color="#4fd594",
+        )
         if data.target is None:
             self.ring_widget.set_progress(Decimal(), False)
             self.target_label.setText(f"No savings goal set for {month_label}")
@@ -1088,8 +989,8 @@ class GoalsPage(QWidget):
             "Goals",
             "Set your savings target, manage category limits, and track your progress.",
         )
-        self.month_navigator = MonthNavigator()
-        self.month_navigator.month_changed.connect(lambda _y, _m: self.reload())
+        self.month_navigator = MonthYearPicker()
+        self.month_navigator.period_changed.connect(lambda _y, _m: self.reload())
         self.header_layout.addWidget(self.header, 0, 0)
         self.header_layout.addWidget(self.month_navigator, 0, 1, alignment=Qt.AlignmentFlag.AlignTop)
         self.header_layout.setColumnStretch(0, 1)
@@ -1274,38 +1175,6 @@ class GoalsPage(QWidget):
             QLabel#savingsGoalAmount { color: #f4f6f8; font-size: 16px; font-weight: 700; }
             QLabel#goalsPercent { color:#dce3ea; font-size:10px; }
             QLabel#goalsBudgetCompactAmount { color:#e4e9ef; font-weight:600; }
-            QFrame#goalsMonthDisplay { background:#151b21; border-top:1px solid #34404d; border-bottom:1px solid #34404d; }
-            QComboBox#goalsMonthSelector, QComboBox#goalsYearSelector {
-                color:#edf2f7;
-                background:transparent;
-                border:none;
-                padding:7px 22px 7px 8px;
-                font-size:12px;
-            }
-            QComboBox#goalsMonthSelector:hover, QComboBox#goalsYearSelector:hover {
-                background:#222b35;
-            }
-            QComboBox#goalsMonthSelector::drop-down, QComboBox#goalsYearSelector::drop-down {
-                width:20px;
-                border:none;
-            }
-            QComboBox#goalsMonthSelector::down-arrow, QComboBox#goalsYearSelector::down-arrow {
-                image:none;
-            }
-            QComboBox#goalsMonthSelector QAbstractItemView,
-            QComboBox#goalsYearSelector QAbstractItemView {
-                color:#e5e8ee;
-                background:#171b21;
-                border:1px solid #343c48;
-                selection-color:#ffffff;
-                selection-background-color:#4468f2;
-                padding:0;
-                margin:0;
-                outline:none;
-            }
-            QFrame#goalsMonthDivider { background:#34404d; border:none; }
-            QToolButton#goalsMonthButton, QToolButton#goalsMenuButton { background:#151b21; border:1px solid #34404d; padding:5px; }
-            QToolButton#goalsMonthButton:hover, QToolButton#goalsMenuButton:hover { background:#27313c; }
             QProgressBar#goalsProgress { background:#293440; border:none; border-radius:5px; min-height:10px; max-height:10px; }
             QProgressBar#goalsProgress::chunk { background:#4fd594; border-radius:5px; }
         """)

@@ -6,7 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QApplication
 
-from main import create_splash
+from app.__main__ import create_splash
 
 
 class SplashScreenTest(unittest.TestCase):

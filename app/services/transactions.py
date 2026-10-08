@@ -133,12 +133,10 @@ def fetch_transactions(
             .where(Transaction.is_deleted.is_(params.category_filter == "deleted"))
         )
         if params.period_filter == "monthly":
-            effective_month = (
-                params.selected_month
-                if params.selected_month in available_months
-                else max(available_months, default=params.selected_month)
-            )
-            year, month = effective_month
+            # The month picker intentionally allows browsing months without
+            # transactions. Never substitute a different populated month here;
+            # doing so leaves the picker and the displayed rows out of sync.
+            year, month = params.selected_month
             first_day = date(year, month, 1)
             next_month = date(year + (month == 12), month % 12 + 1, 1)
             base = base.where(

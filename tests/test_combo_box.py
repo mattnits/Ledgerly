@@ -43,7 +43,7 @@ class AppComboBoxTest(unittest.TestCase):
             margins.bottom(),
         ), 1)
 
-    def test_long_popups_have_transparent_edge_scrollers(self):
+    def test_long_popups_collapse_native_edge_scrollers(self):
         combo = DateDropdown()
         combo.addItems(f"Month {index}" for index in range(30))
         combo.resize(260, 42)
@@ -72,6 +72,13 @@ class AppComboBoxTest(unittest.TestCase):
             )
             self.assertFalse(scroller.autoFillBackground())
             self.assertIn("background: transparent", scroller.styleSheet())
+            self.assertEqual(scroller.height(), 0)
+            self.assertTrue(scroller.isHidden())
+
+        self.assertEqual(popup.height(), combo.view().height())
+        self.assertEqual(combo.view().geometry().top(), 0)
+        self.assertEqual(combo.view().geometry().bottom(), popup.height() - 1)
+        self.assertGreater(combo.view().verticalScrollBar().maximum(), 0)
 
         combo.hidePopup()
         combo.close()

@@ -518,7 +518,7 @@ class InvestmentAccountDialog(GenericDialog):
             "Salary deposits are treated as take-home pay after the configured "
             "RRSP deduction. The app estimates your employee contribution by "
             "reversing that deduction. Tracking starts on the Initial date and "
-            "includes Salary transactions from that date onward, even for past months."
+            "includes them once each month is complete; the current month is excluded."
         )
         note.setObjectName("workRrspInfoNote")
         note.setWordWrap(True)
@@ -607,8 +607,12 @@ class WorkRrspDetailDialog(GenericDialog):
         session_factory=SessionLocal,
     ) -> None:
         current_month = (date.today().year, date.today().month)
+        completed_month = _previous_month(current_month)
         current = get_monthly_work_rrsp_summary(
             account.id, *current_month, session_factory=session_factory
+        )
+        completed = get_monthly_work_rrsp_summary(
+            account.id, *completed_month, session_factory=session_factory
         )
         all_time = get_all_time_work_rrsp_summary(
             account.id, session_factory=session_factory
@@ -617,6 +621,7 @@ class WorkRrspDetailDialog(GenericDialog):
             account.id, session_factory=session_factory
         )
         self.current_summary = current
+        self.completed_summary = completed
         self.all_time_summary = all_time
         self.history = history
 
@@ -648,18 +653,24 @@ class WorkRrspDetailDialog(GenericDialog):
         totals.setHorizontalSpacing(20)
         totals.setVerticalSpacing(7)
         totals.addWidget(QLabel(""), 0, 0)
-        totals.addWidget(QLabel("Current Month"), 0, 1)
+        totals.addWidget(
+            QLabel(date(*completed_month, 1).strftime("%B %Y")), 0, 1
+        )
         totals.addWidget(QLabel("All Time"), 0, 2)
         for row, (caption, current_amount, all_time_amount) in enumerate((
             (
                 "You contributed",
-                current.employee_contribution,
+                completed.employee_contribution,
                 all_time.employee_contribution,
             ),
-            ("Employer matched", current.employer_match, all_time.employer_match),
+            (
+                "Employer matched",
+                completed.employer_match,
+                all_time.employer_match,
+            ),
             (
                 "Total contributed",
-                current.total_contribution,
+                completed.total_contribution,
                 all_time.total_contribution,
             ),
         ), start=1):
@@ -1259,14 +1270,18 @@ class InvestmentsPage(QWidget):
     def _render_work_rrsp_accounts(self) -> None:
         self._clear_layout(self.work_rrsp_layout)
         accounts = tuple(
-            account for account in self._accounts if account.is_work_related
+            account
+            for account in self._accounts
+            if account.is_work_related
+            and (account.account_type or "").strip().casefold() == "rrsp"
         )
         self.work_rrsp_empty.setVisible(not accounts)
         self.work_rrsp_content.setVisible(bool(accounts))
-        current_month = (date.today().year, date.today().month)
+        completed_month = _previous_month((date.today().year, date.today().month))
+        completed_month_label = date(*completed_month, 1).strftime("%b %Y")
         for account in accounts:
             monthly = get_monthly_work_rrsp_summary(
-                account.id, *current_month, session_factory=self.session_factory
+                account.id, *completed_month, session_factory=self.session_factory
             )
             all_time = get_all_time_work_rrsp_summary(
                 account.id, session_factory=self.session_factory
@@ -1326,7 +1341,9 @@ class InvestmentsPage(QWidget):
                 amount.setStyleSheet(
                     f"color: {COLORS['positive']}; font-size: 18px; font-weight: 700;"
                 )
-                month_value = QLabel(f"+{_currency(this_month)} this month")
+                month_value = QLabel(
+                    f"+{_currency(this_month)} in {completed_month_label}"
+                )
                 month_value.setStyleSheet(
                     f"color: {COLORS['text_dim']}; font-size: 10px;"
                 )

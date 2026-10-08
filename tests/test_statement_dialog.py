@@ -22,7 +22,7 @@ class StatementDialogTest(unittest.TestCase):
     def setUp(self):
         root = Path(__file__).resolve().parent.parent
         self.amex = root / "README.md"
-        self.td = root / "main.py"
+        self.td = root / "app" / "__main__.py"
 
     def test_multiple_files_and_per_file_parser_selection_are_preserved(self):
         selection = FileSelection()

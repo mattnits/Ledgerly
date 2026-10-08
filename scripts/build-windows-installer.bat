@@ -1,6 +1,6 @@
 @echo off
 setlocal
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 set "LEDGERLY_VERSION=%~1"
 if not defined LEDGERLY_VERSION set "LEDGERLY_VERSION=0.1.0"
@@ -34,7 +34,7 @@ echo Installing build dependencies...
 if errorlevel 1 exit /b 1
 
 echo Building the desktop application...
-".venv-build\Scripts\python.exe" -m PyInstaller --noconfirm Ledgerly.spec
+".venv-build\Scripts\python.exe" -m PyInstaller --noconfirm packaging\Ledgerly.spec
 if errorlevel 1 exit /b 1
 
 set "ISCC="
@@ -51,7 +51,7 @@ if not defined ISCC (
 )
 
 echo Building Ledgerly %LEDGERLY_VERSION% installer...
-"%ISCC%" "installer\Ledgerly.iss"
+"%ISCC%" "packaging\windows\Ledgerly.iss"
 if errorlevel 1 exit /b 1
 
 echo.

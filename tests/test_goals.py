@@ -14,6 +14,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.db import Base
 from app.services.goals import (
+    MonthlySavingsBreakdown,
     create_or_update_category_budget,
     create_savings_goal,
     delete_category_budget,
@@ -41,13 +42,16 @@ from app.models.models import (
 from app.ui.pages.goals import (
     GoalsPage,
     MonthNavigator,
+    MonthlySavingsCard,
     MonthlySavingsGoalDialog,
     ProgressRing,
+    QuickStatsCard,
     SavingsGoalCard,
     SavingsGoalDialog,
 )
-from app.ui.theme import apply_theme
+from app.ui.theme import COLORS, apply_theme
 from app.ui.widgets.date_picker import DatePickerCalendar, DatePickerEdit
+from app.ui.widgets.month_year_picker import MonthYearPicker
 from app.utils.constants import TransactionType
 
 
@@ -90,7 +94,7 @@ class GoalsServiceTest(unittest.TestCase):
             session.add_all((
                 Transaction(
                     account_id=self.user_account_id,
-                    transaction_date=date(2026, 10, 2),
+                    transaction_date=date(2026, 9, 2),
                     description="Pay",
                     amount=Decimal("900.00"),
                     transaction_type=TransactionType.INCOME,
@@ -98,7 +102,7 @@ class GoalsServiceTest(unittest.TestCase):
                 ),
                 Transaction(
                     account_id=self.user_account_id,
-                    transaction_date=date(2026, 10, 5),
+                    transaction_date=date(2026, 9, 5),
                     description="Food",
                     amount=Decimal("-300.00"),
                     transaction_type=TransactionType.EXPENSE,
@@ -118,15 +122,15 @@ class GoalsServiceTest(unittest.TestCase):
                 ),
                 SavingsSnapshot(
                     user_id="owner",
-                    snapshot_date=date(2026, 10, 31),
+                    snapshot_date=date(2026, 9, 30),
                     amount_saved_this_month=Decimal("9999.00"),
                 ),
             ))
         set_monthly_savings_goal(
-            2026, 10, Decimal("750"), user_id="owner", session_factory=self.sessions
+            2026, 9, Decimal("750"), user_id="owner", session_factory=self.sessions
         )
         result = get_monthly_savings_breakdown(
-            2026, 10, user_id="owner", session_factory=self.sessions
+            2026, 9, user_id="owner", session_factory=self.sessions
         )
         self.assertEqual(result.income, Decimal("900.00"))
         self.assertEqual(result.spending, Decimal("300.00"))
@@ -388,6 +392,7 @@ class GoalsPageLayoutTest(unittest.TestCase):
 
     def test_month_navigator_has_independent_month_and_year_dropdowns(self):
         navigator = MonthNavigator()
+        self.assertIsInstance(navigator, MonthYearPicker)
         navigator.set_month(2026, 10)
         changes = []
         navigator.month_changed.connect(
@@ -411,6 +416,50 @@ class GoalsPageLayoutTest(unittest.TestCase):
         self.assertEqual(navigator.selected_month, (2027, 11))
         self.assertEqual(changes[-1], (2027, 11))
         navigator.close()
+
+    def test_negative_net_savings_is_red_in_every_summary(self):
+        data = MonthlySavingsBreakdown(
+            income=Decimal("15"),
+            spending=Decimal("9088.56"),
+            work_rrsp_employee=Decimal(),
+            work_rrsp_employer=Decimal(),
+            net_savings=Decimal("-9073.56"),
+            target=None,
+        )
+        monthly = MonthlySavingsCard()
+        quick = QuickStatsCard()
+
+        monthly.set_data(data, "August 2026")
+        quick.set_data(data, "August 2026")
+
+        for label in (
+            monthly.actual_label,
+            monthly.breakdown_values["net"],
+            quick.net.value_label,
+        ):
+            self.assertEqual(label.property("signState"), "negative")
+            self.assertIn(COLORS["negative"], label.styleSheet())
+
+        positive = MonthlySavingsBreakdown(
+            income=Decimal("1000"),
+            spending=Decimal("250"),
+            work_rrsp_employee=Decimal(),
+            work_rrsp_employer=Decimal(),
+            net_savings=Decimal("750"),
+            target=None,
+        )
+        monthly.set_data(positive, "September 2026")
+        quick.set_data(positive, "September 2026")
+        for label in (
+            monthly.actual_label,
+            monthly.breakdown_values["net"],
+            quick.net.value_label,
+        ):
+            self.assertEqual(label.property("signState"), "nonnegative")
+            self.assertNotIn(COLORS["negative"], label.styleSheet())
+
+        monthly.close()
+        quick.close()
 
     def setUp(self):
         self.engine = create_engine(

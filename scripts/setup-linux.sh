@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 if ! command -v python3 >/dev/null 2>&1; then
     echo "Python 3.11 or newer is required for source setup."
@@ -20,4 +20,4 @@ fi
 
 echo "Installing runtime packages..."
 .venv/bin/python -m pip install -r requirements.txt
-echo "Setup complete. Run: .venv/bin/python main.py"
+echo "Setup complete. Run: .venv/bin/python -m app"

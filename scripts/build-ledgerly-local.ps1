@@ -4,9 +4,9 @@ param()
 $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$buildScript = Join-Path $projectRoot "build-windows-installer.bat"
+$buildScript = Join-Path $PSScriptRoot "build-windows-installer.bat"
 $executable = Join-Path $projectRoot "dist\Ledgerly\Ledgerly.exe"
-$shortcutPath = Join-Path $projectRoot "Ledgerly.lnk"
+$shortcutPath = Join-Path $projectRoot "dist\Ledgerly.lnk"
 
 Push-Location $projectRoot
 try {
@@ -27,7 +27,7 @@ try {
     $shortcut.Description = "Launch Ledgerly"
     $shortcut.Save()
 
-    Write-Host "Ledgerly was rebuilt and the root shortcut was updated."
+    Write-Host "Ledgerly was rebuilt and dist\Ledgerly.lnk was updated."
 } finally {
     Pop-Location
 }

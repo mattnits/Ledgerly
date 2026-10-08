@@ -12,6 +12,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.services.dashboard import get_dashboard_data
 from app.core.db import Base
+from app.services.goals import get_monthly_savings_breakdown
 from app.services.investments import (
     calculate_work_rrsp_for_salary,
     create_investment_account,
@@ -38,6 +39,7 @@ from app.ui.pages.investments import (
     InvestmentsPage,
     WorkRrspDetailDialog,
 )
+from app.ui.widgets.combo_box import AppComboBox
 from app.utils.constants import TransactionType
 
 
@@ -194,6 +196,49 @@ class WorkRrspServiceTest(WorkRrspFixture, unittest.TestCase):
         self.assertEqual(
             [item.summary.total_contribution for item in history],
             [Decimal("75.00"), Decimal("75.00"), Decimal("75.00")],
+        )
+
+    def test_current_month_is_excluded_until_it_is_complete(self):
+        today = date.today()
+        previous_year = today.year - (today.month == 1)
+        previous_month = (today.month - 2) % 12 + 1
+        self.add_transaction(date(previous_year, previous_month, 15), "950")
+        self.add_transaction(date(today.year, today.month, 1), "1900")
+
+        current = get_monthly_work_rrsp_summary(
+            self.work_id,
+            today.year,
+            today.month,
+            session_factory=self.sessions,
+        )
+        all_time = get_all_time_work_rrsp_summary(
+            self.work_id, session_factory=self.sessions
+        )
+        history = get_work_rrsp_monthly_history(
+            self.work_id, session_factory=self.sessions
+        )
+        dashboard = get_dashboard_data(
+            "owner",
+            "monthly",
+            (today.year, today.month),
+            self.sessions,
+        )
+        goals = get_monthly_savings_breakdown(
+            today.year,
+            today.month,
+            user_id="owner",
+            session_factory=self.sessions,
+        )
+
+        self.assertEqual(current.total_contribution, Decimal("0.00"))
+        self.assertEqual(all_time.total_contribution, Decimal("75.00"))
+        self.assertEqual(dashboard.work_rrsp_employee, Decimal("0.00"))
+        self.assertEqual(dashboard.employer_rrsp_match, Decimal("0.00"))
+        self.assertEqual(goals.work_rrsp_employee, Decimal("0.00"))
+        self.assertEqual(goals.work_rrsp_employer, Decimal("0.00"))
+        self.assertEqual(
+            [(item.year, item.month) for item in history],
+            [(previous_year, previous_month)],
         )
 
     def test_other_income_and_e_transfer_are_ignored(self):
@@ -375,6 +420,11 @@ class WorkRrspUiTest(WorkRrspFixture, unittest.TestCase):
         self.assertIn("5.25", dialog.employee_percent.text())
         dialog.close()
 
+    def test_add_dialog_account_type_uses_shared_bar_free_popup(self):
+        dialog = InvestmentAccountDialog()
+        self.assertIsInstance(dialog.account_type, AppComboBox)
+        dialog.close()
+
     def test_account_dialog_scrollbar_only_appears_when_content_needs_it(self):
         dialog = InvestmentAccountDialog()
         dialog.resize(660, 700)
@@ -409,12 +459,15 @@ class WorkRrspUiTest(WorkRrspFixture, unittest.TestCase):
             account, session_factory=self.sessions
         )
         self.assertEqual(
-            dialog.current_summary.total_contribution, Decimal("75.00")
+            dialog.current_summary.total_contribution, Decimal("0.00")
         )
         self.assertEqual(
-            dialog.all_time_summary.total_contribution, Decimal("150.00")
+            dialog.completed_summary.total_contribution, Decimal("75.00")
         )
-        self.assertEqual(dialog.history_table.rowCount(), 2)
+        self.assertEqual(
+            dialog.all_time_summary.total_contribution, Decimal("75.00")
+        )
+        self.assertEqual(dialog.history_table.rowCount(), 1)
         dialog.close()
 
     def test_investments_page_keeps_generic_table_and_adds_work_summary(self):
