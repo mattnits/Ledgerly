@@ -33,3 +33,19 @@ the new table without touching existing rows.
 The same startup also adds partial unique indexes for monthly targets and
 category budgets. These make the existing owner/month uniqueness rules fully
 effective under SQLite's `NULL` handling; they do not rewrite either table.
+
+## Transaction deduplication
+
+`init_db()` performs an additive migration for transaction identity. It adds:
+
+- `transactions.source_transaction_id VARCHAR(255) NULL`
+- `transactions.dedupe_fingerprint VARCHAR(64) NULL`
+- a non-unique lookup index on `dedupe_fingerprint`
+- a partial unique index on `(account_id, source_transaction_id)` for active,
+  non-deleted rows whose source ID is not null
+
+Existing rows remain unchanged and receive `NULL` in both new columns. The
+importer can still compare those rows by calculating their fallback fingerprint
+in memory. No table is dropped or recreated and no existing transaction is
+deleted. Back up `data/finance.db` while the application is closed, then launch
+the updated app once; no manual SQL step is required.

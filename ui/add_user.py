@@ -27,7 +27,13 @@ from database.groups import create_group, get_group, update_group
 from database.models import User
 from database.user_management import create_user, update_group_as_admin, update_user
 from ui.sidebar import ElidedLabel, avatar_icon
-from ui.theme import COLORS, awesome_icon, set_button_icon
+from ui.theme import (
+    COLORS,
+    awesome_icon,
+    set_button_icon,
+    spaced_text_icon,
+    spaced_text_icon_size,
+)
 
 
 PROFILE_COLORS = (
@@ -136,7 +142,7 @@ class AddUserDialog(QDialog):
         layout.setContentsMargins(28, 24, 28, 22)
         layout.setSpacing(0)
         header = QHBoxLayout()
-        header.setSpacing(16)
+        header.setSpacing(8)
         icon_frame = QFrame()
         icon_frame.setObjectName("dialogIconFrame")
         icon_frame.setFixedSize(56, 56)
@@ -309,8 +315,10 @@ class AddUserDialog(QDialog):
         for user in self._load_users():
             checkbox = QCheckBox(user["name"])
             checkbox.setObjectName("groupMemberChoice")
-            checkbox.setIcon(avatar_icon(user["name"], user["color"], 28))
-            checkbox.setIconSize(QSize(28, 28))
+            checkbox.setIcon(spaced_text_icon(
+                avatar_icon(user["name"], user["color"], 28), 28
+            ))
+            checkbox.setIconSize(spaced_text_icon_size(28))
             checkbox.setMinimumHeight(42)
             checkbox.setSizePolicy(
                 QSizePolicy.Policy.Expanding,

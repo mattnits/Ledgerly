@@ -46,7 +46,13 @@ from database.goals import (
 )
 from ui.components.generic_dialog import GenericDialog
 from ui.components.page_header import PageHeader
-from ui.theme import awesome_icon, category_icon_name, set_button_icon
+from ui.theme import (
+    awesome_icon,
+    category_icon_name,
+    set_button_icon,
+    spaced_text_icon,
+    spaced_text_icon_size,
+)
 
 
 MONEY_STEP = 25.0
@@ -164,7 +170,7 @@ class MonthNavigator(QWidget):
         self.display.setFixedHeight(38)
         display_layout = QHBoxLayout(self.display)
         display_layout.setContentsMargins(14, 0, 12, 0)
-        display_layout.setSpacing(9)
+        display_layout.setSpacing(8)
         calendar_icon = QLabel()
         calendar_icon.setPixmap(
             awesome_icon("fa6s.calendar-days", color="#d5dde7").pixmap(15, 15)
@@ -302,7 +308,7 @@ class MetricTile(QFrame):
         self.setMinimumHeight(88)
         self.tile_layout = QGridLayout(self)
         self.tile_layout.setContentsMargins(14, 12, 14, 11)
-        self.tile_layout.setHorizontalSpacing(11)
+        self.tile_layout.setHorizontalSpacing(8)
         self.tile_layout.setVerticalSpacing(2)
         icon_label = QLabel()
         icon_label.setPixmap(awesome_icon(icon, color=color).pixmap(24, 24))
@@ -353,13 +359,16 @@ class MonthlySavingsCard(SectionCard):
         self.root_layout.setContentsMargins(20, 16, 20, 16)
         self.root_layout.setSpacing(12)
         heading = QHBoxLayout()
+        heading.setSpacing(0)
         icon = QLabel()
         icon.setPixmap(awesome_icon("fa6s.bullseye", color="#49a4ff").pixmap(25, 25))
         titles = QVBoxLayout()
         titles.setSpacing(2)
         title = QLabel("Monthly Savings Goal")
         title.setObjectName("goalsSectionTitle")
-        self.subtitle = QLabel("Your target is based on income, spending, and work RRSP contributions.")
+        self.subtitle = QLabel(
+            "Your target is based on usable income after spending; RRSP contributions are excluded."
+        )
         self.subtitle.setObjectName("goalsMuted")
         self.subtitle.setWordWrap(True)
         titles.addWidget(title)
@@ -372,7 +381,7 @@ class MonthlySavingsCard(SectionCard):
         )
         self.edit_button.clicked.connect(self.edit_requested)
         heading.addWidget(icon, alignment=Qt.AlignmentFlag.AlignTop)
-        heading.addSpacing(5)
+        heading.addSpacing(8)
         heading.addLayout(titles, 1)
         heading.addWidget(self.edit_button, alignment=Qt.AlignmentFlag.AlignTop)
         self.root_layout.addLayout(heading)
@@ -431,7 +440,7 @@ class MonthlySavingsCard(SectionCard):
         self.breakdown_layout.setContentsMargins(14, 12, 14, 12)
         self.breakdown_layout.setHorizontalSpacing(18)
         self.breakdown_layout.setVerticalSpacing(7)
-        heading_label = QLabel("Breakdown  (counts toward goal)")
+        heading_label = QLabel("Goal calculation  (RRSP excluded)")
         heading_label.setObjectName("goalsSmallHeading")
         self.breakdown_layout.addWidget(heading_label, 0, 0, 1, 3)
         self.breakdown_values: dict[str, QLabel] = {}
@@ -499,10 +508,12 @@ class MonthlySavingsCard(SectionCard):
         self.breakdown_layout.setVerticalSpacing(4 if dense else 7)
         self.progress.setMinimumWidth(125 if dense else 175)
         self.breakdown_names["employee"].setText(
-            "RRSP (employee)" if dense else "Work RRSP (employee)"
+            "RRSP employee (excluded)"
+            if dense else "Work RRSP employee (excluded)"
         )
         self.breakdown_names["employer"].setText(
-            "RRSP (employer)" if dense else "Work RRSP (employer)"
+            "RRSP employer (excluded)"
+            if dense else "Work RRSP employer (excluded)"
         )
         self.subtitle.setVisible(not dense)
         self.status_label.setVisible(not dense and bool(self.status_label.text()))
@@ -531,8 +542,8 @@ class MonthlySavingsCard(SectionCard):
         self.actual_label.setText(_money(data.net_savings))
         self.breakdown_values["income"].setText(_money(data.income))
         self.breakdown_values["spending"].setText(f"−{_money(data.spending)}")
-        self.breakdown_values["employee"].setText(f"+{_money(data.work_rrsp_employee)}")
-        self.breakdown_values["employer"].setText(f"+{_money(data.work_rrsp_employer)}")
+        self.breakdown_values["employee"].setText(_money(data.work_rrsp_employee))
+        self.breakdown_values["employer"].setText(_money(data.work_rrsp_employer))
         self.breakdown_values["net"].setText(_money(data.net_savings))
         if data.target is None:
             self.ring_widget.set_progress(Decimal(), False)
@@ -579,7 +590,7 @@ class QuickStatsCard(SectionCard):
         )
         heading = QHBoxLayout(self.header_widget)
         heading.setContentsMargins(0, 0, 0, 0)
-        heading.setSpacing(10)
+        heading.setSpacing(8)
         icon = QLabel()
         icon.setPixmap(awesome_icon("fa6s.chart-simple", color="#49a4ff").pixmap(20, 20))
         self.title_label = QLabel("Quick Stats")
@@ -664,7 +675,7 @@ class BudgetRow(QFrame):
         self.category_cell = QWidget()
         category_layout = QHBoxLayout(self.category_cell)
         category_layout.setContentsMargins(0, 0, 0, 0)
-        category_layout.setSpacing(10)
+        category_layout.setSpacing(8)
         category_icon = QLabel()
         badge_size = 18 if dense else 32
         category_icon.setPixmap(_badge_pixmap(
@@ -781,7 +792,7 @@ class SavingsGoalCard(SectionCard):
         )
         layout.setSpacing(4 if dense else 7)
         heading = QHBoxLayout()
-        heading.setSpacing(10)
+        heading.setSpacing(8)
         icon_name, accent = _goal_visual(item.name)
         icon = QLabel()
         badge_size = 26 if dense else 38
@@ -886,8 +897,8 @@ class MonthlySavingsGoalDialog(GenericDialog):
             icon_name="fa6s.bullseye",
             info_text=(
                 "This target carries forward to future months until you change it. "
-                "Progress uses income - spending + work RRSP employee contribution "
-                "+ employer match."
+                "Progress uses income - spending. Work RRSP employee contributions "
+                "and employer matches are excluded because they are not currently usable cash."
             ),
         )
         self.resize(720, 560)
@@ -906,8 +917,13 @@ class BudgetDialog(GenericDialog):
         form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         self.category = QComboBox()
+        self.category.setIconSize(spaced_text_icon_size())
         for category_id, name, color in categories:
-            self.category.addItem(awesome_icon("fa6s.circle", color=color), name, category_id)
+            self.category.addItem(
+                spaced_text_icon(awesome_icon("fa6s.circle", color=color)),
+                name,
+                category_id,
+            )
         self.month = QLabel(date(year, month, 1).strftime("%B %Y"))
         self.amount = _money_editor(existing.target if existing else Decimal())
         form.addRow("Category", self.category)
@@ -1061,6 +1077,7 @@ class GoalsPage(QWidget):
         self.budget_layout.setContentsMargins(18, 16, 18, 16)
         self.budget_layout.setSpacing(12)
         budget_heading = QHBoxLayout()
+        budget_heading.setSpacing(8)
         budget_icon = QLabel()
         budget_icon.setPixmap(awesome_icon("fa6s.chart-pie", color="#49a4ff").pixmap(21, 21))
         budget_titles = QVBoxLayout()
@@ -1111,6 +1128,7 @@ class GoalsPage(QWidget):
         self.goals_layout.setContentsMargins(18, 16, 18, 16)
         self.goals_layout.setSpacing(12)
         goals_heading = QHBoxLayout()
+        goals_heading.setSpacing(8)
         goals_icon = QLabel()
         goals_icon.setPixmap(awesome_icon("fa6s.flag", color="#49a4ff").pixmap(21, 21))
         goals_titles = QVBoxLayout()

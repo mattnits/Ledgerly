@@ -18,6 +18,8 @@ from ui.theme import (
     awesome_icon,
     category_icon_name,
     set_label_icon,
+    spaced_text_icon,
+    spaced_text_icon_size,
     transaction_type_icon,
 )
 
@@ -105,7 +107,7 @@ class TransactionRow(QObject):
         self.description_cell.setObjectName("tableCell")
         description_layout = QHBoxLayout(self.description_cell)
         description_layout.setContentsMargins(12, 0, 8, 0)
-        description_layout.setSpacing(10)
+        description_layout.setSpacing(8)
         description_icon = QLabel()
         category = next(
             (
@@ -138,6 +140,7 @@ class TransactionRow(QObject):
         self.imported_label.setStyleSheet("color: #a8adb4;")
 
         self.transaction_type_combo = WheelSafeComboBox()
+        self.transaction_type_combo.setIconSize(spaced_text_icon_size())
         self.transaction_type_combo.setObjectName("transactionTypeCombo")
         self.transaction_type_combo.setFixedHeight(34)
         self.transaction_type_combo.setMinimumWidth(0)
@@ -147,14 +150,18 @@ class TransactionRow(QObject):
         )
         if transaction_type is None:
             self.transaction_type_combo.addItem(
-                awesome_icon("fa6s.circle-exclamation", color="#ffbd4a"),
+                spaced_text_icon(
+                    awesome_icon("fa6s.circle-exclamation", color="#ffbd4a")
+                ),
                 "Needs review",
                 None,
             )
         for available_type, label in TRANSACTION_TYPE_LABELS.items():
             row_label = ROW_TRANSACTION_TYPE_LABELS.get(available_type, label)
             self.transaction_type_combo.addItem(
-                transaction_type_icon(available_type), row_label, available_type
+                spaced_text_icon(transaction_type_icon(available_type)),
+                row_label,
+                available_type,
             )
             self.transaction_type_combo.setItemData(
                 self.transaction_type_combo.count() - 1,
@@ -187,6 +194,7 @@ class TransactionRow(QObject):
         transaction_type_layout.addWidget(self.transaction_type_combo)
 
         self.category_combo = WheelSafeComboBox()
+        self.category_combo.setIconSize(spaced_text_icon_size())
         self._set_category_options(transaction_type, category_id)
         self._style_category()
         self.category_combo.currentIndexChanged.connect(self._category_selected)
@@ -274,7 +282,7 @@ class TransactionRow(QObject):
         with QSignalBlocker(self.category_combo):
             self.category_combo.clear()
             self.category_combo.addItem(
-                awesome_icon("fa6s.minus", color="#ffffff"),
+                spaced_text_icon(awesome_icon("fa6s.minus", color="#ffffff")),
                 self._empty_category_label(transaction_type),
                 None,
             )
@@ -292,10 +300,10 @@ class TransactionRow(QObject):
                 ):
                     continue
                 self.category_combo.addItem(
-                    awesome_icon(
+                    spaced_text_icon(awesome_icon(
                         category_icon_name(name),
                         color="#ffffff",
-                    ),
+                    )),
                     name,
                     available_id,
                 )

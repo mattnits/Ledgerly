@@ -270,7 +270,7 @@ class WorkRrspServiceTest(WorkRrspFixture, unittest.TestCase):
         data = get_dashboard_data("owner", "monthly", (2026, 8), self.sessions)
         self.assertEqual(data.cash_savings_actual, Decimal("1000.00"))
         self.assertEqual(data.work_rrsp_employee, Decimal("50.00"))
-        self.assertEqual(data.savings_actual, Decimal("1025.00"))
+        self.assertEqual(data.savings_actual, Decimal("950.00"))
         self.assertEqual(data.employer_rrsp_match, Decimal("25.00"))
         self.assertEqual(data.manual_investing_total, Decimal("800.00"))
         self.assertEqual(data.investing_total, Decimal("875.00"))

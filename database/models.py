@@ -404,6 +404,16 @@ class Transaction(Base):
         nullable=True,
     )
 
+    source_transaction_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    dedupe_fingerprint: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+
     transaction_date: Mapped[date] = mapped_column(
         Date,
         nullable=False,
@@ -436,6 +446,22 @@ class Transaction(Base):
 
     import_record: Mapped["Import | None"] = relationship(
         back_populates="transactions",
+    )
+
+    __table_args__ = (
+        Index(
+            "ux_transactions_active_account_source_id",
+            "account_id",
+            "source_transaction_id",
+            unique=True,
+            sqlite_where=text(
+                "source_transaction_id IS NOT NULL AND is_deleted = 0"
+            ),
+        ),
+        Index(
+            "ix_transactions_dedupe_fingerprint",
+            "dedupe_fingerprint",
+        ),
     )
 
 

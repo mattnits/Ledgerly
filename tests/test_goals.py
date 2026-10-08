@@ -82,7 +82,7 @@ class GoalsServiceTest(unittest.TestCase):
     def tearDown(self):
         self.engine.dispose()
 
-    def test_monthly_goal_and_exact_formula_ignore_personal_savings_snapshot(self):
+    def test_monthly_goal_ignores_snapshot_and_rrsp_contributions(self):
         with self.sessions.begin() as session:
             session.add_all((
                 Transaction(
@@ -129,7 +129,7 @@ class GoalsServiceTest(unittest.TestCase):
         self.assertEqual(result.spending, Decimal("300.00"))
         self.assertEqual(result.work_rrsp_employee, Decimal("100.00"))
         self.assertEqual(result.work_rrsp_employer, Decimal("100.00"))
-        self.assertEqual(result.net_savings, Decimal("800.00"))
+        self.assertEqual(result.net_savings, Decimal("600.00"))
         self.assertEqual(result.target, Decimal("750.00"))
 
     def test_monthly_goal_carries_forward_until_a_later_change(self):
@@ -524,7 +524,7 @@ class GoalsPageLayoutTest(unittest.TestCase):
             self.assertEqual(page.scroll.horizontalScrollBar().maximum(), 0)
             self.assertEqual(
                 page.monthly_card.breakdown_names["employee"].text(),
-                "RRSP (employee)",
+                "RRSP employee (excluded)",
             )
             self.assertIs(
                 page.monthly_card.breakdown_frame.parentWidget(),

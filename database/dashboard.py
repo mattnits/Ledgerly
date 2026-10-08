@@ -671,12 +671,9 @@ def get_dashboard_data(
         work_rrsp_employee = contribution_summary.work_rrsp_employee
         employer_rrsp_match = contribution_summary.work_rrsp_employer
     # Keep Dashboard goal progress identical to the Goals page formula.
-    savings_actual = (
-        summary.total_income
-        - summary.total_spending
-        + work_rrsp_employee
-        + employer_rrsp_match
-    )
+    # Work RRSP contributions remain part of investing totals, but do not
+    # count as currently usable savings toward the goal.
+    savings_actual = summary.total_income - summary.total_spending
     investing_total = (
         manual_investing_total + work_rrsp_employee + employer_rrsp_match
     )

@@ -147,12 +147,9 @@ def get_monthly_savings_breakdown(
         year, month, user_id=user_id, group_id=group_id,
         session_factory=session_factory,
     )
-    net = (
-        finances.total_income
-        - finances.total_spending
-        + rrsp.employee_contribution
-        + rrsp.employer_match
-    )
+    # RRSP funds are invested/locked away rather than currently usable cash,
+    # so they remain visible in the breakdown but do not advance this goal.
+    net = finances.total_income - finances.total_spending
     return MonthlySavingsBreakdown(
         income=finances.total_income,
         spending=finances.total_spending,

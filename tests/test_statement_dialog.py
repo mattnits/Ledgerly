@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -129,6 +130,32 @@ class StatementDialogTest(unittest.TestCase):
 
         dialog.file_selection.remove_file(str(self.td))
         self.assertFalse(dialog.submit_button.isEnabled())
+
+    def test_save_files_is_one_batch_toggle_and_modal_changes_are_not_saved(self):
+        with (
+            patch(
+                "ui.components.file_selection.save_imported_files_enabled",
+                return_value=True,
+            ),
+            patch(
+                "ui.preferences.set_save_imported_files"
+            ) as save_preference,
+        ):
+            dialog = FileUploadDialog()
+            dialog.file_selection.set_files([str(self.amex), str(self.td)])
+
+            self.assertTrue(dialog.should_save_source_files())
+            self.assertEqual(
+                len(dialog.file_selection.findChildren(
+                    type(dialog.file_selection.save_files_toggle)
+                )),
+                1,
+            )
+            dialog.file_selection.save_files_toggle.click()
+
+            self.assertFalse(dialog.should_save_source_files())
+            save_preference.assert_not_called()
+            dialog.close()
 
     def test_date_section_and_footer_stay_anchored_when_files_are_added(self):
         dialog = FileUploadDialog()

@@ -6,6 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
+from ui.components.date_dropdown import DateDropdown, DateDropdownItemDelegate
 from ui.components.period_selector import PeriodSelector
 
 
@@ -45,6 +46,17 @@ class PeriodSelectorTest(unittest.TestCase):
         self.assertEqual(selector.selected_month, current_month)
         self.assertEqual(selector.month_selector.count(), 1)
         self.assertEqual(selector.month_selector.currentData(), current_month)
+
+    def test_month_picker_uses_checkmark_free_date_dropdown(self):
+        selector = PeriodSelector()
+        selector.set_available_months({(2026, 9), (2026, 10)})
+
+        self.assertIsInstance(selector.month_selector, DateDropdown)
+        self.assertIsInstance(
+            selector.month_selector.view().itemDelegate(),
+            DateDropdownItemDelegate,
+        )
+        self.assertFalse(selector.month_selector.itemIcon(0).isNull())
 
     def test_no_data_does_not_create_a_phantom_month(self):
         selector = PeriodSelector()

@@ -46,7 +46,7 @@ class UserChoiceRow(QFrame):
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 10, 14, 10)
-        layout.setSpacing(13)
+        layout.setSpacing(8)
         self.avatar = QLabel()
         self.avatar.setFixedSize(42, 42)
         self.avatar.setProperty("profileType", self.profile_type)
@@ -159,7 +159,7 @@ class SwitchUserDialog(QDialog):
         layout.setContentsMargins(28, 24, 28, 26)
         layout.setSpacing(0)
         header = QHBoxLayout()
-        header.setSpacing(16)
+        header.setSpacing(8)
         icon_frame = QFrame()
         icon_frame.setObjectName("dialogIconFrame")
         icon_frame.setFixedSize(56, 56)

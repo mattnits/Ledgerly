@@ -86,7 +86,7 @@ class ClassificationRulesDialog(QDialog):
         layout.setSpacing(16)
 
         header = QHBoxLayout()
-        header.setSpacing(16)
+        header.setSpacing(8)
         icon_frame = QFrame()
         icon_frame.setObjectName("dialogIconFrame")
         icon_frame.setFixedSize(56, 56)

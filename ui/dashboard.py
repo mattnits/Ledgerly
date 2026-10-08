@@ -1,7 +1,9 @@
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
+    QDialog,
     QFrame,
     QGridLayout,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -19,9 +21,11 @@ from ui.components.dashboard_cards import (
     SavingsCard,
 )
 from ui.components.file_upload_dialog import FileUploadDialog
+from ui.components.duplicate_review_dialog import DuplicateReviewDialog
 from ui.components.page_header import PageHeader
 from ui.components.period_selector import PeriodSelector
 from ui.theme import set_button_icon
+from utils.import_archive import stage_import_files
 from utils.constants import ADD_STATMENT_LABEL
 
 
@@ -232,6 +236,16 @@ class DashboardPage(QWidget):
             dialog.file_selection.show_general_error(str(exc))
             return
 
+        archive = None
+        if dialog.should_save_source_files():
+            try:
+                archive = stage_import_files(dialog.get_files())
+            except (OSError, ValueError) as exc:
+                dialog.file_selection.show_general_error(
+                    f"Could not prepare the source-file archive: {exc}"
+                )
+                return
+
         parser = GenericParser(
             file_data,
             self.user_id,
@@ -242,10 +256,80 @@ class DashboardPage(QWidget):
         errors = parser.get_results()
 
         if errors:
+            if archive is not None:
+                archive.discard()
             dialog.show_errors(errors)
             return
+
+        possible = parser.get_possible_duplicates()
+        if not isinstance(possible, list):
+            # Keeps compatibility with lightweight parser doubles used by callers.
+            possible = []
+        summary = parser.get_import_summary()
+        if hasattr(dialog, "show_classification_summary"):
+            dialog.show_classification_summary(summary)
+
+        if possible:
+            review = DuplicateReviewDialog(possible, dialog)
+            if review.exec() == QDialog.DialogCode.Accepted:
+                try:
+                    summary = parser.commit_duplicate_decisions()
+                except ValueError as exc:
+                    dialog.file_selection.show_general_error(str(exc))
+                    if archive is not None:
+                        archive.discard()
+                    return
+            else:
+                parser.set_all_duplicate_decisions("skip")
+                summary = parser.commit_duplicate_decisions()
+            # Option B: definite-new rows were committed before review. Cancelling
+            # simply leaves every ambiguous row uninserted.
+
+        if archive is not None:
+            try:
+                archive.commit()
+            except OSError as exc:
+                archive.discard()
+                dialog.file_selection.show_general_error(
+                    "Transactions were imported, but the source-file archive "
+                    f"could not be finalized: {exc}"
+                )
+                return
 
         self.files_to_parse = dialog.get_files()
         self.window().transactions_page.reload()
         self.reload()
+        show_summary = isinstance(dialog, FileUploadDialog) and dialog.isVisible()
         dialog.accept()
+        if show_summary:
+            # Let the upload modal close and the main window paint before opening
+            # another modal. This prevents Windows from displaying an empty native
+            # message-box shell while Qt is still completing the modal handoff.
+            QTimer.singleShot(
+                100,
+                lambda summary=summary: self._show_import_complete(summary),
+            )
+
+    def _show_import_complete(self, summary) -> None:
+        message = QMessageBox(self.window())
+        message.setOption(QMessageBox.Option.DontUseNativeDialog, True)
+        message.setIcon(QMessageBox.Icon.Information)
+        message.setWindowTitle("Import complete")
+        message.setText(self._import_summary_text(summary))
+        message.setStandardButtons(QMessageBox.StandardButton.Ok)
+        message.setDefaultButton(QMessageBox.StandardButton.Ok)
+        message.ensurePolished()
+        if message.layout() is not None:
+            message.layout().activate()
+        message.adjustSize()
+        message.exec()
+
+    @staticmethod
+    def _import_summary_text(summary) -> str:
+        return "\n".join((
+            f"{summary.added} transactions added",
+            f"{summary.definite_duplicates_skipped} duplicates skipped automatically",
+            f"{summary.possible_skipped} possible duplicates skipped by user",
+            f"{summary.possible_kept} possible duplicates kept by user",
+            f"{summary.failed} failed",
+        ))

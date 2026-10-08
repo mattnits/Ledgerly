@@ -63,7 +63,7 @@ class GenericDialog(QDialog):
         self.header_widget.setObjectName("dialogHeader")
         header = QHBoxLayout(self.header_widget)
         header.setContentsMargins(0, 0, 0, 0)
-        header.setSpacing(16)
+        header.setSpacing(8)
 
         self.icon_frame = QFrame()
         self.icon_frame.setObjectName("dialogIconFrame")
@@ -121,7 +121,7 @@ class GenericDialog(QDialog):
             self.info_panel.setObjectName("dialogInfoPanel")
             info_layout = QHBoxLayout(self.info_panel)
             info_layout.setContentsMargins(16, 13, 16, 13)
-            info_layout.setSpacing(13)
+            info_layout.setSpacing(8)
             info_icon = QLabel()
             info_icon.setPixmap(
                 awesome_icon("fa6s.circle-info", color="#4da3ff").pixmap(20, 20)

@@ -36,6 +36,7 @@ from database.transactions import (
     get_visible_transaction,
     set_transaction_deleted,
 )
+from ui.components.date_dropdown import DateDropdown
 from ui.components.generic_table import GenericTable
 from ui.components.loading_state import LoadingOverlay
 from ui.components.period_selector import PeriodSelector
@@ -44,6 +45,8 @@ from ui.theme import (
     awesome_icon,
     brand_icon,
     category_icon_name,
+    spaced_text_icon,
+    spaced_text_icon_size,
     transaction_type_icon,
 )
 from utils.constants import (
@@ -225,8 +228,9 @@ class StatementsTable(QWidget):
         filter_layout.setSpacing(14)
 
         self.account_selector = QComboBox()
+        self.account_selector.setIconSize(spaced_text_icon_size())
         self.account_selector.addItem(
-            awesome_icon("fa6s.wallet", color="#b2b8c1"),
+            spaced_text_icon(awesome_icon("fa6s.wallet", color="#b2b8c1")),
             "All Accounts",
             "all",
         )
@@ -234,8 +238,9 @@ class StatementsTable(QWidget):
         self._add_filter_field(filter_layout, "Account", self.account_selector)
 
         self.category_selector = QComboBox()
+        self.category_selector.setIconSize(spaced_text_icon_size())
         self.category_selector.addItem(
-            awesome_icon("fa6s.tags", color="#ffffff"),
+            spaced_text_icon(awesome_icon("fa6s.tags", color="#ffffff")),
             "All Categories",
             "all",
         )
@@ -249,15 +254,20 @@ class StatementsTable(QWidget):
         self._add_filter_field(filter_layout, "Category", self.category_selector)
 
         self.transaction_type_selector = QComboBox()
+        self.transaction_type_selector.setIconSize(spaced_text_icon_size())
         self.transaction_type_selector.setFixedWidth(230)
         self.transaction_type_selector.addItem(
-            awesome_icon("fa6s.credit-card", color="#b2b8c1"),
+            spaced_text_icon(
+                awesome_icon("fa6s.credit-card", color="#b2b8c1")
+            ),
             "All Transaction Types",
             "all",
         )
         for transaction_type, label in TRANSACTION_TYPE_LABELS.items():
             self.transaction_type_selector.addItem(
-                transaction_type_icon(transaction_type), label, transaction_type
+                spaced_text_icon(transaction_type_icon(transaction_type)),
+                label,
+                transaction_type,
             )
         transaction_filter_width = max(
             230,
@@ -291,7 +301,8 @@ class StatementsTable(QWidget):
         review_field_layout.addWidget(self.needs_review_checkbox)
         filter_layout.addWidget(review_field)
 
-        self.date_range_selector = QComboBox()
+        self.date_range_selector = DateDropdown()
+        self.date_range_selector.setIconSize(spaced_text_icon_size())
         for label, value in (
             ("This Month", "this_month"),
             ("Last Month", "last_month"),
@@ -299,7 +310,13 @@ class StatementsTable(QWidget):
             ("This Year", "this_year"),
             ("All Time", "all"),
         ):
-            self.date_range_selector.addItem(label, value)
+            self.date_range_selector.addItem(
+                spaced_text_icon(
+                    awesome_icon("fa6s.calendar-days", color="#b2b8c1")
+                ),
+                label,
+                value,
+            )
         self.date_range_selector.currentIndexChanged.connect(self._select_date_range)
         self._add_filter_field(filter_layout, "Date Range", self.date_range_selector)
 
@@ -650,13 +667,17 @@ class StatementsTable(QWidget):
         with QSignalBlocker(self.account_selector):
             self.account_selector.clear()
             self.account_selector.addItem(
-                    awesome_icon("fa6s.wallet", color="#b2b8c1"),
+                spaced_text_icon(
+                    awesome_icon("fa6s.wallet", color="#b2b8c1")
+                ),
                 "All Accounts",
                 "all",
             )
             for account_id, name, institution in accounts:
                 self.account_selector.addItem(
-                    brand_icon(institution), f"{name} ({institution})", account_id
+                    spaced_text_icon(brand_icon(institution)),
+                    f"{name} ({institution})",
+                    account_id,
                 )
             selected = self.account_selector.findData(self.account_filter)
             if selected < 0:
@@ -666,23 +687,25 @@ class StatementsTable(QWidget):
         with QSignalBlocker(self.category_selector):
             self.category_selector.clear()
             self.category_selector.addItem(
-                awesome_icon("fa6s.tags", color="#ffffff"),
+                spaced_text_icon(awesome_icon("fa6s.tags", color="#ffffff")),
                 "All Categories",
                 "all",
             )
             self.category_selector.addItem(
-                awesome_icon("fa6s.trash", color="#ffffff"),
+                spaced_text_icon(awesome_icon("fa6s.trash", color="#ffffff")),
                 "Removed Transactions",
                 "deleted",
             )
             self.category_selector.addItem(
-                awesome_icon("fa6s.tag", color="#ffffff"),
+                spaced_text_icon(awesome_icon("fa6s.tag", color="#ffffff")),
                 "Uncategorized",
                 None,
             )
             for category_id, name, _color in self.category_options:
                 self.category_selector.addItem(
-                    awesome_icon(category_icon_name(name), color="#ffffff"),
+                    spaced_text_icon(
+                        awesome_icon(category_icon_name(name), color="#ffffff")
+                    ),
                     name,
                     category_id,
                 )

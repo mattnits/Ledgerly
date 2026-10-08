@@ -63,7 +63,7 @@ class FileRow(QFrame):
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 12, 14, 12)
-        layout.setSpacing(14)
+        layout.setSpacing(8)
 
         self.file_icon = QLabel()
         set_label_icon(self.file_icon, "fa6s.file-lines", color="#aebed4", size=26)
@@ -91,7 +91,7 @@ class FileRow(QFrame):
         status_layout.setSpacing(3)
         status_heading = QHBoxLayout()
         status_heading.setContentsMargins(0, 0, 0, 0)
-        status_heading.setSpacing(6)
+        status_heading.setSpacing(8)
         self.error_icon = QLabel()
         self.status_label = QLabel()
         status_heading.addWidget(self.error_icon)

@@ -1,4 +1,4 @@
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QFrame,
@@ -13,12 +13,20 @@ from PySide6.QtWidgets import (
 from database.reset import reset_financial_data
 from database.user_management import delete_user
 from ui.components.page_header import PageHeader
+from ui.components.toggle_switch import ToggleSwitch
+from ui.preferences import (
+    open_fullscreen_enabled,
+    save_imported_files_enabled,
+    set_open_fullscreen,
+    set_save_imported_files,
+)
 from ui.theme import set_button_icon, set_delete_button_icon
 
 
 class SettingsPage(QWidget):
     data_reset = Signal()
     profile_deleted = Signal(str)
+    fullscreen_preference_changed = Signal(bool)
 
     def __init__(self):
         super().__init__()
@@ -31,6 +39,81 @@ class SettingsPage(QWidget):
         layout.setSpacing(18)
 
         layout.addWidget(PageHeader("Settings", "Manage application data and preferences"))
+
+        preferences = QFrame()
+        preferences.setObjectName("settingsCard")
+        preferences_layout = QVBoxLayout(preferences)
+        preferences_layout.setContentsMargins(20, 18, 20, 18)
+        preferences_layout.setSpacing(12)
+        preferences_title = QLabel("Display")
+        preferences_title.setObjectName("sectionTitle")
+        preferences_layout.addWidget(preferences_title)
+
+        fullscreen_row = QHBoxLayout()
+        fullscreen_copy = QVBoxLayout()
+        fullscreen_copy.setSpacing(3)
+        fullscreen_label = QLabel("Open in fullscreen")
+        fullscreen_label.setObjectName("settingsOptionTitle")
+        fullscreen_description = QLabel(
+            "Use the entire screen when Finance starts. Turn this off for a windowed app."
+        )
+        fullscreen_description.setObjectName("mutedLabel")
+        fullscreen_description.setWordWrap(True)
+        fullscreen_copy.addWidget(fullscreen_label)
+        fullscreen_copy.addWidget(fullscreen_description)
+        fullscreen_row.addLayout(fullscreen_copy, 1)
+        self.fullscreen_toggle = ToggleSwitch()
+        self.fullscreen_toggle.setObjectName("fullscreenToggle")
+        self.fullscreen_toggle.setAccessibleName("Open in fullscreen")
+        self.fullscreen_toggle.setToolTip("Open Finance in fullscreen")
+        self.fullscreen_toggle.setChecked(open_fullscreen_enabled())
+        self.fullscreen_toggle.toggled.connect(self._set_fullscreen_preference)
+        fullscreen_row.addWidget(self.fullscreen_toggle, 0, Qt.AlignmentFlag.AlignVCenter)
+        preferences_layout.addLayout(fullscreen_row)
+        layout.addWidget(preferences)
+
+        imports = QFrame()
+        imports.setObjectName("settingsCard")
+        imports_layout = QVBoxLayout(imports)
+        imports_layout.setContentsMargins(20, 18, 20, 18)
+        imports_layout.setSpacing(12)
+        imports_title = QLabel("Statement imports")
+        imports_title.setObjectName("sectionTitle")
+        imports_layout.addWidget(imports_title)
+
+        save_files_row = QHBoxLayout()
+        save_files_copy = QVBoxLayout()
+        save_files_copy.setSpacing(3)
+        save_files_label = QLabel("Save imported source files")
+        save_files_label.setObjectName("settingsOptionTitle")
+        save_files_description = QLabel(
+            "Default the import dialog to save every selected statement under "
+            "data/imported_statements."
+        )
+        save_files_description.setObjectName("mutedLabel")
+        save_files_description.setWordWrap(True)
+        save_files_copy.addWidget(save_files_label)
+        save_files_copy.addWidget(save_files_description)
+        save_files_row.addLayout(save_files_copy, 1)
+        self.save_import_files_toggle = ToggleSwitch()
+        self.save_import_files_toggle.setObjectName("saveImportFilesToggle")
+        self.save_import_files_toggle.setAccessibleName(
+            "Save imported source files by default"
+        )
+        self.save_import_files_toggle.setToolTip(
+            "Default new imports to save their source files"
+        )
+        self.save_import_files_toggle.setChecked(save_imported_files_enabled())
+        self.save_import_files_toggle.toggled.connect(
+            self._set_save_imported_files_preference
+        )
+        save_files_row.addWidget(
+            self.save_import_files_toggle,
+            0,
+            Qt.AlignmentFlag.AlignVCenter,
+        )
+        imports_layout.addLayout(save_files_row)
+        layout.addWidget(imports)
 
         card = QFrame()
         card.setObjectName("settingsCard")
@@ -83,6 +166,17 @@ class SettingsPage(QWidget):
         layout.addWidget(danger)
 
         layout.addStretch()
+
+    @property
+    def open_fullscreen(self) -> bool:
+        return self.fullscreen_toggle.isChecked()
+
+    def _set_fullscreen_preference(self, enabled: bool) -> None:
+        set_open_fullscreen(enabled)
+        self.fullscreen_preference_changed.emit(enabled)
+
+    def _set_save_imported_files_preference(self, enabled: bool) -> None:
+        set_save_imported_files(enabled)
 
     def set_current_user(
         self, user_id: str | None, user_name: str | None = None

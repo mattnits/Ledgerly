@@ -33,6 +33,9 @@ COLORS = {
     "warning": "#ffbd4a",
 }
 
+ICON_TEXT_SPACING = 8
+_NATIVE_BUTTON_ICON_TEXT_SPACING = 4
+
 
 _qtawesome_available: bool | None = None
 
@@ -73,8 +76,63 @@ def set_button_icon(
     size: int = 18,
 ) -> None:
     apply_interactive_cursor(button)
-    button.setIcon(awesome_icon(name, color=color, active_color=active_color))
-    button.setIconSize(QSize(size, size))
+    button._finance_base_icon = awesome_icon(  # type: ignore[attr-defined]
+        name, color=color, active_color=active_color
+    )
+    button._finance_icon_size = size  # type: ignore[attr-defined]
+    refresh_button_icon_spacing(button)
+
+
+def _icon_with_right_padding(icon: QIcon, size: int, padding: int) -> QIcon:
+    """Preserve icon modes while extending its canvas on the text-facing side."""
+    if icon.isNull() or padding <= 0:
+        return icon
+    padded = QIcon()
+    for mode in (
+        QIcon.Mode.Normal,
+        QIcon.Mode.Disabled,
+        QIcon.Mode.Active,
+        QIcon.Mode.Selected,
+    ):
+        for state in (QIcon.State.Off, QIcon.State.On):
+            canvas = QPixmap(size + padding, size)
+            canvas.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(canvas)
+            painter.drawPixmap(0, 0, icon.pixmap(size, size, mode, state))
+            painter.end()
+            padded.addPixmap(canvas, mode, state)
+    return padded
+
+
+def spaced_text_icon(icon: QIcon, size: int = 16) -> QIcon:
+    """Return an icon canvas that yields the standard 8 px icon/text gap."""
+    return _icon_with_right_padding(
+        icon,
+        size,
+        max(0, ICON_TEXT_SPACING - _NATIVE_BUTTON_ICON_TEXT_SPACING),
+    )
+
+
+def spaced_text_icon_size(size: int = 16) -> QSize:
+    return QSize(
+        size + max(0, ICON_TEXT_SPACING - _NATIVE_BUTTON_ICON_TEXT_SPACING),
+        size,
+    )
+
+
+def refresh_button_icon_spacing(button: QAbstractButton) -> None:
+    """Keep an 8 px visual gap for text buttons and centered icon-only controls."""
+    icon = getattr(button, "_finance_base_icon", button.icon())
+    size = int(getattr(button, "_finance_icon_size", button.iconSize().height()))
+    has_text = bool(button.text().strip())
+    extra_padding = (
+        max(0, ICON_TEXT_SPACING - _NATIVE_BUTTON_ICON_TEXT_SPACING)
+        if has_text
+        else 0
+    )
+    button.setIcon(_icon_with_right_padding(icon, size, extra_padding))
+    button.setIconSize(QSize(size + extra_padding, size))
+    button.setProperty("iconTextSpacing", ICON_TEXT_SPACING if has_text else 0)
 
 
 def set_icon_only_button(
@@ -354,6 +412,11 @@ QLabel#sectionTitle {{
     font-size: 15px;
     font-weight: 650;
 }}
+QLabel#settingsOptionTitle {{
+    color: {COLORS['text']};
+    font-size: 14px;
+    font-weight: 600;
+}}
 QLabel#accountName {{ color: #dfe2e6; }}
 QWidget#tableCell {{ background: transparent; }}
 QPushButton {{
@@ -400,6 +463,58 @@ QPushButton#dangerButton {{
     border-color: #63303e;
 }}
 QPushButton#dangerButton:hover {{ background: #47202d; }}
+QLabel#duplicateCount {{
+    color: {COLORS['text']};
+    font-size: 14px;
+    font-weight: 650;
+}}
+QScrollArea#duplicateReviewScroll,
+QScrollArea#duplicateReviewScroll > QWidget > QWidget {{
+    background: transparent;
+    border: none;
+}}
+QFrame#duplicateReviewCard {{
+    background: #151c24;
+    border: 1px solid #303b47;
+    border-radius: 12px;
+}}
+QFrame#duplicateReviewCard[decision="keep"] {{ border-color: #277a5b; }}
+QFrame#duplicateReviewCard[decision="skip"] {{ border-color: #68404a; }}
+QFrame#duplicateDetailsPanel {{
+    background: #111820;
+    border: 1px solid #293541;
+    border-radius: 9px;
+}}
+QLabel#duplicateDetailsTitle {{
+    color: {COLORS['text_muted']};
+    font-size: 11px;
+    font-weight: 700;
+}}
+QLabel#duplicateDetailsText {{ color: #e7ebf0; }}
+QLabel#duplicateAmount {{ color: #ffffff; font-size: 15px; font-weight: 700; }}
+QLabel#duplicateReason {{ color: #9db8d6; }}
+QPushButton#duplicateKeepButton {{
+    color: #a9f2d2;
+    background: #152820;
+    border-color: #295d48;
+}}
+QPushButton#duplicateKeepButton:hover,
+QPushButton#duplicateKeepButton[selected="true"] {{
+    color: #ffffff;
+    background: #1b6448;
+    border-color: #2fa775;
+}}
+QPushButton#duplicateSkipButton {{
+    color: #f0b5bb;
+    background: #281a20;
+    border-color: #56313d;
+}}
+QPushButton#duplicateSkipButton:hover,
+QPushButton#duplicateSkipButton[selected="true"] {{
+    color: #ffffff;
+    background: #693041;
+    border-color: #a64a61;
+}}
 QPushButton[iconOnly="true"] {{
     min-width: 38px;
     max-width: 38px;

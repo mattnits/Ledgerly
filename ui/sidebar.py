@@ -12,7 +12,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ui.theme import awesome_icon, contrasting_text, set_button_icon
+from ui.theme import (
+    awesome_icon,
+    contrasting_text,
+    refresh_button_icon_spacing,
+    set_button_icon,
+)
 from utils.constants import (
     ACCOUNTS_LABEL,
     ACCOUNTS_PAGE,
@@ -354,7 +359,7 @@ class Sidebar(QFrame):
         self.brand.setObjectName("brand")
         self.brand_layout = QHBoxLayout(self.brand)
         self.brand_layout.setContentsMargins(8, 0, 8, 14)
-        self.brand_layout.setSpacing(10)
+        self.brand_layout.setSpacing(8)
         self.brand_icon = QLabel()
         self.brand_icon.setPixmap(
             awesome_icon("fa6s.wallet", color="#55a8ff").pixmap(20, 20)
@@ -387,7 +392,7 @@ class Sidebar(QFrame):
         # The larger top inset raises the divider while keeping the profile row
         # visually centered between that divider and the bottom of the sidebar.
         self.user_bar_layout.setContentsMargins(6, 24, 6, 7)
-        self.user_bar_layout.setSpacing(6)
+        self.user_bar_layout.setSpacing(8)
         self.current_user_panel = ProfilePanel()
         self.current_user_layout = QHBoxLayout(self.current_user_panel)
         self.current_user_layout.setContentsMargins(0, 0, 0, 0)
@@ -595,7 +600,7 @@ class Sidebar(QFrame):
             0 if collapsed else 8,
             14,
         )
-        self.brand_layout.setSpacing(4 if collapsed else 10)
+        self.brand_layout.setSpacing(4 if collapsed else 8)
         self.brand_title.setVisible(not collapsed)
         toggle_label = "Expand sidebar" if collapsed else "Collapse sidebar"
         self.collapse_button.setToolTip(toggle_label)
@@ -610,6 +615,7 @@ class Sidebar(QFrame):
         for button in self.navigation_buttons:
             label = button.property("sidebarLabel")
             button.setText("" if collapsed else label)
+            refresh_button_icon_spacing(button)
             button.setMaximumWidth(48 if collapsed else 16777215)
         self.current_user_text.setVisible(not collapsed)
         self.current_user_name.setVisible(not collapsed)

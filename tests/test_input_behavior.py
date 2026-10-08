@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.input_behavior import install_wheel_change_guard
+from ui.theme import refresh_button_icon_spacing, set_button_icon
 
 
 def send_wheel(widget, vertical_delta: int) -> None:
@@ -92,6 +93,19 @@ class WheelChangeGuardTest(unittest.TestCase):
         self.assertEqual(
             button.cursor().shape(), Qt.CursorShape.PointingHandCursor
         )
+
+    def test_text_button_icons_use_eight_pixel_spacing(self):
+        button = QPushButton("Action")
+        set_button_icon(button, "fa6s.check", size=16)
+
+        self.assertEqual(button.property("iconTextSpacing"), 8)
+        self.assertEqual(button.iconSize().width(), 20)
+        self.assertEqual(button.iconSize().height(), 16)
+
+        button.setText("")
+        refresh_button_icon_spacing(button)
+        self.assertEqual(button.property("iconTextSpacing"), 0)
+        self.assertEqual(button.iconSize().width(), 16)
 
         button.setEnabled(False)
         self.app.processEvents()

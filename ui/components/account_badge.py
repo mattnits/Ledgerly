@@ -20,7 +20,7 @@ class AccountBadge(QWidget):
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 0, 4, 0)
-        layout.setSpacing(7)
+        layout.setSpacing(8)
 
         icon_label = QLabel()
         icon_label.setObjectName("accountBrandIcon")

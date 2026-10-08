@@ -23,6 +23,7 @@ from ui.investments import InvestmentsPage
 from ui.transactions import TransactionsPage
 from ui.settings import SettingsPage
 from ui.user_management import UserManagementPage
+from ui.preferences import last_user_id, set_last_user_id
 from utils.constants import (
     ACCOUNTS_PAGE,
     CATEGORIES_PAGE,
@@ -48,7 +49,7 @@ class ShellWindow(QMainWindow):
         self._pending_group_edit: int | None = None
         self._startup_setup_complete = False
         self._startup_ready = False
-        self.session = CurrentSession()
+        self.session = CurrentSession(current_user_id=last_user_id())
 
         # -------------------------
         # Root widget
@@ -163,6 +164,9 @@ class ShellWindow(QMainWindow):
         )
 
         self.settings_page.data_reset.connect(self.handle_data_reset)
+        self.settings_page.fullscreen_preference_changed.connect(
+            self.set_fullscreen_mode
+        )
         self.dashboard_page.goals_requested.connect(
             self._show_goals_from_dashboard
         )
@@ -189,6 +193,24 @@ class ShellWindow(QMainWindow):
     def is_startup_ready(self) -> bool:
         return self._startup_ready
 
+    @property
+    def opens_in_fullscreen(self) -> bool:
+        return self.settings_page.open_fullscreen
+
+    def show_with_saved_window_mode(self) -> None:
+        if self.opens_in_fullscreen:
+            self.showFullScreen()
+        else:
+            self.show()
+
+    def set_fullscreen_mode(self, enabled: bool) -> None:
+        if not self.isVisible():
+            return
+        if enabled:
+            self.showFullScreen()
+        else:
+            self.showNormal()
+
     def _handle_startup_loading_changed(self, loading: bool) -> None:
         if self._startup_setup_complete and not loading:
             self._mark_startup_ready()
@@ -200,6 +222,9 @@ class ShellWindow(QMainWindow):
         self.startup_ready.emit()
 
     def load_users(self, current_user_id: str | None = None):
+        if current_user_id is not None:
+            self.session.current_user_id = current_user_id
+            set_last_user_id(current_user_id)
         current_key = f"user:{current_user_id}" if current_user_id else None
         self.load_profiles(current_key)
 
@@ -216,6 +241,7 @@ class ShellWindow(QMainWindow):
             self.session.current_user_id = (
                 str(user_profiles[0]["id"]) if user_profiles else None
             )
+        set_last_user_id(self.session.current_user_id)
         profiles = get_profiles(current_user_id=self.session.current_user_id)
         preferred_key = current_profile_key or self.session.active_profile_key
         profile_keys = {item["key"] for item in profiles}
@@ -345,6 +371,8 @@ class ShellWindow(QMainWindow):
 
     def handle_user_changed(self, user_id: str):
         # Compatibility path for older callers that still select raw users.
+        self.session.current_user_id = user_id
+        set_last_user_id(user_id)
         self.session.set_active_profile(f"user:{user_id}")
         self.user_management_page.set_current_user(user_id)
         self._apply_profile(f"user:{user_id}")
@@ -352,7 +380,24 @@ class ShellWindow(QMainWindow):
         self.sidebar.set_current_page(DASHBOARD_PAGE)
 
     def handle_profile_changed(self, profile_key: str) -> None:
+        context = ProfileContext.from_key(profile_key)
         self.session.set_active_profile(profile_key)
+        if context.user_id is not None:
+            self.session.current_user_id = context.user_id
+            set_last_user_id(context.user_id)
+            selected = next(
+                (
+                    profile for profile in self.sidebar.profiles
+                    if profile["key"] == profile_key
+                ),
+                None,
+            )
+            self.settings_page.set_current_user(
+                context.user_id,
+                selected["name"] if selected is not None else None,
+            )
+            if hasattr(self.categories_page, "set_current_user"):
+                self.categories_page.set_current_user(context.user_id)
         self.user_management_page.set_current_user(
             self._management_user_id(self.sidebar.profiles, profile_key)
         )
@@ -420,9 +465,10 @@ class ShellWindow(QMainWindow):
             ACCOUNTS_PAGE: self.accounts_page,
             INVESTMENTS_PAGE: self.investments_page,
             CATEGORIES_PAGE: self.categories_page,
-            GOALS_PAGE: self.goals_page,
             SETTINGS_PAGE: self.settings_page,
         }
+        if hasattr(self, "goals_page"):
+            pages[GOALS_PAGE] = self.goals_page
         if hasattr(self, "user_management_page"):
             pages[USER_MANAGEMENT_PAGE] = self.user_management_page
 
@@ -440,7 +486,7 @@ class ShellWindow(QMainWindow):
                 self.investments_page.reload()
             if page is self.categories_page:
                 self.categories_page.reload()
-            if page is self.goals_page:
+            if hasattr(self, "goals_page") and page is self.goals_page:
                 self.goals_page.reload()
             if (
                 hasattr(self, "user_management_page")

@@ -5,8 +5,10 @@ from utils.constants import ADD_STATMENT_LABEL
 
 class FileUploadDialog(GenericDialog):
 
-    def __init__(self, parent=None):
-        self.file_selection = FileSelection()
+    def __init__(self, parent=None, *, save_import_default: bool | None = None):
+        self.file_selection = FileSelection(
+            save_import_default=save_import_default
+        )
         super().__init__(
             ADD_STATMENT_LABEL,
             self.file_selection,
@@ -29,5 +31,16 @@ class FileUploadDialog(GenericDialog):
     def get_date_range(self):
         return self.file_selection.get_date_range()
 
+    def should_save_source_files(self) -> bool:
+        return self.file_selection.should_save_source_files()
+
     def show_errors(self, errors: list[tuple[str, str]]) -> None:
         self.file_selection.show_errors(errors)
+
+    def show_classification_summary(self, summary) -> None:
+        self.subtitle_label.setText(
+            f"{summary.parsed} rows parsed · {summary.added} new · "
+            f"{summary.definite_duplicates_skipped} duplicates skipped · "
+            f"{summary.possible_duplicates} need review"
+        )
+        self.subtitle_label.setVisible(True)

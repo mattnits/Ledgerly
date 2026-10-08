@@ -2,9 +2,10 @@ from datetime import date
 from typing import Iterable
 
 from PySide6.QtCore import QSignalBlocker, Signal
-from PySide6.QtWidgets import QButtonGroup, QComboBox, QHBoxLayout, QPushButton, QWidget
+from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QPushButton, QWidget
 
-from ui.theme import awesome_icon
+from ui.components.date_dropdown import DateDropdown
+from ui.theme import awesome_icon, spaced_text_icon, spaced_text_icon_size
 
 
 Month = tuple[int, int]
@@ -46,8 +47,8 @@ class PeriodSelector(QWidget):
         self.monthly_button.clicked.connect(lambda: self.set_period("monthly"))
         self.all_time_button.clicked.connect(lambda: self.set_period("all"))
 
-        self.month_selector = QComboBox()
-        self.month_selector.setObjectName("monthSelector")
+        self.month_selector = DateDropdown()
+        self.month_selector.setIconSize(spaced_text_icon_size())
         self.month_selector.setFixedWidth(self.MONTH_SELECTOR_WIDTH)
         self.month_selector.currentIndexChanged.connect(self._select_month)
         layout.addWidget(self.month_selector)
@@ -70,20 +71,6 @@ class PeriodSelector(QWidget):
                 font-weight: 600;
             }
             QPushButton#periodButton:hover { background: #24292f; }
-            QComboBox#monthSelector {
-                color: #e3e5e8;
-                background: #191d22;
-                border: 1px solid #343b44;
-                border-radius: 10px;
-                padding: 9px 30px 9px 12px;
-            }
-            QComboBox#monthSelector::drop-down {
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-                width: 28px;
-                border: none;
-                background: transparent;
-            }
         """)
 
     def set_available_months(self, months: Iterable[Month]) -> None:
@@ -135,7 +122,9 @@ class PeriodSelector(QWidget):
             self.month_selector.clear()
             for year, month in sorted(months, reverse=True):
                 self.month_selector.addItem(
-                    awesome_icon("fa6s.calendar-days", color="#b2b8c1"),
+                    spaced_text_icon(
+                        awesome_icon("fa6s.calendar-days", color="#b2b8c1")
+                    ),
                     date(year, month, 1).strftime("%B %Y"),
                     (year, month),
                 )

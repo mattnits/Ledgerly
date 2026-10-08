@@ -40,7 +40,43 @@ def init_db(db_engine=engine):
     _migrate_work_rrsp_fields(db_engine)
     _migrate_investment_snapshots(db_engine)
     _migrate_category_rule_account_scope(db_engine)
+    _migrate_transaction_deduplication(db_engine)
     _migrate_goal_unique_indexes(db_engine)
+
+
+def _migrate_transaction_deduplication(db_engine) -> None:
+    """Add nullable transaction identity fields without rewriting existing rows."""
+    inspector = inspect(db_engine)
+    if "transactions" not in inspector.get_table_names():
+        return
+    if db_engine.dialect.name != "sqlite":
+        raise RuntimeError(
+            "The transaction deduplication migration currently supports SQLite only."
+        )
+    columns = {
+        column["name"] for column in inspector.get_columns("transactions")
+    }
+    with db_engine.begin() as connection:
+        if "source_transaction_id" not in columns:
+            connection.execute(text(
+                "ALTER TABLE transactions "
+                "ADD COLUMN source_transaction_id VARCHAR(255)"
+            ))
+        if "dedupe_fingerprint" not in columns:
+            connection.execute(text(
+                "ALTER TABLE transactions "
+                "ADD COLUMN dedupe_fingerprint VARCHAR(64)"
+            ))
+        connection.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "ux_transactions_active_account_source_id "
+            "ON transactions (account_id, source_transaction_id) "
+            "WHERE source_transaction_id IS NOT NULL AND is_deleted = 0"
+        ))
+        connection.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_transactions_dedupe_fingerprint "
+            "ON transactions (dedupe_fingerprint)"
+        ))
 
 
 def _migrate_goal_unique_indexes(db_engine) -> None:

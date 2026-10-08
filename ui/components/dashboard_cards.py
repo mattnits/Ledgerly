@@ -77,7 +77,7 @@ class DashboardCard(QFrame):
         self.layout.setSpacing(12)
 
         self.header_layout = QHBoxLayout()
-        self.header_layout.setSpacing(10)
+        self.header_layout.setSpacing(8)
         icon_container = QFrame()
         icon_container.setObjectName("dashboardIcon")
         icon_container.setFixedSize(36, 36)
@@ -413,7 +413,7 @@ class SavingsCard(DashboardCard):
         cash = actual if cash_actual is None else cash_actual
         self.cash_saved_row.set_values("Cash saved", format_currency(cash))
         self.work_rrsp_row.set_values(
-            "Work RRSP", format_currency(work_rrsp_employee)
+            "Work RRSP (excluded)", format_currency(work_rrsp_employee)
         )
         self.actual_row.set_values(
             "Net savings toward goal", format_currency(actual)
@@ -421,7 +421,7 @@ class SavingsCard(DashboardCard):
         match_text = format_currency(employer_match)
         if employer_match >= 0:
             match_text = f"+{match_text}"
-        self.employer_match_row.set_values("Employer match", match_text)
+        self.employer_match_row.set_values("Employer match (excluded)", match_text)
         self.balance_row.set_values(
             "Savings balance",
             format_currency(balance) if balance is not None else "Not recorded",
@@ -547,7 +547,7 @@ class CategoryCard(DashboardCard):
             row = QWidget()
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(0, 1, 0, 1)
-            row_layout.setSpacing(7)
+            row_layout.setSpacing(8)
             dot = QFrame()
             dot.setFixedSize(8, 8)
             dot.setStyleSheet(f"background: {item.color}; border-radius: 4px;")

@@ -116,7 +116,7 @@ def main():
             if revealed:
                 return
             revealed = True
-            window.show()
+            window.show_with_saved_window_mode()
             # Keep the splash above the first native paint. Closing it on the
             # following event-loop turn avoids exposing an unpainted frame.
             QTimer.singleShot(0, finish_reveal)

@@ -258,6 +258,52 @@ class DatabaseMigrationTest(unittest.TestCase):
         self.assertEqual(row["description_key"], "coffee")
         engine.dispose()
 
+    def test_transaction_identity_columns_and_indexes_are_added_without_rewrite(self):
+        engine = create_engine("sqlite://")
+        metadata = MetaData()
+        transactions = Table(
+            "transactions",
+            metadata,
+            Column("id", Integer, primary_key=True),
+            Column("account_id", Integer, nullable=False),
+            Column("is_deleted", Boolean, nullable=False, default=False),
+            Column("transaction_date", Date, nullable=False),
+            Column("description", String(255), nullable=False),
+            Column("amount", Numeric(12, 2), nullable=False),
+        )
+        metadata.create_all(engine)
+        with engine.begin() as connection:
+            connection.execute(transactions.insert().values(
+                id=7,
+                account_id=3,
+                is_deleted=False,
+                transaction_date=date(2026, 9, 10),
+                description="Preserved",
+                amount=Decimal("12.34"),
+            ))
+
+        init_db(engine)
+
+        migrated = Table("transactions", MetaData(), autoload_with=engine)
+        columns = {column["name"] for column in inspect(engine).get_columns(
+            "transactions"
+        )}
+        indexes = {index["name"] for index in inspect(engine).get_indexes(
+            "transactions"
+        )}
+        with engine.connect() as connection:
+            row = connection.execute(
+                select(migrated).where(migrated.c.id == 7)
+            ).mappings().one()
+        self.assertTrue({
+            "source_transaction_id", "dedupe_fingerprint"
+        }.issubset(columns))
+        self.assertIsNone(row["source_transaction_id"])
+        self.assertIsNone(row["dedupe_fingerprint"])
+        self.assertIn("ix_transactions_dedupe_fingerprint", indexes)
+        self.assertIn("ux_transactions_active_account_source_id", indexes)
+        engine.dispose()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -204,7 +204,7 @@ class UserManagementPage(QWidget):
         widget.setObjectName("managementSectionHeading")
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
+        layout.setSpacing(8)
         icon = QLabel()
         icon.setPixmap(
             awesome_icon(icon_name, color="#b8c2d0").pixmap(22, 22)
@@ -249,7 +249,7 @@ class UserManagementPage(QWidget):
 
         detail = QHBoxLayout()
         detail.setContentsMargins(4, 2, 4, 0)
-        detail.setSpacing(14)
+        detail.setSpacing(8)
         avatar = QLabel()
         avatar.setFixedSize(60, 60)
         avatar.setPixmap(
@@ -318,7 +318,7 @@ class UserManagementPage(QWidget):
             row.setObjectName("membershipRow")
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(12, 8, 10, 8)
-            row_layout.setSpacing(10)
+            row_layout.setSpacing(8)
             avatar = QLabel()
             avatar.setFixedSize(36, 36)
             avatar.setPixmap(avatar_icon(
@@ -430,7 +430,7 @@ class UserManagementPage(QWidget):
         identity = QWidget()
         identity_layout = QHBoxLayout(identity)
         identity_layout.setContentsMargins(0, 0, 0, 0)
-        identity_layout.setSpacing(9)
+        identity_layout.setSpacing(8)
         avatar = QLabel()
         avatar.setFixedSize(32, 32)
         avatar.setPixmap(
@@ -605,7 +605,7 @@ class UserManagementPage(QWidget):
         identity = QWidget()
         identity_layout = QHBoxLayout(identity)
         identity_layout.setContentsMargins(0, 0, 0, 0)
-        identity_layout.setSpacing(9)
+        identity_layout.setSpacing(8)
         avatar = QLabel()
         avatar.setFixedSize(32, 32)
         avatar.setPixmap(avatar_icon(

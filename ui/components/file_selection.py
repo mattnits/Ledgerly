@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
 
 from ui.components.date_picker import DatePickerEdit
 from ui.components.file_row import FileRow
+from ui.components.toggle_switch import ToggleSwitch
+from ui.preferences import save_imported_files_enabled
 from ui.theme import COLORS, set_button_icon, set_label_icon
 
 
@@ -36,7 +38,7 @@ class ErrorSummary(QFrame):
         self.setObjectName("statementErrorSummary")
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 13, 16, 13)
-        layout.setSpacing(12)
+        layout.setSpacing(8)
         self.icon = QLabel()
         set_label_icon(
             self.icon, "fa6s.circle-exclamation", color=COLORS["negative"], size=20
@@ -110,7 +112,7 @@ class FilePickerPanel(QFrame):
 class FileSelection(QWidget):
     queue_changed = Signal(bool)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, save_import_default: bool | None = None):
         super().__init__(parent)
         self.selected_files: list[str] = []
         self.file_rows: list[FileRow] = []
@@ -204,6 +206,42 @@ class FileSelection(QWidget):
         date_layout.addLayout(date_range_row)
         layout.addWidget(self.date_range_card)
 
+        self.storage_card = QFrame()
+        self.storage_card.setObjectName("statementStorageOption")
+        storage_layout = QHBoxLayout(self.storage_card)
+        storage_layout.setContentsMargins(14, 11, 14, 11)
+        storage_layout.setSpacing(14)
+        storage_copy = QVBoxLayout()
+        storage_copy.setSpacing(2)
+        storage_title = QLabel("Save source files")
+        storage_title.setObjectName("statementStorageTitle")
+        storage_description = QLabel(
+            "Save all selected statements to data/imported_statements after a successful import."
+        )
+        storage_description.setObjectName("statementStorageDescription")
+        storage_description.setWordWrap(True)
+        storage_copy.addWidget(storage_title)
+        storage_copy.addWidget(storage_description)
+        storage_layout.addLayout(storage_copy, 1)
+        self.save_files_toggle = ToggleSwitch()
+        self.save_files_toggle.setObjectName("statementSaveFilesToggle")
+        self.save_files_toggle.setAccessibleName("Save all imported source files")
+        self.save_files_toggle.setToolTip(
+            "Applies to every file in this import and does not change Settings"
+        )
+        default = (
+            save_imported_files_enabled()
+            if save_import_default is None
+            else save_import_default
+        )
+        self.save_files_toggle.setChecked(default)
+        storage_layout.addWidget(
+            self.save_files_toggle,
+            0,
+            Qt.AlignmentFlag.AlignVCenter,
+        )
+        layout.addWidget(self.storage_card)
+
         self.file_picker = FilePickerPanel()
         self.select_button = self.file_picker.button
         self.file_picker.clicked.connect(self.select_files)
@@ -276,6 +314,9 @@ class FileSelection(QWidget):
         if start > end:
             raise ValueError("The import start date must be on or before the end date")
         return start, end
+
+    def should_save_source_files(self) -> bool:
+        return self.save_files_toggle.isChecked()
 
     def show_errors(self, errors: list[tuple[str, str]]) -> None:
         selected = set(self.selected_files)
@@ -383,6 +424,20 @@ class FileSelection(QWidget):
             QFrame#statementDateRange {{
                 background: transparent;
                 border: none;
+            }}
+            QFrame#statementStorageOption {{
+                background: #12171d;
+                border: 1px solid {COLORS['border']};
+                border-radius: 10px;
+            }}
+            QLabel#statementStorageTitle {{
+                color: {COLORS['text']};
+                font-size: 13px;
+                font-weight: 650;
+            }}
+            QLabel#statementStorageDescription {{
+                color: {COLORS['text_dim']};
+                font-size: 11px;
             }}
             QFrame#statementFilePicker {{
                 background: #12171d;
