@@ -204,6 +204,11 @@ Windows and Linux packages. Pushing a `v*` tag publishes the Windows installer,
 Windows portable ZIP, and Linux ZIP to GitHub Releases. Manual workflow runs
 retain the packages as downloadable workflow artifacts.
 
+Every pull request also runs two independent checks: **Tests** runs the full
+unit test suite, and **Build app** creates and smoke-tests packaged Windows and
+Linux apps. Repository branch protection should require both checks before
+merging.
+
 ## Tests
 
 Run the test suite without opening desktop windows:
