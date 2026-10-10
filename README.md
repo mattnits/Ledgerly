@@ -217,11 +217,11 @@ Run the test suite without opening desktop windows:
 
 ```powershell
 $env:QT_QPA_PLATFORM = 'offscreen'
-python -m unittest discover -s tests -v
+python tests/run_suite.py
 ```
 
 ### Bash
 
 ```bash
-QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests -v
+QT_QPA_PLATFORM=offscreen python tests/run_suite.py
 ```
