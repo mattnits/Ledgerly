@@ -24,6 +24,10 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+      - name: Install Linux GUI runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libegl1
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
       - name: Run test suite
