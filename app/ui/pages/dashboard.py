@@ -125,6 +125,7 @@ class DashboardPage(QWidget):
         *,
         user_id: str | None = None,
         group_id: int | None = None,
+        reload: bool = True,
     ) -> None:
         self.user_id = user_id
         self.group_id = group_id
@@ -133,7 +134,8 @@ class DashboardPage(QWidget):
             "" if user_id is not None else "Switch to a user to import statements"
         )
         self.period_selector.reset(emit=False)
-        self.reload()
+        if reload:
+            self.reload()
 
     def reload(self) -> None:
         self.period_selector.set_available_months(
@@ -297,7 +299,11 @@ class DashboardPage(QWidget):
                 return
 
         self.files_to_parse = dialog.get_files()
-        self.window().transactions_page.reload()
+        window = self.window()
+        if hasattr(window, "mark_monthly_pages_dirty"):
+            window.mark_monthly_pages_dirty(window.transactions_page)
+        else:
+            window.transactions_page.reload()
         self.reload()
         show_summary = isinstance(dialog, FileUploadDialog) and dialog.isVisible()
         dialog.accept()

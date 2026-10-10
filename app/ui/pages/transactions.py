@@ -66,10 +66,15 @@ class TransactionsPage(QWidget):
         *,
         user_id: str | None = None,
         group_id: int | None = None,
+        reload: bool = True,
     ) -> None:
         self.user_id = user_id
         self.group_id = group_id
-        self.statements_table.set_profile(user_id=user_id, group_id=group_id)
+        self.statements_table.set_profile(
+            user_id=user_id,
+            group_id=group_id,
+            reload=reload,
+        )
         self.rules_button.setEnabled(user_id is not None)
         self.rules_button.setToolTip(
             "" if user_id is not None else "Classification rules are personal settings"

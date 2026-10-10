@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QApplication, QCalendarWidget, QToolButton
 
 from app.ui.widgets.date_picker import DatePickerCalendar, DatePickerEdit
 from app.ui.widgets.file_selection import FileSelection
-from app.ui.pages.investments import InvestmentAccountDialog, InvestmentsPage
+from app.ui.pages.investments import InvestmentAccountDialog, PortfolioEntryDialog
 
 
 class DatePickerTest(unittest.TestCase):
@@ -84,16 +84,16 @@ class DatePickerTest(unittest.TestCase):
     def test_import_and_investment_forms_use_the_shared_component(self):
         selection = FileSelection()
         account_dialog = InvestmentAccountDialog()
-        investments = InvestmentsPage()
+        entry_dialog = PortfolioEntryDialog(())
         try:
             self.assertIsInstance(selection.start_date, DatePickerEdit)
             self.assertIsInstance(selection.end_date, DatePickerEdit)
             self.assertIsInstance(account_dialog.initial_date, DatePickerEdit)
-            self.assertIsInstance(investments.entry_date, DatePickerEdit)
+            self.assertIsInstance(entry_dialog.entry_date, DatePickerEdit)
         finally:
             selection.close()
             account_dialog.close()
-            investments.close()
+            entry_dialog.close()
 
 
 if __name__ == "__main__":

@@ -85,10 +85,12 @@ class AccountsPage(QWidget):
         *,
         user_id: str | None = None,
         group_id: int | None = None,
+        reload: bool = True,
     ) -> None:
         self.user_id = user_id
         self.group_id = group_id
-        self.reload()
+        if reload:
+            self.reload()
 
     def set_user_id(self, user_id: str | None) -> None:
         self.set_profile(user_id=user_id)

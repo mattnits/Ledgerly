@@ -17,11 +17,14 @@ from app.services.investments import (
     calculate_work_rrsp_for_salary,
     create_investment_account,
     create_investment_snapshot,
+    get_account_current_value,
+    get_account_history,
     get_account_summaries,
     get_all_time_work_rrsp_summary,
     get_monthly_contribution_summary,
     get_monthly_work_rrsp_summary,
     get_owner_work_rrsp_summary,
+    get_portfolio_history,
     get_total_portfolio_value,
     get_work_rrsp_monthly_history,
     update_investment_account,
@@ -196,6 +199,106 @@ class WorkRrspServiceTest(WorkRrspFixture, unittest.TestCase):
         self.assertEqual(
             [item.summary.total_contribution for item in history],
             [Decimal("75.00"), Decimal("75.00"), Decimal("75.00")],
+        )
+
+    def test_july_start_value_grows_with_each_completed_payroll_month(self):
+        with self.sessions.begin() as session:
+            session.get(
+                InvestmentAccount, self.work_id
+            ).payroll_tracking_start_date = date(2026, 7, 1)
+        create_investment_snapshot(
+            self.work_id,
+            date(2026, 7, 1),
+            "1000",
+            session_factory=self.sessions,
+        )
+        self.add_transaction(date(2026, 7, 15), "950")
+        self.add_transaction(date(2026, 8, 15), "950")
+        self.add_transaction(date(2026, 9, 15), "950")
+
+        summaries = {
+            item.id: item
+            for item in get_account_summaries(
+                user_id="owner",
+                session_factory=self.sessions,
+            )
+        }
+        self.assertEqual(
+            summaries[self.work_id].current_value,
+            Decimal("1225.00"),
+        )
+        self.assertEqual(
+            summaries[self.work_id].last_updated.date(),
+            date(2026, 9, 30),
+        )
+        self.assertEqual(
+            get_account_current_value(
+                self.work_id,
+                session_factory=self.sessions,
+            ),
+            Decimal("1225.00"),
+        )
+        self.assertEqual(
+            get_total_portfolio_value(
+                user_id="owner",
+                session_factory=self.sessions,
+            ),
+            Decimal("1225.00"),
+        )
+
+        expected = [
+            (date(2026, 7, 1), Decimal("1000.00")),
+            (date(2026, 7, 31), Decimal("1075.00")),
+            (date(2026, 8, 31), Decimal("1150.00")),
+            (date(2026, 9, 30), Decimal("1225.00")),
+        ]
+        portfolio_history = get_portfolio_history(
+            user_id="owner",
+            end_date=date(2026, 9, 30),
+            session_factory=self.sessions,
+        )
+        account_history = get_account_history(
+            self.work_id,
+            session_factory=self.sessions,
+        )
+        self.assertEqual(
+            [
+                (point.snapshot_datetime.date(), point.total_value)
+                for point in portfolio_history
+            ],
+            expected,
+        )
+        self.assertEqual(
+            [
+                (point.snapshot_datetime.date(), point.total_value)
+                for point in account_history
+            ],
+            expected,
+        )
+
+    def test_work_rrsp_without_opening_value_starts_at_zero_and_grows(self):
+        with self.sessions.begin() as session:
+            session.get(
+                InvestmentAccount, self.work_id
+            ).payroll_tracking_start_date = date(2026, 7, 1)
+        self.add_transaction(date(2026, 7, 15), "950")
+        self.add_transaction(date(2026, 8, 15), "950")
+        self.add_transaction(date(2026, 9, 15), "950")
+
+        self.assertEqual(
+            get_account_current_value(
+                self.work_id,
+                session_factory=self.sessions,
+            ),
+            Decimal("225.00"),
+        )
+        history = get_account_history(
+            self.work_id,
+            session_factory=self.sessions,
+        )
+        self.assertEqual(
+            [point.total_value for point in history],
+            [Decimal("75.00"), Decimal("150.00"), Decimal("225.00")],
         )
 
     def test_current_month_is_excluded_until_it_is_complete(self):

@@ -103,6 +103,7 @@ class ShellWindow(QMainWindow):
         # loaded, then retained while the user moves around the app.
         self._selected_month: tuple[int, int] | None = None
         self._syncing_month_selection = False
+        self._dirty_monthly_pages: set[QWidget] = set()
         self.dashboard_page.period_selector.selection_changed.connect(
             self._handle_period_selection_changed
         )
@@ -268,11 +269,10 @@ class ShellWindow(QMainWindow):
     ) -> None:
         profiles = get_profiles()
         user_profiles = [item for item in profiles if item["type"] == "user"]
-        user_ids = {str(item["id"]) for item in user_profiles}
-        if self.session.current_user_id not in user_ids:
-            self.session.current_user_id = (
-                str(user_profiles[0]["id"]) if user_profiles else None
-            )
+        self.session.current_user_id = self._resolve_current_user_id(
+            user_profiles,
+            self.session.current_user_id,
+        )
         set_last_user_id(self.session.current_user_id)
         profiles = get_profiles(current_user_id=self.session.current_user_id)
         preferred_key = current_profile_key or self.session.active_profile_key
@@ -309,6 +309,17 @@ class ShellWindow(QMainWindow):
             self._startup_setup_complete = True
             if not self.transactions_page.statements_table._loading:
                 self._mark_startup_ready()
+
+    @staticmethod
+    def _resolve_current_user_id(
+        user_profiles: list[dict],
+        persisted_user_id: str | None,
+    ) -> str | None:
+        """Use the persisted user when valid, otherwise the first user."""
+        user_ids = {str(profile["id"]) for profile in user_profiles}
+        if persisted_user_id in user_ids:
+            return persisted_user_id
+        return str(user_profiles[0]["id"]) if user_profiles else None
 
     def show_add_user(self):
         dialog = AddUserDialog(self)
@@ -478,10 +489,26 @@ class ShellWindow(QMainWindow):
             context = ProfileContext.from_key(profile_key)
             user_id, group_id = context.user_id, context.group_id
         self.dashboard_page.set_profile(user_id=user_id, group_id=group_id)
-        self.transactions_page.set_profile(user_id=user_id, group_id=group_id)
-        self.investments_page.set_profile(user_id=user_id, group_id=group_id)
-        self.accounts_page.set_profile(user_id=user_id, group_id=group_id)
-        self.goals_page.set_profile(user_id=user_id, group_id=group_id)
+        self.transactions_page.set_profile(
+            user_id=user_id,
+            group_id=group_id,
+            reload=False,
+        )
+        self.investments_page.set_profile(
+            user_id=user_id,
+            group_id=group_id,
+            reload=False,
+        )
+        self.accounts_page.set_profile(
+            user_id=user_id,
+            group_id=group_id,
+            reload=False,
+        )
+        self.goals_page.set_profile(
+            user_id=user_id,
+            group_id=group_id,
+            reload=False,
+        )
 
         selected_month = preserved_month or self.dashboard_page.selected_month
         self._set_selected_month(selected_month)
@@ -501,7 +528,7 @@ class ShellWindow(QMainWindow):
         self._set_selected_month((year, month))
 
     def _set_selected_month(self, selected_month: tuple[int, int]) -> None:
-        """Apply one month/year selection to every monthly page."""
+        """Synchronize month controls without querying hidden pages."""
         if self._syncing_month_selection:
             return
 
@@ -514,7 +541,7 @@ class ShellWindow(QMainWindow):
             )
             self.transactions_page.statements_table.set_selected_month(
                 selected_month,
-                reload=True,
+                reload=False,
             )
             self.investments_page.period_selector.set_selected_month(
                 selected_month,
@@ -524,15 +551,39 @@ class ShellWindow(QMainWindow):
                 *selected_month,
                 emit=False,
             )
+            visible_page = (
+                self.pages.currentWidget()
+                if hasattr(self, "pages")
+                else None
+            )
+            if not hasattr(self, "_dirty_monthly_pages"):
+                self._dirty_monthly_pages = set()
+            for page in ShellWindow._monthly_pages(self):
+                if page is visible_page:
+                    self._dirty_monthly_pages.discard(page)
+                else:
+                    self._dirty_monthly_pages.add(page)
         finally:
             self._syncing_month_selection = False
 
+    def _monthly_pages(self) -> tuple[QWidget, ...]:
+        return tuple(
+            page
+            for page in (
+                getattr(self, "dashboard_page", None),
+                getattr(self, "transactions_page", None),
+                getattr(self, "investments_page", None),
+                getattr(self, "goals_page", None),
+            )
+            if page is not None
+        )
+
+    def mark_monthly_pages_dirty(self, *pages: QWidget) -> None:
+        targets = pages or ShellWindow._monthly_pages(self)
+        self._dirty_monthly_pages.update(targets)
+
     def handle_data_reset(self) -> None:
-        self.dashboard_page.reload()
-        self.transactions_page.reload()
-        self.accounts_page.reload()
-        self.investments_page.reload()
-        self.goals_page.reload()
+        self.mark_monthly_pages_dirty()
 
     def change_page(self, page_name: str):
 
@@ -552,20 +603,29 @@ class ShellWindow(QMainWindow):
         page = pages.get(page_name)
 
         if page is not None:
+            previous_page = (
+                self.pages.currentWidget()
+                if hasattr(self.pages, "currentWidget")
+                else None
+            )
+            monthly_pages = ShellWindow._monthly_pages(self)
+            if previous_page is not page:
+                self._dirty_monthly_pages.update(
+                    monthly_page
+                    for monthly_page in monthly_pages
+                    if monthly_page is not page
+                )
             self.pages.setCurrentWidget(page)
-            if page is self.transactions_page:
-                self.transactions_page.reload()
-            if page is self.dashboard_page:
-                self.dashboard_page.reload()
-            if page is self.accounts_page:
+            dirty_pages = getattr(self, "_dirty_monthly_pages", set())
+            if page in monthly_pages:
+                if page in dirty_pages or previous_page is not page:
+                    page.reload()
+                    dirty_pages.discard(page)
+            elif page is self.accounts_page:
                 self.accounts_page.reload()
-            if page is self.investments_page:
-                self.investments_page.reload()
-            if page is self.categories_page:
+            elif page is self.categories_page:
                 self.categories_page.reload()
-            if hasattr(self, "goals_page") and page is self.goals_page:
-                self.goals_page.reload()
-            if (
+            elif (
                 hasattr(self, "user_management_page")
                 and page is self.user_management_page
             ):

@@ -1,10 +1,11 @@
 import os
 import unittest
 from datetime import date, timedelta
+from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QPushButton, QScrollArea
 from sqlalchemy import create_engine
@@ -12,13 +13,16 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.db import Base
+from app.models.models import User
 from app.services.investments import (
     create_investment_account,
     create_investment_snapshot,
 )
-from app.models.models import User
-from app.ui.pages.investments import InvestmentsPage
+from app.ui.pages.investments import InvestmentsPage, PortfolioEntryDialog
 from app.ui.theme import APP_STYLESHEET
+from app.ui.widgets.account_badge import AccountBadge
+from app.ui.widgets.combo_box import FramelessPopupComboBox
+from app.ui.widgets.date_picker import DatePickerEdit
 
 
 class InvestmentsPageUiTest(unittest.TestCase):
@@ -35,7 +39,10 @@ class InvestmentsPageUiTest(unittest.TestCase):
         self.sessions = sessionmaker(bind=self.engine)
         Base.metadata.create_all(self.engine)
         with self.sessions.begin() as session:
-            session.add(User(id="owner", name="Owner", color="#123456"))
+            session.add_all((
+                User(id="owner", name="Owner", color="#123456"),
+                User(id="empty", name="Empty", color="#654321"),
+            ))
         self.account_id = create_investment_account(
             "TD",
             "TFSA",
@@ -47,85 +54,75 @@ class InvestmentsPageUiTest(unittest.TestCase):
     def tearDown(self):
         self.engine.dispose()
 
-    def test_page_scrolls_and_reflows_panels_at_compact_sizes(self):
-        page = InvestmentsPage(session_factory=self.sessions)
-        self.assertEqual(
-            [scroll.objectName() for scroll in page.findChildren(QScrollArea)],
-            ["investmentsScroll", "investmentRecentScroll"],
-        )
+    @staticmethod
+    def _grid_position(grid, widget):
+        return grid.getItemPosition(grid.indexOf(widget))[:2]
 
-        page.resize(600, 500)
-        page.show()
-        self.app.processEvents()
-        self.assertEqual(page.size().width(), 600)
-        self.assertEqual(
-            page.middle_grid.getItemPosition(
-                page.middle_grid.indexOf(page.entry_panel)
-            )[:2],
-            (1, 0),
-        )
-        self.assertEqual(
-            page.bottom_grid.getItemPosition(
-                page.bottom_grid.indexOf(page.recent_panel)
-            )[:2],
-            (1, 0),
-        )
-        self.assertGreater(page.page_scroll.horizontalScrollBar().maximum(), 0)
-        self.assertGreater(page.page_scroll.verticalScrollBar().maximum(), 0)
+    def _assert_vertically_ordered(self, parent, *widgets):
+        spans = []
+        for widget in widgets:
+            top = widget.mapTo(parent, QPoint()).y()
+            spans.append((top, top + widget.height()))
+        for earlier, later in zip(spans, spans[1:]):
+            self.assertLessEqual(earlier[1], later[0])
 
-        page.resize(1600, 1100)
-        self.app.processEvents()
-        self.assertEqual(
-            page.middle_grid.getItemPosition(
-                page.middle_grid.indexOf(page.entry_panel)
-            )[:2],
-            (0, 2),
-        )
-        self.assertEqual(
-            page.bottom_grid.getItemPosition(
-                page.bottom_grid.indexOf(page.recent_panel)
-            )[:2],
-            (0, 2),
-        )
-        page.close()
-
-    def test_account_edit_and_delete_actions_are_icon_only(self):
+    def test_page_has_one_scroll_area_and_reflows_at_all_breakpoints(self):
         page = InvestmentsPage(session_factory=self.sessions)
         page.set_user_id("owner")
-
-        actions = page.accounts_table.cellWidget(0, 5)
-        buttons = actions.findChildren(QPushButton)
-        edit_button = next(
-            button for button in buttons
-            if button.objectName() == "tableIconButton"
-        )
-        delete_button = next(
-            button for button in buttons
-            if button.objectName() == "dangerButton"
+        self.assertEqual(
+            [scroll.objectName() for scroll in page.findChildren(QScrollArea)],
+            ["investmentsScroll"],
         )
 
-        self.assertEqual(len(buttons), 2)
-        self.assertNotIn("Add Entry", (button.text() for button in buttons))
-        self.assertEqual(edit_button.text(), "")
-        self.assertEqual(edit_button.toolTip(), "Edit investment account")
-        self.assertFalse(edit_button.icon().isNull())
-        self.assertEqual(delete_button.text(), "")
-        self.assertEqual(delete_button.toolTip(), "Delete investment account")
-        self.assertFalse(delete_button.icon().isNull())
+        page.resize(480, 520)
         page.show()
         self.app.processEvents()
-        button_group_left = min(button.geometry().left() for button in buttons)
-        button_group_right = max(button.geometry().right() for button in buttons)
-        left_margin = button_group_left
-        right_margin = actions.width() - button_group_right - 1
-        self.assertLessEqual(abs(left_margin - right_margin), 1)
+        self.assertEqual(page._layout_mode, "narrow")
+        self.assertEqual(self._grid_position(page.summary_grid, page.gain_card), (3, 0))
         self.assertEqual(
-            page.accounts_table.horizontalHeaderItem(5).textAlignment(),
-            Qt.AlignmentFlag.AlignCenter,
+            self._grid_position(page.chart_grid, page.account_chart_card),
+            (1, 0),
         )
+        self.assertEqual(
+            self._grid_position(page.activity_grid, page.recent_panel),
+            (1, 0),
+        )
+        self.assertEqual(
+            self._grid_position(
+                page.account_chart_card.header_grid,
+                page.account_selector,
+            ),
+            (1, 0),
+        )
+        self.assertEqual(page.page_scroll.horizontalScrollBar().maximum(), 0)
+        self.assertGreater(page.page_scroll.verticalScrollBar().maximum(), 0)
+
+        page.resize(900, 700)
+        self.app.processEvents()
+        self.assertEqual(page._layout_mode, "medium")
+        self.assertEqual(self._grid_position(page.summary_grid, page.gain_card), (1, 1))
+        self.assertEqual(
+            self._grid_position(page.chart_grid, page.account_chart_card),
+            (1, 0),
+        )
+        self.assertEqual(page.page_scroll.horizontalScrollBar().maximum(), 0)
+
+        page.resize(1600, 1000)
+        self.app.processEvents()
+        self.assertEqual(page._layout_mode, "wide")
+        self.assertEqual(self._grid_position(page.summary_grid, page.gain_card), (0, 3))
+        self.assertEqual(
+            self._grid_position(page.chart_grid, page.account_chart_card),
+            (0, 1),
+        )
+        self.assertEqual(
+            self._grid_position(page.activity_grid, page.recent_panel),
+            (0, 1),
+        )
+        self.assertEqual(page.page_scroll.horizontalScrollBar().maximum(), 0)
         page.close()
 
-    def test_account_actions_are_centered_in_the_rendered_column(self):
+    def test_account_edit_and_delete_actions_are_icon_only_and_centered(self):
         previous_stylesheet = self.app.styleSheet()
         self.app.setStyleSheet(APP_STYLESHEET)
         page = InvestmentsPage(session_factory=self.sessions)
@@ -138,53 +135,66 @@ class InvestmentsPageUiTest(unittest.TestCase):
             table = page.accounts_table
             actions = table.cellWidget(0, 5)
             buttons = actions.findChildren(QPushButton)
-            column_left = table.columnViewportPosition(5)
-            column_center = column_left + table.columnWidth(5) / 2
-            actions_center = actions.x() + actions.width() / 2
-            button_group_left = actions.x() + min(
-                button.x() for button in buttons
+            edit_button = next(
+                button for button in buttons
+                if button.objectName() == "tableIconButton"
             )
-            button_group_right = actions.x() + max(
+            delete_button = next(
+                button for button in buttons
+                if button.objectName() == "dangerButton"
+            )
+            self.assertEqual(len(buttons), 2)
+            self.assertEqual(edit_button.text(), "")
+            self.assertEqual(edit_button.toolTip(), "Edit investment account")
+            self.assertFalse(edit_button.icon().isNull())
+            self.assertEqual(delete_button.text(), "")
+            self.assertEqual(delete_button.toolTip(), "Delete investment account")
+            self.assertFalse(delete_button.icon().isNull())
+
+            column_center = (
+                table.columnViewportPosition(5) + table.columnWidth(5) / 2
+            )
+            actions_center = actions.x() + actions.width() / 2
+            button_left = actions.x() + min(button.x() for button in buttons)
+            button_right = actions.x() + max(
                 button.x() + button.width() for button in buttons
             )
-            button_group_center = (
-                button_group_left + button_group_right
-            ) / 2
-
-            self.assertEqual(
-                table.columnWidth(5),
-                InvestmentsPage.ACCOUNT_ACTION_COLUMN_WIDTH,
-            )
             self.assertEqual(actions_center, column_center)
-            self.assertEqual(button_group_center, column_center)
+            self.assertEqual((button_left + button_right) / 2, column_center)
+            self.assertEqual(
+                table.horizontalHeaderItem(5).textAlignment(),
+                Qt.AlignmentFlag.AlignCenter,
+            )
         finally:
             page.close()
             self.app.setStyleSheet(previous_stylesheet)
 
-    def test_entry_form_wraps_without_overlap_and_masks_account_number(self):
+    def test_add_entry_uses_a_modal_with_masked_account_number(self):
         page = InvestmentsPage(session_factory=self.sessions)
         page.set_user_id("owner")
-        page.setMinimumSize(0, 0)
-        page.resize(800, 760)
-        page.show()
-        self.app.processEvents()
-
-        self.assertEqual(
-            page.entry_form.rowWrapPolicy(),
-            page.entry_form.RowWrapPolicy.WrapAllRows,
-        )
-        for field in (
-            page.entry_account,
-            page.entry_date,
-            page.entry_total,
-            page.entry_contribution,
-        ):
-            label = page.entry_form.labelForField(field)
-            self.assertFalse(label.geometry().intersects(field.geometry()))
-
-        self.assertIn("***1234", page.entry_account.currentText())
-        self.assertNotIn("ABC1234", page.entry_account.currentText())
-        page.close()
+        dialog = PortfolioEntryDialog(page._accounts)
+        try:
+            self.assertIsInstance(dialog.account, FramelessPopupComboBox)
+            self.assertIsInstance(dialog.entry_date, DatePickerEdit)
+            self.assertIn("***1234", dialog.account.currentText())
+            self.assertNotIn("ABC1234", dialog.account.currentText())
+            self.assertFalse(hasattr(page, "entry_panel"))
+            dialog.total.setText("450.00")
+            dialog.contribution.setText("50.00")
+            dialog.exec = MagicMock(side_effect=dialog.submitted.emit)
+            with patch(
+                "app.ui.pages.investments.PortfolioEntryDialog",
+                return_value=dialog,
+            ) as dialog_class:
+                page.add_entry_button.click()
+            dialog_class.assert_called_once()
+            dialog.exec.assert_called_once()
+            self.assertEqual(page.recent_table.rowCount(), 1)
+            self.assertEqual(page.recent_table.item(0, 2).text(), "$450.00")
+            self.assertEqual(page.recent_table.item(0, 3).text(), "+$50.00")
+        finally:
+            dialog.close()
+            page.close()
 
     def test_account_number_reveals_on_hover_and_can_be_pinned(self):
         page = InvestmentsPage(session_factory=self.sessions)
@@ -205,17 +215,15 @@ class InvestmentsPageUiTest(unittest.TestCase):
         self.assertEqual(account_number.text(), "ABC1234")
         page.close()
 
-    def test_chart_history_runs_from_earliest_entry_to_period_end(self):
+    def test_selected_month_drives_card_and_both_chart_end_dates(self):
         today = date.today()
-        first_of_current_month = date(today.year, today.month, 1)
-        previous_month = first_of_current_month - timedelta(days=1)
-        earliest = date(today.year - 1, 1, 1)
-        selected_date = date(previous_month.year, previous_month.month, 15)
+        selected_month_end = date(today.year, today.month, 1) - timedelta(days=1)
+        selected_date = selected_month_end.replace(day=15)
+        earlier = selected_date - timedelta(days=40)
         for snapshot_date, value in (
-            (earliest, "100"),
+            (earlier, "100"),
             (selected_date, "200"),
             (today, "300"),
-            (today + timedelta(days=1), "400"),
         ):
             create_investment_snapshot(
                 self.account_id,
@@ -227,26 +235,57 @@ class InvestmentsPageUiTest(unittest.TestCase):
         page = InvestmentsPage(session_factory=self.sessions)
         page.set_user_id("owner")
         page.period_selector.set_selected_month(
-            (previous_month.year, previous_month.month), emit=False
+            (selected_date.year, selected_date.month), emit=False
         )
         page.reload()
+
+        expected_dates = [earlier, selected_date]
         self.assertEqual(
             [point.snapshot_datetime.date() for point in page.chart.points],
-            [earliest, selected_date],
+            expected_dates,
         )
-        self.assertEqual(page.chart.range_start, earliest)
-        self.assertEqual(page.chart.range_end, previous_month)
+        self.assertEqual(
+            [point.snapshot_datetime.date() for point in page.account_chart.points],
+            expected_dates,
+        )
+        self.assertEqual(page.chart.range_end, selected_month_end)
+        self.assertEqual(page.account_chart.range_end, selected_month_end)
+        self.assertEqual(page.portfolio_card.value_label.text(), "$200.00")
 
+    def test_account_selector_filters_the_account_chart(self):
+        second_id = create_investment_account(
+            "Wealthsimple",
+            "Long-Term Growth Account",
+            account_number="XYZ5678",
+            user_id="owner",
+            session_factory=self.sessions,
+        )
+        today = date.today()
+        create_investment_snapshot(
+            self.account_id, today - timedelta(days=2), "100",
+            session_factory=self.sessions,
+        )
+        create_investment_snapshot(
+            second_id, today - timedelta(days=1), "250",
+            session_factory=self.sessions,
+        )
+
+        page = InvestmentsPage(session_factory=self.sessions)
+        page.set_user_id("owner")
         page.period_selector.set_period("all", emit=False)
         page.reload()
-        self.assertEqual(
-            [point.snapshot_datetime.date() for point in page.chart.points],
-            [earliest, selected_date, today],
-        )
-        self.assertEqual(page.chart.range_start, earliest)
-        self.assertEqual(page.chart.range_end, today)
+        second_index = page.account_selector.findData(second_id)
+        page.account_selector.setCurrentIndex(second_index)
+        self.app.processEvents()
 
-    def test_recent_entries_scroll_after_four_visible_items(self):
+        self.assertEqual(page.account_selector.currentData(), second_id)
+        self.assertEqual(
+            [point.total_value for point in page.account_chart.points],
+            [250],
+        )
+        self.assertEqual(page.chart.points[-1].total_value, 350)
+
+    def test_recent_entries_are_compact_and_do_not_add_nested_scrolling(self):
         today = date.today()
         for offset in range(1, 7):
             create_investment_snapshot(
@@ -263,13 +302,174 @@ class InvestmentsPageUiTest(unittest.TestCase):
         page.show()
         self.app.processEvents()
 
-        self.assertEqual(page.recent_layout.count(), 6)
+        self.assertEqual(page.recent_table.rowCount(), page.MAX_RECENT_ENTRIES)
+        self.assertEqual(page.recent_table.verticalScrollBar().maximum(), 0)
         self.assertEqual(
-            page.recent_scroll.height(),
-            page.VISIBLE_RECENT_ENTRIES * page.RECENT_ENTRY_HEIGHT
-            + (page.VISIBLE_RECENT_ENTRIES - 1) * 8,
+            [scroll.objectName() for scroll in page.findChildren(QScrollArea)],
+            ["investmentsScroll"],
         )
-        self.assertGreater(page.recent_scroll.verticalScrollBar().maximum(), 0)
+        page.close()
+
+    def test_empty_state_has_clear_call_to_action(self):
+        page = InvestmentsPage(session_factory=self.sessions)
+        page.set_user_id("empty")
+        page.resize(1400, 900)
+        page.show()
+        self.app.processEvents()
+
+        self.assertTrue(page.empty_panel.isVisible())
+        self.assertTrue(page.empty_add_account_button.isEnabled())
+        self.assertFalse(page.add_entry_button.isEnabled())
+        self.assertFalse(page.chart_container.isVisible())
+        self.assertFalse(page.activity_container.isVisible())
+        self.assertFalse(page.work_rrsp_panel.isVisible())
+        self.assertEqual(len(page.empty_steps), 3)
+        self.assertTrue(all(arrow.isVisible() for arrow in page.empty_step_arrows))
+        self.assertEqual(
+            [self._grid_position(page.empty_steps_grid, step) for step in page.empty_steps],
+            [(0, 0), (0, 2), (0, 4)],
+        )
+        self.assertEqual(page.empty_title.text(), "No investment accounts yet")
+        self.assertGreaterEqual(
+            page.empty_title.height(),
+            page.empty_title.fontMetrics().height(),
+        )
+        self._assert_vertically_ordered(
+            page.empty_panel,
+            page.empty_hero_icon,
+            page.empty_title,
+            page.empty_message,
+            page.empty_add_account_button,
+            page.empty_divider,
+            page.empty_steps[0],
+        )
+        self.assertLessEqual(
+            page.period_selector.geometry().top()
+            - page.header.geometry().bottom(),
+            page.SECTION_GAP + 2,
+        )
+        self.assertLessEqual(
+            page.portfolio_card.geometry().top()
+            - page.period_selector.geometry().bottom(),
+            page.SECTION_GAP + 2,
+        )
+        self.assertLessEqual(
+            page.empty_panel.geometry().top()
+            - page.portfolio_card.geometry().bottom(),
+            page.SECTION_GAP + 2,
+        )
+        self.assertEqual(page.page_scroll.horizontalScrollBar().maximum(), 0)
+
+        page.resize(480, 700)
+        self.app.processEvents()
+        self.assertEqual(
+            [self._grid_position(page.empty_steps_grid, step) for step in page.empty_steps],
+            [(0, 0), (1, 0), (2, 0)],
+        )
+        self.assertTrue(all(arrow.isHidden() for arrow in page.empty_step_arrows))
+        self.assertEqual(page.page_scroll.horizontalScrollBar().maximum(), 0)
+
+        page.resize(360, 520)
+        self.app.processEvents()
+        self.assertTrue(page.empty_title.wordWrap())
+        self.assertEqual(page.page_scroll.horizontalScrollBar().maximum(), 0)
+        self.assertGreater(page.page_scroll.verticalScrollBar().maximum(), 0)
+        self._assert_vertically_ordered(
+            page.empty_panel,
+            page.empty_hero_icon,
+            page.empty_title,
+            page.empty_message,
+            page.empty_add_account_button,
+            page.empty_divider,
+            *page.empty_steps,
+        )
+        page.close()
+
+    def test_account_selector_popup_has_no_shadow_or_padding_bands(self):
+        page = InvestmentsPage(session_factory=self.sessions)
+        page.set_user_id("owner")
+        selector = page.account_selector
+        selector.show()
+        selector.showPopup()
+        self.app.processEvents()
+
+        popup = selector._popup_window
+        self.assertTrue(
+            popup.windowFlags() & Qt.WindowType.NoDropShadowWindowHint
+        )
+        self.assertTrue(popup.layout().contentsMargins().isNull())
+        self.assertEqual(popup.layout().spacing(), 0)
+        self.assertEqual(selector.view().geometry().top(), 0)
+        self.assertEqual(selector.view().geometry().bottom(), popup.height() - 1)
+        selector.hidePopup()
+        page.close()
+
+    def test_multiple_work_rrsp_accounts_render_independently_and_reflow(self):
+        for index in range(2):
+            create_investment_account(
+                f"Employer {index}",
+                f"Work RRSP {index}",
+                account_number=f"RRSP{index}",
+                account_type="RRSP",
+                initial_date=date.today() - timedelta(days=90),
+                user_id="owner",
+                is_work_related=True,
+                auto_track_from_payroll=True,
+                employee_contribution_percent="5",
+                employer_matching_enabled=True,
+                employer_match_percent="50",
+                session_factory=self.sessions,
+            )
+
+        page = InvestmentsPage(session_factory=self.sessions)
+        page.set_user_id("owner")
+        page.resize(600, 700)
+        page.show()
+        self.app.processEvents()
+        self.assertEqual(page.work_rrsp_layout.count(), 2)
+        self.assertEqual(len(page._rrsp_card_grids), 2)
+        for grid, cards in page._rrsp_card_grids:
+            self.assertEqual(len(cards), 3)
+            self.assertEqual(
+                [self._grid_position(grid, card) for card in cards],
+                [(0, 0), (1, 0), (2, 0)],
+            )
+
+        page.resize(1400, 900)
+        self.app.processEvents()
+        for grid, cards in page._rrsp_card_grids:
+            self.assertEqual(
+                [self._grid_position(grid, card) for card in cards],
+                [(0, 0), (0, 1), (0, 2)],
+            )
+        page.close()
+
+    def test_long_account_name_stays_inside_its_table_cell(self):
+        create_investment_account(
+            "RBC Dominion Securities",
+            "A Very Long Retirement Investment Account Name",
+            account_number="LONG999",
+            user_id="owner",
+            session_factory=self.sessions,
+        )
+        page = InvestmentsPage(session_factory=self.sessions)
+        page.set_user_id("owner")
+        page.resize(850, 700)
+        page.show()
+        self.app.processEvents()
+
+        badge = next(
+            page.accounts_table.cellWidget(row, 0)
+            for row in range(page.accounts_table.rowCount())
+            if "A Very Long Retirement"
+            in page.accounts_table.cellWidget(row, 0).name_label.toolTip()
+        )
+        self.assertIsInstance(badge, AccountBadge)
+        row = page.accounts_table.indexAt(badge.geometry().center()).row()
+        cell = page.accounts_table.visualRect(page.accounts_table.model().index(row, 0))
+        self.assertLessEqual(badge.geometry().right(), cell.right())
+        self.assertIn("A Very Long Retirement", badge.name_label.toolTip())
+        self.assertEqual(page.page_scroll.horizontalScrollBar().maximum(), 0)
         page.close()
 
 

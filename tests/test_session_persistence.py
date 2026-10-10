@@ -10,6 +10,34 @@ from app.ui.shell import ShellWindow
 
 
 class SessionPersistenceTest(unittest.TestCase):
+    def test_missing_persisted_user_falls_back_to_first_user(self):
+        profiles = [
+            {"type": "user", "id": "first-user"},
+            {"type": "user", "id": "second-user"},
+        ]
+
+        selected = ShellWindow._resolve_current_user_id(
+            profiles,
+            "user-from-another-database",
+        )
+
+        self.assertEqual(selected, "first-user")
+
+    def test_existing_persisted_user_is_retained(self):
+        profiles = [
+            {"type": "user", "id": "first-user"},
+            {"type": "user", "id": "second-user"},
+        ]
+
+        selected = ShellWindow._resolve_current_user_id(profiles, "second-user")
+
+        self.assertEqual(selected, "second-user")
+
+    def test_no_users_clears_the_persisted_user(self):
+        selected = ShellWindow._resolve_current_user_id([], "missing-user")
+
+        self.assertIsNone(selected)
+
     def test_selecting_personal_profile_caches_that_user(self):
         dashboard = object()
         shell = SimpleNamespace(

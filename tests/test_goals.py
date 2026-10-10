@@ -2,6 +2,7 @@ import os
 import unittest
 from datetime import date, datetime
 from decimal import Decimal
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -41,6 +42,7 @@ from app.models.models import (
     User,
 )
 from app.ui.pages.goals import (
+    BudgetDialog,
     BudgetRow,
     GoalsPage,
     MonthNavigator,
@@ -237,6 +239,19 @@ class GoalsServiceTest(unittest.TestCase):
         with self.sessions() as session:
             self.assertEqual(session.query(MonthlyCategoryBudget).count(), 1)
 
+    def test_budget_progress_normalizes_sqlite_float_aggregates(self):
+        progress = CategoryBudgetProgress(
+            category_id=1,
+            category_name="Bills",
+            category_color="#398cff",
+            spent=125.5,
+            target=Decimal("200.00"),
+        )
+
+        self.assertIsInstance(progress.spent, Decimal)
+        self.assertEqual(progress.remaining, Decimal("74.50"))
+        self.assertEqual(progress.percent, Decimal("62.7500"))
+
     def test_category_budgets_carry_forward_until_changed_or_removed(self):
         with self.sessions.begin() as session:
             transport = Category(name="Transportation", color="#398cff")
@@ -312,6 +327,71 @@ class GoalsServiceTest(unittest.TestCase):
         self.assertEqual(
             [(item.category_name, item.target) for item in february],
             [("Transportation", Decimal("200.00"))],
+        )
+
+    def test_recurring_budget_resumes_after_existing_single_month_budget(self):
+        create_or_update_category_budget(
+            self.food_id,
+            2026,
+            9,
+            Decimal("225"),
+            applies_to_future=False,
+            user_id="owner",
+            session_factory=self.sessions,
+        )
+
+        result = create_or_update_category_budget(
+            self.food_id,
+            2026,
+            7,
+            Decimal("100"),
+            applies_to_future=True,
+            user_id="owner",
+            session_factory=self.sessions,
+        )
+
+        self.assertEqual(result.preserved_months, ((2026, 9),))
+        self.assertEqual(
+            get_category_budgets(
+                2026, 8, user_id="owner", session_factory=self.sessions
+            )[0].target,
+            Decimal("100.00"),
+        )
+        self.assertEqual(
+            get_category_budgets(
+                2026, 9, user_id="owner", session_factory=self.sessions
+            )[0].target,
+            Decimal("225.00"),
+        )
+        self.assertEqual(
+            get_category_budgets(
+                2026, 10, user_id="owner", session_factory=self.sessions
+            )[0].target,
+            Decimal("100.00"),
+        )
+
+    def test_month_only_budget_does_not_carry_forward(self):
+        create_or_update_category_budget(
+            self.food_id,
+            2026,
+            7,
+            Decimal("100"),
+            applies_to_future=False,
+            user_id="owner",
+            session_factory=self.sessions,
+        )
+
+        self.assertEqual(
+            len(get_category_budgets(
+                2026, 7, user_id="owner", session_factory=self.sessions
+            )),
+            1,
+        )
+        self.assertEqual(
+            get_category_budgets(
+                2026, 8, user_id="owner", session_factory=self.sessions
+            ),
+            (),
         )
 
     def test_database_indexes_enforce_owner_month_uniqueness(self):
@@ -488,6 +568,72 @@ class GoalsPageLayoutTest(unittest.TestCase):
             dialog.windowFlags() & Qt.WindowType.FramelessWindowHint
         )
         dialog.close()
+
+    def test_budget_dialog_applies_to_future_months_by_default(self):
+        dialog = BudgetDialog(
+            [(1, "Bills", "#398cff")],
+            2026,
+            7,
+        )
+
+        self.assertTrue(dialog.apply_to_future.isChecked())
+        self.assertIn("future months", dialog.apply_to_future.text())
+        dialog.close()
+
+    def test_saving_goal_from_september_refreshes_page_after_dialog_closes(self):
+        page = GoalsPage(session_factory=self.sessions)
+        page.month_navigator.set_month(2026, 9)
+        page.set_profile(user_id="owner")
+
+        def complete_dialog(dialog):
+            dialog.name.setText("September goal")
+            dialog.target.setValue(1500)
+            dialog.current.setValue(100)
+            dialog.submitted.emit()
+            return dialog.result()
+
+        with patch.object(
+            SavingsGoalDialog,
+            "exec",
+            new=complete_dialog,
+        ):
+            page._edit_long_term_goal(None)
+
+        self.assertEqual(len(page._goal_items), 1)
+        self.assertEqual(page._goal_items[0].name, "September goal")
+        self.assertEqual(page._goal_items[0].target_amount, Decimal("1500.00"))
+        page.close()
+
+    def test_saving_budget_from_september_refreshes_and_carries_forward(self):
+        with self.sessions.begin() as session:
+            category = Category(name="Bills", color="#398cff")
+            session.add(category)
+            session.flush()
+            category_id = category.id
+
+        page = GoalsPage(session_factory=self.sessions)
+        page.month_navigator.set_month(2026, 9)
+        page.set_profile(user_id="owner")
+
+        def complete_dialog(dialog):
+            dialog.category.setCurrentIndex(
+                dialog.category.findData(category_id)
+            )
+            dialog.amount.setValue(450)
+            dialog.submitted.emit()
+            return dialog.result()
+
+        with patch.object(BudgetDialog, "exec", new=complete_dialog):
+            page._edit_budget(None)
+
+        self.assertEqual(len(page._budget_items), 1)
+        self.assertEqual(page._budget_items[0].category_name, "Bills")
+        self.assertEqual(page._budget_items[0].target, Decimal("450.00"))
+
+        page.month_navigator.set_month(2026, 10)
+        page.reload()
+        self.assertEqual(page._budget_items[0].target, Decimal("450.00"))
+        page.close()
 
     def test_savings_goal_dialog_uses_shared_calendar_design(self):
         dialog = SavingsGoalDialog()

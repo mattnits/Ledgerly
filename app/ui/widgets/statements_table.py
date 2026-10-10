@@ -732,6 +732,7 @@ class StatementsTable(QWidget):
         *,
         user_id: str | None = None,
         group_id: int | None = None,
+        reload: bool = True,
     ) -> None:
         self.user_id = user_id
         self.group_id = group_id
@@ -748,7 +749,8 @@ class StatementsTable(QWidget):
         with QSignalBlocker(self.search), QSignalBlocker(self.needs_review_checkbox):
             self.search.clear()
             self.needs_review_checkbox.setChecked(False)
-        self.reload()
+        if reload:
+            self.reload()
 
     def reload(self) -> None:
         self._apply_filters()

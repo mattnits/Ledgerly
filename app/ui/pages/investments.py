@@ -4,7 +4,7 @@ import calendar
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from PySide6.QtCore import QDate, QPointF, QRectF, Qt
+from PySide6.QtCore import QDate, QPointF, QRectF, QSignalBlocker, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QLineEdit,
     QMessageBox,
     QPushButton,
@@ -33,6 +34,7 @@ from app.services.investments import (
     create_investment_snapshot,
     delete_investment_account,
     get_account_summaries,
+    get_account_history,
     get_all_time_work_rrsp_summary,
     get_investment_months,
     get_monthly_work_rrsp_summary,
@@ -40,12 +42,11 @@ from app.services.investments import (
     get_portfolio_history,
     get_recent_snapshots,
     get_total_contributions,
-    get_total_portfolio_value,
     get_work_rrsp_monthly_history,
     update_investment_account,
 )
 from app.ui.widgets.account_badge import AccountBadge
-from app.ui.widgets.combo_box import AppComboBox
+from app.ui.widgets.combo_box import AppComboBox, FramelessPopupComboBox
 from app.ui.widgets.date_picker import DatePickerEdit
 from app.ui.dialogs.generic_dialog import GenericDialog
 from app.ui.widgets.generic_table import GenericTable
@@ -53,6 +54,7 @@ from app.ui.widgets.page_header import PageHeader
 from app.ui.widgets.period_selector import PeriodSelector
 from app.ui.theme import (
     COLORS,
+    brand_icon,
     set_button_icon,
     set_delete_button_icon,
     set_icon_only_button,
@@ -63,6 +65,12 @@ from app.ui.theme import (
 def _currency(value: Decimal) -> str:
     sign = "-" if value < 0 else ""
     return f"{sign}${abs(value):,.2f}"
+
+
+def _signed_currency(value: Decimal) -> str:
+    if value > 0:
+        return f"+${value:,.2f}"
+    return _currency(value)
 
 
 def _month_dates(month: tuple[int, int]) -> tuple[date, date]:
@@ -162,12 +170,20 @@ class AccountNumberReveal(QLabel):
 
 
 class PortfolioChart(QWidget):
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        line_color: str = "#2791ff",
+        empty_text: str = "No portfolio history yet",
+    ) -> None:
         super().__init__(parent)
         self.points: tuple[PortfolioPoint, ...] = ()
         self.range_start: date | None = None
         self.range_end: date | None = None
-        self.setMinimumHeight(180)
+        self.line_color = line_color
+        self.empty_text = empty_text
+        self.setMinimumHeight(175)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def set_data(
@@ -190,7 +206,7 @@ class PortfolioChart(QWidget):
             painter.drawText(
                 self.rect(),
                 Qt.AlignmentFlag.AlignCenter,
-                "No portfolio history yet",
+                self.empty_text,
             )
             return
 
@@ -238,9 +254,9 @@ class PortfolioChart(QWidget):
         path = QPainterPath(coordinates[0])
         for point in coordinates[1:]:
             path.lineTo(point)
-        painter.setPen(QPen(QColor("#6c9fff"), 2.5))
+        painter.setPen(QPen(QColor(self.line_color), 2.5))
         painter.drawPath(path)
-        painter.setBrush(QColor("#6c9fff"))
+        painter.setBrush(QColor(self.line_color))
         painter.setPen(Qt.PenStyle.NoPen)
         for point in coordinates:
             painter.drawEllipse(point, 3.5, 3.5)
@@ -262,31 +278,39 @@ class SummaryCard(QFrame):
     def __init__(self, title: str, icon: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("investmentSummaryCard")
+        self.setMinimumHeight(104)
+        self.setMaximumHeight(122)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 16, 18, 16)
-        layout.setSpacing(7)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(4)
 
         title_row = QHBoxLayout()
+        title_row.setSpacing(9)
+        self.icon_frame = QFrame()
+        self.icon_frame.setObjectName("investmentSummaryIcon")
+        self.icon_frame.setFixedSize(34, 34)
+        icon_layout = QVBoxLayout(self.icon_frame)
+        icon_layout.setContentsMargins(0, 0, 0, 0)
+        icon_label = QLabel()
+        set_label_icon(icon_label, icon, color="#42a0ff", size=18)
+        icon_layout.addWidget(icon_label, alignment=Qt.AlignmentFlag.AlignCenter)
         self.title_label = QLabel(title)
         self.title_label.setStyleSheet(
             f"color: {COLORS['text_muted']}; font-size: 12px; font-weight: 650;"
         )
-        icon_label = QLabel()
-        from app.ui.theme import set_label_icon
-
-        set_label_icon(icon_label, icon, color="#6c9fff", size=16)
+        self.title_label.setWordWrap(False)
+        title_row.addWidget(self.icon_frame)
         title_row.addWidget(self.title_label)
         title_row.addStretch()
-        title_row.addWidget(icon_label)
         layout.addLayout(title_row)
 
         self.value_label = QLabel("$0.00")
         self.value_label.setStyleSheet(
-            f"color: {COLORS['text']}; font-size: 27px; font-weight: 750;"
+            f"color: {COLORS['text']}; font-size: 24px; font-weight: 750;"
         )
-        layout.addWidget(self.value_label)
+        layout.addWidget(self.value_label, alignment=Qt.AlignmentFlag.AlignBottom)
         self.detail_label = QLabel()
-        self.detail_label.setWordWrap(True)
+        self.detail_label.setWordWrap(False)
         self.detail_label.setStyleSheet(
             f"color: {COLORS['text_dim']}; font-size: 11px;"
         )
@@ -598,6 +622,80 @@ class InvestmentAccountDialog(GenericDialog):
         return str(self.account_type.currentData() or "General")
 
 
+class PortfolioEntryDialog(GenericDialog):
+    """Compact modal used to record a portfolio value or contribution."""
+
+    def __init__(
+        self,
+        accounts: tuple[InvestmentAccountSummary, ...],
+        parent=None,
+        *,
+        selected_account_id: int | None = None,
+    ) -> None:
+        content = QWidget()
+        form = QFormLayout(content)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setHorizontalSpacing(18)
+        form.setVerticalSpacing(12)
+        form.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
+        )
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+
+        self.account = FramelessPopupComboBox()
+        self.account.setObjectName("investmentEntryAccount")
+        self.account.setMaxVisibleItems(8)
+        for account in accounts:
+            masked_number = _masked_account_number(account.account_number_last7)
+            suffix = f" ({masked_number})" if masked_number else ""
+            self.account.addItem(
+                brand_icon(account.institution, size=18),
+                f"{account.account_name} — {account.institution}{suffix}",
+                account.id,
+            )
+        if selected_account_id is not None:
+            selected_index = self.account.findData(selected_account_id)
+            if selected_index >= 0:
+                self.account.setCurrentIndex(selected_index)
+
+        self.entry_date = DatePickerEdit(_qdate(date.today()))
+        self.total = QLineEdit()
+        self.total.setPlaceholderText("0.00")
+        self.contribution = QLineEdit()
+        self.contribution.setPlaceholderText("Optional")
+        for field in (
+            self.account,
+            self.entry_date,
+            self.total,
+            self.contribution,
+        ):
+            field.setMinimumWidth(0)
+            field.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Fixed,
+            )
+        form.addRow("Investment account", self.account)
+        form.addRow("Date", self.entry_date)
+        form.addRow("Total amount", self.total)
+        form.addRow("Contribution", self.contribution)
+
+        self.error_label = QLabel()
+        self.error_label.setWordWrap(True)
+        self.error_label.setStyleSheet(f"color: {COLORS['negative']};")
+        form.addRow("", self.error_label)
+
+        super().__init__(
+            "Add Portfolio Entry",
+            content,
+            parent,
+            submit_label="Add Entry",
+            subtitle="Record an account value and optional contribution.",
+            icon_name="fa6s.chart-line",
+        )
+        self.setMinimumSize(520, 430)
+        self.resize(620, 500)
+
+
 class WorkRrspDetailDialog(GenericDialog):
     def __init__(
         self,
@@ -725,11 +823,13 @@ class WorkRrspDetailDialog(GenericDialog):
 
 
 class InvestmentsPage(QWidget):
-    RECENT_ENTRY_HEIGHT = 72
-    VISIBLE_RECENT_ENTRIES = 4
-    COMPACT_LAYOUT_WIDTH = 1050
-    NARROW_LAYOUT_WIDTH = 760
-    ACCOUNT_ACTION_COLUMN_WIDTH = 120
+    PAGE_MARGIN = 24
+    SECTION_GAP = 14
+    CARD_GAP = 14
+    WIDE_LAYOUT_WIDTH = 1120
+    MEDIUM_LAYOUT_WIDTH = 820
+    ACCOUNT_ACTION_COLUMN_WIDTH = 128
+    MAX_RECENT_ENTRIES = 5
 
     def __init__(self, session_factory=SessionLocal):
         super().__init__()
@@ -737,6 +837,7 @@ class InvestmentsPage(QWidget):
         self.user_id: str | None = None
         self.group_id: int | None = None
         self._accounts: tuple[InvestmentAccountSummary, ...] = ()
+        self._rrsp_card_grids: list[tuple[QGridLayout, list[QFrame]]] = []
         self.setObjectName("investmentsPage")
 
         root_layout = QVBoxLayout(self)
@@ -747,7 +848,7 @@ class InvestmentsPage(QWidget):
         self.page_scroll.setWidgetResizable(True)
         self.page_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.page_scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
         self.page_scroll.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAsNeeded
@@ -762,37 +863,71 @@ class InvestmentsPage(QWidget):
         content = QWidget()
         self.content = content
         content.setObjectName("investmentsContent")
-        content.setMinimumWidth(720)
+        content.setMinimumWidth(0)
         content.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Minimum,
         )
-        layout = QVBoxLayout(content)
-        layout.setContentsMargins(28, 24, 28, 24)
-        layout.setSpacing(18)
+        self.content_layout = QVBoxLayout(content)
+        self.content_layout.setContentsMargins(
+            self.PAGE_MARGIN,
+            18,
+            self.PAGE_MARGIN,
+            self.PAGE_MARGIN,
+        )
+        self.content_layout.setSpacing(self.SECTION_GAP)
         self.page_scroll.setWidget(content)
 
-        add_account_button = QPushButton("Add Investment Account")
-        add_account_button.setObjectName("pageActionButton")
+        self.add_entry_button = QPushButton("Add Portfolio Entry")
+        self.add_entry_button.setObjectName("pageActionButton")
         set_button_icon(
-            add_account_button,
+            self.add_entry_button,
             "fa6s.plus",
             color="#ffffff",
             active_color="#ffffff",
         )
-        add_account_button.clicked.connect(self._open_add_account)
-        layout.addWidget(PageHeader(
+        self.add_entry_button.clicked.connect(lambda: self._open_add_entry())
+        self.add_account_button = QPushButton("Add Investment Account")
+        self.add_account_button.setObjectName("pageActionButton")
+        set_button_icon(
+            self.add_account_button,
+            "fa6s.plus",
+            color="#ffffff",
+            active_color="#ffffff",
+        )
+        self.add_account_button.clicked.connect(self._open_add_account)
+
+        self.header_actions = QWidget()
+        self.header_actions_layout = QGridLayout(self.header_actions)
+        self.header_actions_layout.setContentsMargins(0, 0, 0, 0)
+        self.header_actions_layout.setHorizontalSpacing(10)
+        self.header_actions_layout.setVerticalSpacing(8)
+        self.header_actions_layout.addWidget(self.add_entry_button, 0, 0)
+        self.header_actions_layout.addWidget(self.add_account_button, 0, 1)
+        self.header = PageHeader(
             "Investments",
-            "Track your investment accounts and portfolio snapshots.",
-            add_account_button,
-        ))
+            "Track your investment accounts and portfolio performance.",
+        )
+        self.header_grid = QGridLayout()
+        self.header_grid.setContentsMargins(0, 0, 0, 0)
+        self.header_grid.setHorizontalSpacing(16)
+        self.header_grid.setVerticalSpacing(8)
+        self.header_grid.addWidget(self.header, 0, 0)
+        self.header_grid.addWidget(
+            self.header_actions,
+            0,
+            1,
+            alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+        )
+        self.header_grid.setColumnStretch(0, 1)
+        self.content_layout.addLayout(self.header_grid)
 
         self.period_selector = PeriodSelector()
         self.period_selector.selection_changed.connect(lambda *_: self.reload())
-        layout.addWidget(self.period_selector)
+        self.content_layout.addWidget(self.period_selector)
 
         self.summary_grid = QGridLayout()
-        self.summary_grid.setSpacing(16)
+        self.summary_grid.setSpacing(self.CARD_GAP)
         self.portfolio_card = SummaryCard(
             "Total Portfolio Value", "fa6s.chart-line"
         )
@@ -802,165 +937,585 @@ class InvestmentsPage(QWidget):
         self.accounts_card = SummaryCard(
             "Investment Accounts", "fa6s.building-columns"
         )
-        self.summary_grid.addWidget(self.portfolio_card, 0, 0)
-        self.summary_grid.addWidget(self.contribution_card, 0, 1)
-        self.summary_grid.addWidget(self.accounts_card, 0, 2)
-        for column in range(3):
-            self.summary_grid.setColumnStretch(column, 1)
-        layout.addLayout(self.summary_grid)
+        self.gain_card = SummaryCard("Total Gain/Loss", "fa6s.chart-column")
+        self.summary_cards = (
+            self.portfolio_card,
+            self.contribution_card,
+            self.accounts_card,
+            self.gain_card,
+        )
+        self.content_layout.addLayout(self.summary_grid)
 
-        self.middle_grid = QGridLayout()
-        self.middle_grid.setHorizontalSpacing(16)
-        self.middle_grid.setVerticalSpacing(16)
-        self.chart_card = QFrame()
-        self.chart_card.setObjectName("contentCard")
-        chart_layout = QVBoxLayout(self.chart_card)
-        chart_layout.setContentsMargins(18, 16, 18, 14)
-        chart_title = QLabel("Portfolio Value Over Time")
-        chart_title.setObjectName("sectionTitle")
-        chart_layout.addWidget(chart_title)
+        self.empty_panel = self._build_empty_panel()
+        self.content_layout.addWidget(self.empty_panel, 1)
+
+        self.chart_container = QWidget()
+        self.chart_grid = QGridLayout()
+        self.chart_grid.setContentsMargins(0, 0, 0, 0)
+        self.chart_grid.setHorizontalSpacing(self.CARD_GAP)
+        self.chart_grid.setVerticalSpacing(self.CARD_GAP)
+        self.chart_container.setLayout(self.chart_grid)
         self.chart = PortfolioChart()
-        chart_layout.addWidget(self.chart, 1)
-        self.middle_grid.addWidget(self.chart_card, 0, 0, 1, 2)
-        self.entry_panel = self._build_entry_panel()
-        self.middle_grid.addWidget(self.entry_panel, 0, 2)
-        self.middle_grid.setColumnStretch(0, 1)
-        self.middle_grid.setColumnStretch(1, 1)
-        self.middle_grid.setColumnStretch(2, 1)
-        layout.addLayout(self.middle_grid, 5)
+        self.portfolio_chart_card = self._build_chart_panel(
+            "Portfolio Performance",
+            "Total value of all investment accounts over time.",
+            self.chart,
+        )
+        self.account_selector = FramelessPopupComboBox()
+        self.account_selector.setObjectName("investmentChartAccountSelector")
+        self.account_selector.setMinimumWidth(190)
+        self.account_selector.setMaxVisibleItems(8)
+        self.account_selector.currentIndexChanged.connect(
+            self._account_chart_changed
+        )
+        self.account_chart = PortfolioChart(
+            line_color=COLORS["positive"],
+            empty_text="No history for this account yet",
+        )
+        self.account_chart_card = self._build_chart_panel(
+            "Account Performance",
+            "Performance of a single investment account.",
+            self.account_chart,
+            self.account_selector,
+        )
+        self.content_layout.addWidget(self.chart_container)
 
-        self.bottom_grid = QGridLayout()
-        self.bottom_grid.setHorizontalSpacing(16)
-        self.bottom_grid.setVerticalSpacing(16)
+        self.activity_container = QWidget()
+        self.activity_grid = QGridLayout()
+        self.activity_grid.setContentsMargins(0, 0, 0, 0)
+        self.activity_grid.setHorizontalSpacing(self.CARD_GAP)
+        self.activity_grid.setVerticalSpacing(self.CARD_GAP)
+        self.activity_container.setLayout(self.activity_grid)
         self.accounts_panel = self._build_accounts_panel()
         self.recent_panel = self._build_recent_panel()
-        self.bottom_grid.addWidget(self.accounts_panel, 0, 0, 1, 2)
-        self.bottom_grid.addWidget(self.recent_panel, 0, 2)
-        self.bottom_grid.setColumnStretch(0, 1)
-        self.bottom_grid.setColumnStretch(1, 1)
-        self.bottom_grid.setColumnStretch(2, 1)
-        layout.addLayout(self.bottom_grid, 5)
+        self.content_layout.addWidget(self.activity_container)
 
         self.work_rrsp_panel = self._build_work_rrsp_panel()
-        layout.addWidget(self.work_rrsp_panel)
+        self.content_layout.addWidget(self.work_rrsp_panel)
 
-        self._layout_mode: tuple[bool, bool] | None = None
+        self._layout_mode: str | None = None
         self._update_responsive_layout(self.width())
 
-    def _build_entry_panel(self) -> QFrame:
+        self.setStyleSheet("""
+            QFrame#investmentSummaryIcon, QFrame#investmentSectionIcon {
+                background: #13294a;
+                border: 1px solid #1d4777;
+                border-radius: 9px;
+            }
+            QLabel#investmentSectionSubtitle {
+                color: #8f9baa;
+                font-size: 11px;
+            }
+            QFrame#investmentEmptyPanel {
+                background: #151b21;
+                border: 1px solid #303b46;
+                border-radius: 14px;
+            }
+            QLabel#investmentEmptyTitle {
+                color: #f2f4f7;
+                font-size: 24px;
+                font-weight: 700;
+            }
+            QLabel#investmentEmptyMessage {
+                color: #aab5c3;
+                font-size: 14px;
+            }
+            QFrame#investmentEmptyHeroIcon, QFrame#investmentEmptyStepIcon {
+                background: #152945;
+                border: 1px solid #1e416b;
+                border-radius: 28px;
+            }
+            QFrame#investmentEmptyHeroIcon {
+                border-radius: 44px;
+            }
+            QLabel#investmentEmptyStepNumber {
+                color: #ffffff;
+                background: #2387ff;
+                border: 1px solid #59a6ff;
+                border-radius: 11px;
+                font-size: 11px;
+                font-weight: 700;
+            }
+            QLabel#investmentEmptyStepTitle {
+                color: #f2f4f7;
+                font-size: 13px;
+                font-weight: 700;
+            }
+            QLabel#investmentEmptyStepText, QLabel#investmentEmptyDividerLabel {
+                color: #98a6b6;
+                font-size: 11px;
+            }
+            QFrame#investmentEmptyDivider {
+                color: #33404c;
+                background: #33404c;
+                border: none;
+                max-height: 1px;
+            }
+            QComboBox#investmentChartAccountSelector {
+                min-height: 20px;
+                padding-top: 6px;
+                padding-bottom: 6px;
+            }
+            QScrollArea#investmentsScroll QScrollBar:vertical {
+                width: 9px;
+                margin: 3px 1px;
+                background: transparent;
+            }
+            QScrollArea#investmentsScroll QScrollBar::handle:vertical {
+                min-height: 28px;
+                background: #4a5058;
+                border-radius: 4px;
+            }
+            QScrollArea#investmentsScroll QScrollBar::add-line:vertical,
+            QScrollArea#investmentsScroll QScrollBar::sub-line:vertical {
+                height: 0;
+            }
+        """)
+
+    @staticmethod
+    def _section_heading(
+        title: str,
+        subtitle: str,
+        icon_name: str,
+        trailing: QWidget | None = None,
+    ) -> QWidget:
+        heading = QWidget()
+        layout = QHBoxLayout(heading)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        icon_frame = QFrame()
+        icon_frame.setObjectName("investmentSectionIcon")
+        icon_frame.setFixedSize(36, 36)
+        icon_layout = QVBoxLayout(icon_frame)
+        icon_layout.setContentsMargins(0, 0, 0, 0)
+        icon = QLabel()
+        set_label_icon(icon, icon_name, color="#42a0ff", size=18)
+        icon_layout.addWidget(icon, alignment=Qt.AlignmentFlag.AlignCenter)
+        labels = QVBoxLayout()
+        labels.setSpacing(1)
+        title_label = QLabel(title)
+        title_label.setObjectName("sectionTitle")
+        subtitle_label = QLabel(subtitle)
+        subtitle_label.setObjectName("investmentSectionSubtitle")
+        subtitle_label.setWordWrap(True)
+        labels.addWidget(title_label)
+        labels.addWidget(subtitle_label)
+        layout.addWidget(icon_frame, alignment=Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(labels, 1)
+        if trailing is not None:
+            layout.addWidget(trailing, alignment=Qt.AlignmentFlag.AlignTop)
+        return heading
+
+    def _build_chart_panel(
+        self,
+        title: str,
+        subtitle: str,
+        chart: PortfolioChart,
+        selector: QWidget | None = None,
+    ) -> QFrame:
         panel = QFrame()
         panel.setObjectName("contentCard")
+        panel.setMinimumWidth(0)
         panel.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
         )
-        panel_layout = QVBoxLayout(panel)
-        panel_layout.setContentsMargins(18, 16, 18, 18)
-        panel_layout.setSpacing(12)
-        title = QLabel("Add Portfolio Entry")
-        title.setObjectName("sectionTitle")
-        panel_layout.addWidget(title)
-
-        form = QFormLayout()
-        self.entry_form = form
-        form.setSpacing(10)
-        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
-        form.setFieldGrowthPolicy(
-            QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(14, 12, 14, 10)
+        layout.setSpacing(6)
+        header = QWidget()
+        header_grid = QGridLayout(header)
+        header_grid.setContentsMargins(0, 0, 0, 0)
+        header_grid.setHorizontalSpacing(10)
+        header_grid.setVerticalSpacing(6)
+        heading = self._section_heading(
+            title,
+            subtitle,
+            "fa6s.chart-line",
         )
-        form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
-        self.entry_account = AppComboBox()
-        self.entry_date = DatePickerEdit(_qdate(date.today()))
-        self.entry_total = QLineEdit()
-        self.entry_total.setPlaceholderText("0.00")
-        self.entry_contribution = QLineEdit()
-        self.entry_contribution.setPlaceholderText("Optional")
-        for field in (
-            self.entry_account,
-            self.entry_date,
-            self.entry_total,
-            self.entry_contribution,
-        ):
-            field.setMinimumWidth(0)
-            field.setSizePolicy(
-                QSizePolicy.Policy.Expanding,
-                QSizePolicy.Policy.Fixed,
+        header_grid.addWidget(heading, 0, 0)
+        header_grid.setColumnStretch(0, 1)
+        if selector is not None:
+            header_grid.addWidget(
+                selector,
+                0,
+                1,
+                alignment=Qt.AlignmentFlag.AlignRight
+                | Qt.AlignmentFlag.AlignTop,
             )
-        form.addRow("Investment account", self.entry_account)
-        form.addRow("Date", self.entry_date)
-        form.addRow("Total amount", self.entry_total)
-        form.addRow("Contribution", self.entry_contribution)
-        panel_layout.addLayout(form)
-        self.entry_error = QLabel()
-        self.entry_error.setWordWrap(True)
-        self.entry_error.setStyleSheet(f"color: {COLORS['negative']};")
-        panel_layout.addWidget(self.entry_error)
-        self.save_entry_button = QPushButton("Save Entry")
-        self.save_entry_button.setObjectName("primaryButton")
+        panel.header_grid = header_grid
+        panel.heading = heading
+        panel.selector = selector
+        layout.addWidget(header)
+        layout.addWidget(chart, 1)
+        return panel
+
+    def _build_empty_panel(self) -> QFrame:
+        panel = QFrame()
+        panel.setObjectName("investmentEmptyPanel")
+        panel.setMinimumHeight(420)
+        panel.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        layout = QVBoxLayout(panel)
+        self.empty_panel_layout = layout
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        layout.setContentsMargins(42, 24, 42, 28)
+        layout.setSpacing(10)
+
+        self.empty_hero = QWidget()
+        self.empty_hero.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Minimum,
+        )
+        hero_layout = QVBoxLayout(self.empty_hero)
+        hero_layout.setContentsMargins(0, 0, 0, 0)
+        hero_layout.setSpacing(10)
+
+        self.empty_hero_icon = QFrame()
+        self.empty_hero_icon.setObjectName("investmentEmptyHeroIcon")
+        self.empty_hero_icon.setFixedSize(88, 88)
+        hero_icon_layout = QVBoxLayout(self.empty_hero_icon)
+        hero_icon_layout.setContentsMargins(0, 0, 0, 0)
+        icon = QLabel()
+        set_label_icon(icon, "fa6s.chart-column", color="#3597ff", size=40)
+        hero_icon_layout.addWidget(icon, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.empty_title = QLabel("No investment accounts yet")
+        self.empty_title.setObjectName("investmentEmptyTitle")
+        self.empty_title.setTextFormat(Qt.TextFormat.PlainText)
+        self.empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_title.setWordWrap(False)
+        self.empty_title.setMinimumHeight(38)
+        self.empty_title.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Minimum,
+        )
+        self.empty_message = QLabel(
+            "Add your first investment account to start tracking portfolio "
+            "value, contributions, and performance."
+        )
+        self.empty_message.setObjectName("investmentEmptyMessage")
+        self.empty_message.setTextFormat(Qt.TextFormat.PlainText)
+        self.empty_message.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_message.setWordWrap(True)
+        self.empty_message.setMaximumWidth(560)
+        self.empty_message.setMinimumHeight(38)
+        self.empty_message.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Minimum,
+        )
+        self.empty_add_account_button = QPushButton("Add Investment Account")
+        self.empty_add_account_button.setObjectName("pageActionButton")
         set_button_icon(
-            self.save_entry_button,
+            self.empty_add_account_button,
             "fa6s.plus",
             color="#ffffff",
             active_color="#ffffff",
         )
-        self.save_entry_button.clicked.connect(self._save_entry)
-        panel_layout.addWidget(self.save_entry_button)
-        panel_layout.addStretch()
+        self.empty_add_account_button.clicked.connect(self._open_add_account)
+        hero_layout.addWidget(
+            self.empty_hero_icon,
+            alignment=Qt.AlignmentFlag.AlignCenter,
+        )
+        hero_layout.addWidget(self.empty_title)
+        message_row = QHBoxLayout()
+        message_row.setContentsMargins(0, 0, 0, 0)
+        message_row.addStretch(1)
+        message_row.addWidget(self.empty_message, 4)
+        message_row.addStretch(1)
+        hero_layout.addLayout(message_row)
+        hero_layout.addWidget(
+            self.empty_add_account_button,
+            alignment=Qt.AlignmentFlag.AlignCenter,
+        )
+        layout.addWidget(self.empty_hero)
+
+        self.empty_divider = QWidget()
+        self.empty_divider.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        divider = QHBoxLayout(self.empty_divider)
+        divider.setContentsMargins(0, 0, 0, 0)
+        divider.setSpacing(12)
+        left_line = QFrame()
+        left_line.setObjectName("investmentEmptyDivider")
+        left_line.setFrameShape(QFrame.Shape.HLine)
+        right_line = QFrame()
+        right_line.setObjectName("investmentEmptyDivider")
+        right_line.setFrameShape(QFrame.Shape.HLine)
+        self.empty_divider_label = QLabel("How it works")
+        self.empty_divider_label.setObjectName("investmentEmptyDividerLabel")
+        divider.addWidget(left_line, 1)
+        divider.addWidget(self.empty_divider_label)
+        divider.addWidget(right_line, 1)
+        layout.addStretch(1)
+        layout.addWidget(self.empty_divider)
+
+        self.empty_steps_grid = QGridLayout()
+        self.empty_steps_grid.setContentsMargins(0, 4, 0, 0)
+        self.empty_steps_grid.setHorizontalSpacing(16)
+        self.empty_steps_grid.setVerticalSpacing(12)
+        self.empty_steps = (
+            self._build_empty_step(
+                1,
+                "fa6s.building-columns",
+                "Add an account",
+                "Connect your investment account (e.g. brokerage or retirement).",
+            ),
+            self._build_empty_step(
+                2,
+                "fa6s.file-lines",
+                "Add portfolio entries",
+                "Record purchases, contributions, and other investment activity.",
+            ),
+            self._build_empty_step(
+                3,
+                "fa6s.chart-line",
+                "Track performance",
+                "View portfolio value, contributions, and gain/loss over time.",
+            ),
+        )
+        self.empty_step_arrows = (QLabel(), QLabel())
+        for arrow in self.empty_step_arrows:
+            set_label_icon(arrow, "fa6s.chevron-right", color="#4aa3ff", size=16)
+        layout.addLayout(self.empty_steps_grid)
+        layout.addStretch(1)
         return panel
+
+    @staticmethod
+    def _build_empty_step(
+        number: int,
+        icon_name: str,
+        title: str,
+        description: str,
+    ) -> QWidget:
+        step = QWidget()
+        step.setMinimumWidth(0)
+        step.setMinimumHeight(76)
+        step.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Minimum,
+        )
+        step_layout = QHBoxLayout(step)
+        step_layout.setContentsMargins(0, 0, 0, 0)
+        step_layout.setSpacing(12)
+
+        icon_stack = QWidget()
+        icon_stack.setFixedSize(72, 68)
+        icon_frame = QFrame(icon_stack)
+        icon_frame.setObjectName("investmentEmptyStepIcon")
+        icon_frame.setGeometry(0, 8, 56, 56)
+        icon_layout = QVBoxLayout(icon_frame)
+        icon_layout.setContentsMargins(0, 0, 0, 0)
+        icon = QLabel()
+        set_label_icon(icon, icon_name, color="#4aa3ff", size=24)
+        icon_layout.addWidget(icon, alignment=Qt.AlignmentFlag.AlignCenter)
+        badge = QLabel(str(number), icon_stack)
+        badge.setObjectName("investmentEmptyStepNumber")
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setGeometry(48, 0, 24, 24)
+
+        text_layout = QVBoxLayout()
+        text_layout.setContentsMargins(0, 8, 0, 0)
+        text_layout.setSpacing(4)
+        title_label = QLabel(title)
+        title_label.setObjectName("investmentEmptyStepTitle")
+        title_label.setWordWrap(True)
+        title_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Minimum,
+        )
+        description_label = QLabel(description)
+        description_label.setObjectName("investmentEmptyStepText")
+        description_label.setWordWrap(True)
+        description_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Minimum,
+        )
+        text_layout.addWidget(title_label)
+        text_layout.addWidget(description_label)
+        text_layout.addStretch()
+        step_layout.addWidget(icon_stack, alignment=Qt.AlignmentFlag.AlignTop)
+        step_layout.addLayout(text_layout, 1)
+        return step
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._update_responsive_layout(event.size().width())
+        self._update_responsive_layout(self.page_scroll.viewport().width())
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt API spelling
+        super().showEvent(event)
+        self._update_responsive_layout(self.page_scroll.viewport().width())
 
     def _update_responsive_layout(self, width: int) -> None:
-        compact = width < self.COMPACT_LAYOUT_WIDTH
-        narrow = width < self.NARROW_LAYOUT_WIDTH
-        mode = (compact, narrow)
+        if width >= self.WIDE_LAYOUT_WIDTH:
+            mode = "wide"
+        elif width >= self.MEDIUM_LAYOUT_WIDTH:
+            mode = "medium"
+        else:
+            mode = "narrow"
+        self._update_empty_panel_metrics(mode)
         if mode == self._layout_mode:
             return
         self._layout_mode = mode
 
-        for card in (
-            self.portfolio_card,
-            self.contribution_card,
-            self.accounts_card,
-        ):
-            self.summary_grid.removeWidget(card)
-        if narrow:
-            self.summary_grid.setColumnStretch(0, 1)
-            self.summary_grid.setColumnStretch(1, 0)
-            self.summary_grid.setColumnStretch(2, 0)
-            self.summary_grid.addWidget(self.portfolio_card, 0, 0)
-            self.summary_grid.addWidget(self.contribution_card, 1, 0)
-            self.summary_grid.addWidget(self.accounts_card, 2, 0)
+        self.header_grid.removeWidget(self.header)
+        self.header_grid.removeWidget(self.header_actions)
+        self.header_actions_layout.removeWidget(self.add_entry_button)
+        self.header_actions_layout.removeWidget(self.add_account_button)
+        if mode == "narrow":
+            self.header_actions_layout.addWidget(self.add_entry_button, 0, 0)
+            self.header_actions_layout.addWidget(self.add_account_button, 1, 0)
+            self.header_grid.addWidget(self.header, 0, 0)
+            self.header_grid.addWidget(
+                self.header_actions,
+                1,
+                0,
+                alignment=Qt.AlignmentFlag.AlignLeft,
+            )
+            self.header_grid.setColumnStretch(1, 0)
         else:
-            for column in range(3):
-                self.summary_grid.setColumnStretch(column, 1)
-            self.summary_grid.addWidget(self.portfolio_card, 0, 0)
-            self.summary_grid.addWidget(self.contribution_card, 0, 1)
-            self.summary_grid.addWidget(self.accounts_card, 0, 2)
+            self.header_actions_layout.addWidget(self.add_entry_button, 0, 0)
+            self.header_actions_layout.addWidget(self.add_account_button, 0, 1)
+            self.header_grid.addWidget(self.header, 0, 0)
+            self.header_grid.addWidget(
+                self.header_actions,
+                0,
+                1,
+                alignment=(
+                    Qt.AlignmentFlag.AlignRight
+                    | Qt.AlignmentFlag.AlignVCenter
+                ),
+            )
+            self.header_grid.setColumnStretch(1, 0)
 
-        self.middle_grid.removeWidget(self.chart_card)
-        self.middle_grid.removeWidget(self.entry_panel)
-        self.bottom_grid.removeWidget(self.accounts_panel)
-        self.bottom_grid.removeWidget(self.recent_panel)
-        if compact:
-            for grid in (self.middle_grid, self.bottom_grid):
-                grid.setColumnStretch(0, 1)
-                grid.setColumnStretch(1, 0)
-                grid.setColumnStretch(2, 0)
-            self.middle_grid.addWidget(self.chart_card, 0, 0)
-            self.middle_grid.addWidget(self.entry_panel, 1, 0)
-            self.bottom_grid.addWidget(self.accounts_panel, 0, 0)
-            self.bottom_grid.addWidget(self.recent_panel, 1, 0)
+        for card in self.summary_cards:
+            self.summary_grid.removeWidget(card)
+        summary_columns = 4 if mode == "wide" else 2 if mode == "medium" else 1
+        for index, card in enumerate(self.summary_cards):
+            self.summary_grid.addWidget(
+                card,
+                index // summary_columns,
+                index % summary_columns,
+            )
+        for column in range(4):
+            self.summary_grid.setColumnStretch(
+                column,
+                1 if column < summary_columns else 0,
+            )
+
+        for grid, widgets in (
+            (
+                self.chart_grid,
+                (self.portfolio_chart_card, self.account_chart_card),
+            ),
+            (self.activity_grid, (self.accounts_panel, self.recent_panel)),
+        ):
+            for widget in widgets:
+                grid.removeWidget(widget)
+
+        side_by_side = mode == "wide"
+        if side_by_side:
+            self.chart_grid.addWidget(self.portfolio_chart_card, 0, 0)
+            self.chart_grid.addWidget(self.account_chart_card, 0, 1)
+            self.chart_grid.setColumnStretch(0, 1)
+            self.chart_grid.setColumnStretch(1, 1)
+            self.activity_grid.addWidget(self.accounts_panel, 0, 0)
+            self.activity_grid.addWidget(self.recent_panel, 0, 1)
+            self.activity_grid.setColumnStretch(0, 3)
+            self.activity_grid.setColumnStretch(1, 2)
         else:
-            for grid in (self.middle_grid, self.bottom_grid):
-                for column in range(3):
-                    grid.setColumnStretch(column, 1)
-            self.middle_grid.addWidget(self.chart_card, 0, 0, 1, 2)
-            self.middle_grid.addWidget(self.entry_panel, 0, 2)
-            self.bottom_grid.addWidget(self.accounts_panel, 0, 0, 1, 2)
-            self.bottom_grid.addWidget(self.recent_panel, 0, 2)
+            self.chart_grid.addWidget(self.portfolio_chart_card, 0, 0)
+            self.chart_grid.addWidget(self.account_chart_card, 1, 0)
+            self.chart_grid.setColumnStretch(0, 1)
+            self.chart_grid.setColumnStretch(1, 0)
+            self.activity_grid.addWidget(self.accounts_panel, 0, 0)
+            self.activity_grid.addWidget(self.recent_panel, 1, 0)
+            self.activity_grid.setColumnStretch(0, 1)
+            self.activity_grid.setColumnStretch(1, 0)
+
+        self._reflow_rrsp_cards(stack=mode == "narrow")
+        self._reflow_chart_header(
+            self.account_chart_card,
+            stack=mode == "narrow",
+        )
+        self._reflow_empty_steps(stack=mode != "wide")
+
+    def _update_empty_panel_metrics(self, mode: str) -> None:
+        """Keep empty-state text readable as the scroll viewport changes size."""
+        side_margin = 42 if mode == "wide" else 32 if mode == "medium" else 24
+        compact_height = self.page_scroll.viewport().height() < 680
+        top_margin = 18 if compact_height else 24
+        bottom_margin = 20 if compact_height else 28
+        self.empty_panel_layout.setContentsMargins(
+            side_margin,
+            top_margin,
+            side_margin,
+            bottom_margin,
+        )
+        self.empty_panel_layout.setSpacing(8 if compact_height else 10)
+
+        wrap_title = mode == "narrow"
+        self.empty_title.setWordWrap(wrap_title)
+        self.empty_title.setMinimumHeight(64 if wrap_title else 38)
+        self.empty_message.setMinimumHeight(58 if mode == "narrow" else 38)
+        for step in self.empty_steps:
+            step.setMinimumHeight(88 if mode != "wide" else 76)
+
+    def _reflow_empty_steps(self, *, stack: bool) -> None:
+        for step in self.empty_steps:
+            self.empty_steps_grid.removeWidget(step)
+        for arrow in self.empty_step_arrows:
+            self.empty_steps_grid.removeWidget(arrow)
+
+        if stack:
+            for row, step in enumerate(self.empty_steps):
+                self.empty_steps_grid.addWidget(step, row, 0)
+            for arrow in self.empty_step_arrows:
+                arrow.hide()
+            self.empty_steps_grid.setColumnStretch(0, 1)
+            for column in range(1, 5):
+                self.empty_steps_grid.setColumnStretch(column, 0)
+            return
+
+        for index, step in enumerate(self.empty_steps):
+            self.empty_steps_grid.addWidget(step, 0, index * 2)
+            self.empty_steps_grid.setColumnStretch(index * 2, 1)
+            if index < len(self.empty_step_arrows):
+                arrow = self.empty_step_arrows[index]
+                arrow.show()
+                self.empty_steps_grid.addWidget(
+                    arrow,
+                    0,
+                    index * 2 + 1,
+                    alignment=Qt.AlignmentFlag.AlignCenter,
+                )
+                self.empty_steps_grid.setColumnStretch(index * 2 + 1, 0)
+
+    @staticmethod
+    def _reflow_chart_header(panel: QFrame, *, stack: bool) -> None:
+        selector = panel.selector
+        if selector is None:
+            return
+        panel.header_grid.removeWidget(panel.heading)
+        panel.header_grid.removeWidget(selector)
+        panel.header_grid.addWidget(panel.heading, 0, 0)
+        panel.header_grid.addWidget(
+            selector,
+            1 if stack else 0,
+            0 if stack else 1,
+            alignment=(
+                Qt.AlignmentFlag.AlignLeft
+                if stack
+                else Qt.AlignmentFlag.AlignRight
+            )
+            | Qt.AlignmentFlag.AlignTop,
+        )
+        panel.header_grid.setColumnStretch(0, 1)
+        panel.header_grid.setColumnStretch(1, 0)
 
     def _build_accounts_panel(self) -> QFrame:
         panel = QFrame()
@@ -971,9 +1526,23 @@ class InvestmentsPage(QWidget):
         )
         panel_layout = QVBoxLayout(panel)
         panel_layout.setContentsMargins(0, 0, 0, 0)
-        heading = QLabel("Investment Accounts")
-        heading.setObjectName("sectionTitle")
-        heading.setContentsMargins(18, 14, 18, 4)
+        self.accounts_panel_add_button = QPushButton("Add Account")
+        self.accounts_panel_add_button.setObjectName("secondaryActionButton")
+        set_button_icon(
+            self.accounts_panel_add_button,
+            "fa6s.plus",
+            color="#61adff",
+            active_color="#ffffff",
+            size=13,
+        )
+        self.accounts_panel_add_button.clicked.connect(self._open_add_account)
+        heading = self._section_heading(
+            "Investment Accounts",
+            "Linked accounts and their current balances.",
+            "fa6s.building-columns",
+            self.accounts_panel_add_button,
+        )
+        heading.setContentsMargins(14, 12, 14, 3)
         panel_layout.addWidget(heading)
         self.accounts_empty = QLabel("No investment accounts yet")
         self.accounts_empty.setObjectName("emptyLabel")
@@ -988,7 +1557,21 @@ class InvestmentsPage(QWidget):
             "Last Updated",
             "Action",
         ))
-        self.accounts_table.setMinimumHeight(200)
+        self.accounts_table.setMinimumHeight(190)
+        self.accounts_table.setMaximumHeight(230)
+        self.accounts_table.verticalHeader().setDefaultSectionSize(42)
+        self.accounts_table.horizontalHeader().setFixedHeight(38)
+        self.accounts_table.horizontalHeader().setMinimumSectionSize(82)
+        for column in (0, 1):
+            self.accounts_table.horizontalHeader().setSectionResizeMode(
+                column,
+                QHeaderView.ResizeMode.Stretch,
+            )
+        for column in (2, 3, 4):
+            self.accounts_table.horizontalHeader().setSectionResizeMode(
+                column,
+                QHeaderView.ResizeMode.ResizeToContents,
+            )
         self.accounts_table.horizontalHeader().setSectionResizeMode(
             5, QHeaderView.ResizeMode.Fixed
         )
@@ -1009,53 +1592,57 @@ class InvestmentsPage(QWidget):
             QSizePolicy.Policy.Expanding,
         )
         panel_layout = QVBoxLayout(panel)
-        panel_layout.setContentsMargins(18, 16, 18, 18)
-        panel_layout.setSpacing(10)
-        title = QLabel("Recent Portfolio Entries")
-        title.setObjectName("sectionTitle")
-        panel_layout.addWidget(title)
-
-        self.recent_scroll = QScrollArea()
-        self.recent_scroll.setObjectName("investmentRecentScroll")
-        self.recent_scroll.setWidgetResizable(True)
-        self.recent_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.recent_scroll.setHorizontalScrollBarPolicy(
+        panel_layout.setContentsMargins(0, 0, 0, 0)
+        panel_layout.setSpacing(0)
+        heading = self._section_heading(
+            "Recent Portfolio Entries",
+            "Latest values and contributions for this period.",
+            "fa6s.file-lines",
+        )
+        heading.setContentsMargins(14, 12, 14, 3)
+        panel_layout.addWidget(heading)
+        self.recent_table = GenericTable((
+            "Date",
+            "Account",
+            "Value",
+            "Contribution",
+        ))
+        self.recent_table.setMinimumHeight(190)
+        self.recent_table.setMaximumHeight(230)
+        self.recent_table.verticalHeader().setDefaultSectionSize(30)
+        self.recent_table.horizontalHeader().setFixedHeight(38)
+        self.recent_table.horizontalHeader().setMinimumSectionSize(76)
+        self.recent_table.horizontalHeader().setSectionResizeMode(
+            1,
+            QHeaderView.ResizeMode.Stretch,
+        )
+        for column in (0, 2, 3):
+            self.recent_table.horizontalHeader().setSectionResizeMode(
+                column,
+                QHeaderView.ResizeMode.ResizeToContents,
+            )
+        self.recent_table.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
-        self.recent_scroll.setVerticalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAsNeeded
-        )
-        viewport_height = (
-            self.VISIBLE_RECENT_ENTRIES * self.RECENT_ENTRY_HEIGHT
-            + (self.VISIBLE_RECENT_ENTRIES - 1) * 8
-        )
-        self.recent_scroll.setFixedHeight(viewport_height)
-        self.recent_scroll.setStyleSheet(
-            "QScrollArea#investmentRecentScroll { background: transparent; border: none; }"
-            "QScrollArea#investmentRecentScroll > QWidget > QWidget "
-            "{ background: transparent; }"
-        )
-
-        self.recent_entries = QWidget()
-        self.recent_entries.setObjectName("investmentRecentEntries")
-        self.recent_layout = QVBoxLayout(self.recent_entries)
-        self.recent_layout.setContentsMargins(0, 0, 4, 0)
-        self.recent_layout.setSpacing(8)
-        self.recent_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.recent_scroll.setWidget(self.recent_entries)
-        panel_layout.addWidget(self.recent_scroll)
-        panel_layout.addStretch()
+        panel_layout.addWidget(self.recent_table)
+        self.recent_empty = QLabel("No portfolio entries for this period")
+        self.recent_empty.setObjectName("emptyLabel")
+        self.recent_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.recent_empty.setMinimumHeight(120)
+        panel_layout.addWidget(self.recent_empty)
         return panel
 
     def _build_work_rrsp_panel(self) -> QFrame:
         panel = QFrame()
         panel.setObjectName("contentCard")
         panel_layout = QVBoxLayout(panel)
-        panel_layout.setContentsMargins(18, 16, 18, 18)
-        panel_layout.setSpacing(12)
-        title = QLabel("Work RRSP Contributions")
-        title.setObjectName("sectionTitle")
-        panel_layout.addWidget(title)
+        panel_layout.setContentsMargins(14, 12, 14, 14)
+        panel_layout.setSpacing(9)
+        panel_layout.addWidget(self._section_heading(
+            "Work RRSP Contributions",
+            "Payroll-derived employee and employer contributions.",
+            "fa6s.piggy-bank",
+        ))
         self.work_rrsp_empty = QLabel("No work RRSP accounts configured.")
         self.work_rrsp_empty.setObjectName("emptyLabel")
         panel_layout.addWidget(self.work_rrsp_empty)
@@ -1074,11 +1661,17 @@ class InvestmentsPage(QWidget):
         *,
         user_id: str | None = None,
         group_id: int | None = None,
+        reload: bool = True,
     ) -> None:
         self.user_id = user_id
         self.group_id = group_id
+        enabled = user_id is not None or group_id is not None
+        self.add_account_button.setEnabled(enabled)
+        self.accounts_panel_add_button.setEnabled(enabled)
+        self.empty_add_account_button.setEnabled(enabled)
         self.period_selector.reset(emit=False)
-        self.reload()
+        if reload:
+            self.reload()
 
     def reload(self) -> None:
         if self.user_id is None and self.group_id is None:
@@ -1098,10 +1691,9 @@ class InvestmentsPage(QWidget):
             group_id=self.group_id,
             session_factory=self.session_factory,
         )
-        total_value = get_total_portfolio_value(
-            user_id=self.user_id,
-            group_id=self.group_id,
-            session_factory=self.session_factory,
+        latest_total_value = sum(
+            (account.current_value for account in self._accounts),
+            Decimal("0.00"),
         )
 
         selected_month = self.period_selector.selected_month
@@ -1135,6 +1727,13 @@ class InvestmentsPage(QWidget):
             end_date=history_end,
             session_factory=self.session_factory,
         )
+        total_value = (
+            history[-1].total_value
+            if self.period_selector.period == "monthly" and history
+            else latest_total_value
+        )
+        if self.period_selector.period == "monthly" and not history:
+            total_value = Decimal()
         previous_portfolio = self._portfolio_before_month(selected_month)
         self._update_cards(
             total_value,
@@ -1142,12 +1741,14 @@ class InvestmentsPage(QWidget):
             contributions,
             previous_contributions,
             contribution_label,
+            history,
         )
         self.chart.set_data(history, end_date=history_end)
+        self._populate_account_selector(history_end)
         self._render_accounts()
         self._render_work_rrsp_accounts()
         self._render_recent(start_date, history_end)
-        self._refresh_entry_accounts()
+        self._set_content_state(bool(self._accounts))
 
     def _portfolio_before_month(self, month: tuple[int, int]) -> Decimal | None:
         previous = _previous_month(month)
@@ -1167,6 +1768,7 @@ class InvestmentsPage(QWidget):
         contributions: Decimal,
         previous_contributions: Decimal | None,
         contribution_label: str,
+        history: tuple[PortfolioPoint, ...],
     ) -> None:
         if previous_value is None:
             portfolio_detail = "No previous-month value available"
@@ -1208,29 +1810,106 @@ class InvestmentsPage(QWidget):
             f"{institutions} institution{'s' if institutions != 1 else ''}",
         )
 
+        baseline = previous_value
+        baseline_label = "vs previous month"
+        if self.period_selector.period == "all":
+            baseline = history[0].total_value if history else None
+            baseline_label = "since first entry"
+        if baseline is None:
+            self.gain_card.set_data(
+                "$0.00",
+                "No comparison history available",
+                COLORS["text_dim"],
+            )
+        else:
+            gain = total_value - baseline
+            return_percent = (
+                gain / abs(baseline) * 100 if baseline else Decimal()
+            )
+            self.gain_card.set_data(
+                _signed_currency(gain),
+                f"{return_percent:+.1f}% {baseline_label}",
+                COLORS["positive"] if gain >= 0 else COLORS["negative"],
+            )
+
+    def _set_content_state(self, has_accounts: bool) -> None:
+        self.empty_panel.setVisible(not has_accounts)
+        self.add_entry_button.setEnabled(has_accounts)
+        self.chart_container.setVisible(has_accounts)
+        self.activity_container.setVisible(has_accounts)
+        self.work_rrsp_panel.setVisible(has_accounts)
+
     def _render_empty(self) -> None:
         self.portfolio_card.set_data("$0.00", "No portfolio history")
         self.contribution_card.set_data("$0.00", "No contributions recorded")
         self.accounts_card.set_data("0", "0 institutions")
+        self.gain_card.set_data("$0.00", "No comparison history")
         self.chart.set_data(())
+        self.account_chart.set_data(())
+        with QSignalBlocker(self.account_selector):
+            self.account_selector.clear()
         self.accounts_table.set_rows(())
         self.accounts_empty.show()
         self._clear_layout(self.work_rrsp_layout)
         self.work_rrsp_empty.show()
         self.work_rrsp_content.hide()
-        self._clear_layout(self.recent_layout)
-        self.recent_entries.setMinimumHeight(0)
-        empty = QLabel("No portfolio entries yet")
-        empty.setObjectName("emptyLabel")
-        self.recent_layout.addWidget(empty)
-        self.entry_account.clear()
-        self.save_entry_button.setEnabled(False)
+        self.recent_table.set_rows(())
+        self.recent_empty.show()
+        self._set_content_state(False)
+
+    def _populate_account_selector(self, history_end: date) -> None:
+        selected_id = self.account_selector.currentData()
+        available_ids = {account.id for account in self._accounts}
+        if selected_id not in available_ids:
+            selected_id = self._accounts[0].id if self._accounts else None
+        with QSignalBlocker(self.account_selector):
+            self.account_selector.clear()
+            for account in self._accounts:
+                self.account_selector.addItem(
+                    brand_icon(account.institution, size=18),
+                    f"{account.account_name} — {account.institution}",
+                    account.id,
+                )
+            if selected_id is not None:
+                index = self.account_selector.findData(selected_id)
+                self.account_selector.setCurrentIndex(max(index, 0))
+        self.account_selector.setEnabled(bool(self._accounts))
+        self._render_account_chart(history_end)
+
+    def _account_chart_changed(self, _index: int) -> None:
+        selected_month = self.period_selector.selected_month
+        history_end = (
+            _month_dates(selected_month)[1]
+            if self.period_selector.period == "monthly"
+            else date.today()
+        )
+        self._render_account_chart(history_end)
+
+    def _render_account_chart(self, history_end: date) -> None:
+        account_id = self.account_selector.currentData()
+        if account_id is None:
+            self.account_chart.set_data(())
+            return
+        history = tuple(
+            snapshot
+            for snapshot in get_account_history(
+                int(account_id),
+                session_factory=self.session_factory,
+            )
+            if snapshot.snapshot_datetime.date() <= history_end
+        )
+        self.account_chart.set_data(history, end_date=history_end)
 
     def _render_accounts(self) -> None:
         rows = []
         for account in self._accounts:
             actions = QWidget()
             actions.setObjectName("tableCell")
+            actions.setMinimumWidth(0)
+            actions.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Expanding,
+            )
             action_layout = QHBoxLayout(actions)
             action_layout.setContentsMargins(3, 3, 3, 3)
             action_layout.setSpacing(6)
@@ -1246,7 +1925,6 @@ class InvestmentsPage(QWidget):
             delete_button.setObjectName("dangerButton")
             delete_button.setToolTip("Delete investment account")
             set_delete_button_icon(delete_button)
-            actions.setMinimumWidth(92)
             edit_button.clicked.connect(
                 lambda checked=False, selected=account: self._open_edit_account(selected)
             )
@@ -1269,6 +1947,7 @@ class InvestmentsPage(QWidget):
 
     def _render_work_rrsp_accounts(self) -> None:
         self._clear_layout(self.work_rrsp_layout)
+        self._rrsp_card_grids = []
         accounts = tuple(
             account
             for account in self._accounts
@@ -1310,6 +1989,7 @@ class InvestmentsPage(QWidget):
 
             cards = QGridLayout()
             cards.setSpacing(10)
+            metric_cards: list[QFrame] = []
             values = (
                 (
                     "You Contributed",
@@ -1350,8 +2030,11 @@ class InvestmentsPage(QWidget):
                 card_layout.addWidget(title)
                 card_layout.addWidget(amount)
                 card_layout.addWidget(month_value)
+                card.setProperty("rrspMetricIndex", column)
+                metric_cards.append(card)
                 cards.addWidget(card, 0, column)
                 cards.setColumnStretch(column, 1)
+            self._rrsp_card_grids.append((cards, metric_cards))
             block_layout.addLayout(cards)
 
             value_text = (
@@ -1366,6 +2049,17 @@ class InvestmentsPage(QWidget):
             footer.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 11px;")
             block_layout.addWidget(footer)
             self.work_rrsp_layout.addWidget(block)
+        self._reflow_rrsp_cards(stack=self._layout_mode == "narrow")
+
+    def _reflow_rrsp_cards(self, *, stack: bool) -> None:
+        for grid, cards in self._rrsp_card_grids:
+            for card in cards:
+                grid.removeWidget(card)
+            for index, card in enumerate(cards):
+                grid.addWidget(card, index if stack else 0, 0 if stack else index)
+            for column in range(3):
+                grid.setColumnStretch(column, 1 if not stack else 0)
+            grid.setColumnStretch(0, 1)
 
     def _open_work_rrsp_details(
         self, account: InvestmentAccountSummary
@@ -1377,71 +2071,31 @@ class InvestmentsPage(QWidget):
         ).exec()
 
     def _render_recent(self, start_date: date | None, end_date: date | None) -> None:
-        self._clear_layout(self.recent_layout)
         entries = get_recent_snapshots(
             user_id=self.user_id,
             group_id=self.group_id,
-            limit=50,
+            limit=self.MAX_RECENT_ENTRIES,
             start_date=start_date,
             end_date=end_date,
             session_factory=self.session_factory,
         )
-        if not entries:
-            self.recent_entries.setMinimumHeight(0)
-            empty = QLabel("No portfolio entries for this period")
-            empty.setObjectName("emptyLabel")
-            empty.setWordWrap(True)
-            self.recent_layout.addWidget(empty)
-            return
-        for entry in entries:
-            item = QFrame()
-            item.setObjectName("recentInvestmentEntry")
-            item.setMinimumHeight(self.RECENT_ENTRY_HEIGHT)
-            item_layout = QVBoxLayout(item)
-            item_layout.setContentsMargins(10, 7, 10, 7)
-            item_layout.setSpacing(2)
-            name = QLabel(f"{entry.account_name} — {entry.institution}")
-            name.setStyleSheet(f"color: {COLORS['text']}; font-weight: 650;")
-            name.setWordWrap(True)
-            recorded = QLabel(entry.snapshot_datetime.strftime("%b %d, %Y"))
-            recorded.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px;")
-            value_text = f"Value: {_currency(entry.total_value)}"
-            if entry.contribution_amount is not None:
-                value_text += (
-                    "  ·  Contribution: "
+        rows = tuple(
+            (
+                entry.snapshot_datetime.strftime("%b %d, %Y"),
+                entry.account_name,
+                _currency(entry.total_value),
+                (
                     f"{'+' if entry.contribution_amount >= 0 else ''}"
                     f"{_currency(entry.contribution_amount)}"
-                )
-            value = QLabel(value_text)
-            value.setStyleSheet(f"color: {COLORS['text_muted']};")
-            value.setWordWrap(True)
-            item_layout.addWidget(name)
-            item_layout.addWidget(recorded)
-            item_layout.addWidget(value)
-            self.recent_layout.addWidget(item)
-        content_height = (
-            len(entries) * self.RECENT_ENTRY_HEIGHT
-            + max(len(entries) - 1, 0) * self.recent_layout.spacing()
+                    if entry.contribution_amount is not None
+                    else "—"
+                ),
+            )
+            for entry in entries
         )
-        self.recent_entries.setMinimumHeight(content_height)
-
-    def _refresh_entry_accounts(self) -> None:
-        selected_id = self.entry_account.currentData()
-        self.entry_account.clear()
-        for account in self._accounts:
-            masked_number = _masked_account_number(
-                account.account_number_last7
-            )
-            suffix = f" ({masked_number})" if masked_number else ""
-            self.entry_account.addItem(
-                f"{account.account_name} — {account.institution}{suffix}",
-                account.id,
-            )
-        if selected_id is not None:
-            index = self.entry_account.findData(selected_id)
-            if index >= 0:
-                self.entry_account.setCurrentIndex(index)
-        self.save_entry_button.setEnabled(bool(self._accounts))
+        self.recent_table.set_rows(rows)
+        self.recent_table.setVisible(bool(rows))
+        self.recent_empty.setVisible(not rows)
 
     def _open_add_account(self) -> None:
         if self.user_id is None and self.group_id is None:
@@ -1518,35 +2172,45 @@ class InvestmentsPage(QWidget):
             return
         self.reload()
 
-    def _save_entry(self) -> None:
-        self.entry_error.clear()
-        account_id = self.entry_account.currentData()
-        if account_id is None:
-            self.entry_error.setText("Add an investment account first")
+    def _open_add_entry(self, selected_account_id: int | None = None) -> None:
+        if not self._accounts:
             return
-        try:
-            total_value = _parse_optional_money(
-                self.entry_total.text(), "Total amount"
-            )
-            if total_value is None:
-                raise ValueError("Total amount is required")
-            contribution = _parse_optional_money(
-                self.entry_contribution.text(), "Contribution amount"
-            )
-            create_investment_snapshot(
-                account_id,
-                _date_from_editor(self.entry_date),
-                total_value,
-                contribution,
-                session_factory=self.session_factory,
-            )
-        except ValueError as exc:
-            self.entry_error.setText(str(exc))
-            return
-        self.entry_total.clear()
-        self.entry_contribution.clear()
-        self.entry_date.setDate(_qdate(date.today()))
-        self.reload()
+        dialog = PortfolioEntryDialog(
+            self._accounts,
+            self.window(),
+            selected_account_id=selected_account_id,
+        )
+
+        def submit() -> None:
+            try:
+                account_id = dialog.account.currentData()
+                if account_id is None:
+                    raise ValueError("Choose an investment account")
+                total_value = _parse_optional_money(
+                    dialog.total.text(),
+                    "Total amount",
+                )
+                if total_value is None:
+                    raise ValueError("Total amount is required")
+                contribution = _parse_optional_money(
+                    dialog.contribution.text(),
+                    "Contribution amount",
+                )
+                create_investment_snapshot(
+                    int(account_id),
+                    _date_from_editor(dialog.entry_date),
+                    total_value,
+                    contribution,
+                    session_factory=self.session_factory,
+                )
+            except ValueError as exc:
+                dialog.error_label.setText(str(exc))
+                return
+            dialog.accept()
+            self.reload()
+
+        dialog.submitted.connect(submit)
+        dialog.exec()
 
     @staticmethod
     def _clear_layout(layout: QVBoxLayout) -> None:

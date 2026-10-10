@@ -1,5 +1,5 @@
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 from app.ui.theme import brand_icon
 
@@ -31,8 +31,10 @@ class AccountBadge(QWidget):
 
         self.name_label = QLabel(account_name)
         self.name_label.setObjectName("accountName")
-        self.name_label.setMinimumWidth(
-            self.name_label.fontMetrics().horizontalAdvance(account_name) + 4
+        self.name_label.setMinimumWidth(0)
+        self.name_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
         )
         self.name_label.setToolTip(f"{account_name} · {institution}")
         layout.addWidget(self.name_label, 1)

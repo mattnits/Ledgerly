@@ -203,7 +203,7 @@ class TransactionAsyncLoadingTest(unittest.TestCase):
         table.close()
         engine.dispose()
 
-    def test_navigation_switches_to_transactions_before_refresh(self):
+    def test_navigation_refreshes_a_dirty_transactions_page_after_switch(self):
         events = []
 
         class Page:
@@ -211,6 +211,9 @@ class TransactionAsyncLoadingTest(unittest.TestCase):
                 events.append("refresh")
 
         class Stack:
+            def currentWidget(self):
+                return None
+
             def setCurrentWidget(self, page):
                 events.append("switch")
 
@@ -223,11 +226,42 @@ class TransactionAsyncLoadingTest(unittest.TestCase):
             investments_page=Page(),
             categories_page=Page(),
             settings_page=Page(),
+            _dirty_monthly_pages={transactions_page},
         )
 
         ShellWindow.change_page(shell, TRANSACTIONS_PAGE)
 
         self.assertEqual(events, ["switch", "refresh"])
+
+    def test_reselecting_the_visible_clean_monthly_page_does_not_refresh(self):
+        events = []
+
+        class Page:
+            def reload(self):
+                events.append("refresh")
+
+        class Stack:
+            def currentWidget(self):
+                return transactions_page
+
+            def setCurrentWidget(self, page):
+                events.append("switch")
+
+        transactions_page = Page()
+        shell = SimpleNamespace(
+            pages=Stack(),
+            dashboard_page=Page(),
+            transactions_page=transactions_page,
+            accounts_page=Page(),
+            investments_page=Page(),
+            categories_page=Page(),
+            settings_page=Page(),
+            _dirty_monthly_pages=set(),
+        )
+
+        ShellWindow.change_page(shell, TRANSACTIONS_PAGE)
+
+        self.assertEqual(events, ["switch"])
 
 
 if __name__ == "__main__":

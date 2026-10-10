@@ -125,6 +125,15 @@ Ledgerly keeps this information local, but it does not replace normal device
 security. Protect your operating-system account, use disk encryption when
 appropriate, and keep regular backups of `finance.db`.
 
+### Switching databases manually
+
+Close every Ledgerly window before replacing `finance.db`. Move the current
+database and any matching `finance.db-wal` / `finance.db-shm` files together to
+a backup location so sidecar files from two different databases are never
+mixed, then copy in a complete Ledgerly database backup. On startup, Ledgerly
+checks the replacement before applying migrations. Damaged, incomplete, and
+unrelated SQLite files are left untouched and shown with a retry option.
+
 ## Run from source
 
 Clone the repository, then use the setup script for your platform.

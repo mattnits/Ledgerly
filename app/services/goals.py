@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import and_, delete, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 
 from app.core.db import SessionLocal
 from app.services.finance_services import monthly_financial_summary
@@ -37,6 +37,14 @@ class CategoryBudgetProgress:
     category_color: str
     spent: Decimal
     target: Decimal
+    applies_to_future: bool = True
+
+    def __post_init__(self) -> None:
+        # SQLite aggregate functions can return float even when the mapped
+        # column is Numeric. Normalize once so rendering and arithmetic never
+        # mix float with Decimal.
+        object.__setattr__(self, "spent", _decimal_value(self.spent))
+        object.__setattr__(self, "target", _decimal_value(self.target))
 
     @property
     def remaining(self) -> Decimal:
@@ -63,6 +71,19 @@ class SavingsGoalRecord:
         if self.target_amount <= 0:
             return Decimal()
         return self.current_amount / self.target_amount * Decimal(100)
+
+
+@dataclass(frozen=True)
+class CategoryBudgetSaveResult:
+    preserved_months: tuple[tuple[int, int], ...] = ()
+
+
+def _decimal_value(value) -> Decimal:
+    if value is None:
+        return Decimal()
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value))
 
 
 def _owner_kwargs(user_id: str | None, group_id: int | None) -> dict:
@@ -188,7 +209,10 @@ def get_category_budgets(
     end = date(year + (month == 12), month % 12 + 1, 1)
     with session_factory() as session:
         spending_rows = session.execute(
-            select(Transaction.category_id, Transaction.amount)
+            select(
+                Transaction.category_id,
+                func.sum(func.abs(Transaction.amount)),
+            )
             .join(Transaction.account)
             .where(
                 visible_account_scope(user_id, group_id),
@@ -198,6 +222,7 @@ def get_category_budgets(
                 Transaction.transaction_date >= start,
                 Transaction.transaction_date < end,
             )
+            .group_by(Transaction.category_id)
         ).all()
         budget_rows = session.execute(
             select(
@@ -205,15 +230,25 @@ def get_category_budgets(
                 Category.name,
                 Category.color,
                 MonthlyCategoryBudget.target_amount,
+                MonthlyCategoryBudget.applies_to_future,
             )
             .join(Category, MonthlyCategoryBudget.category_id == Category.id)
             .where(
                 direct_owner_scope(MonthlyCategoryBudget, user_id, group_id),
                 or_(
-                    MonthlyCategoryBudget.year < year,
+                    and_(
+                        MonthlyCategoryBudget.applies_to_future.is_(True),
+                        MonthlyCategoryBudget.year < year,
+                    ),
                     and_(
                         MonthlyCategoryBudget.year == year,
-                        MonthlyCategoryBudget.month <= month,
+                        or_(
+                            MonthlyCategoryBudget.month == month,
+                            and_(
+                                MonthlyCategoryBudget.month < month,
+                                MonthlyCategoryBudget.applies_to_future.is_(True),
+                            ),
+                        ),
                     ),
                 ),
             )
@@ -222,12 +257,16 @@ def get_category_budgets(
                 MonthlyCategoryBudget.month.desc(),
             )
         ).all()
-    totals: dict[int, Decimal] = {}
-    for category_id, amount in spending_rows:
-        totals[category_id] = totals.get(category_id, Decimal()) + abs(amount)
-    effective: dict[int, tuple[str, str, Decimal]] = {}
-    for category_id, name, color, target in budget_rows:
-        effective.setdefault(category_id, (name, color, target))
+    totals = {
+        category_id: _decimal_value(amount)
+        for category_id, amount in spending_rows
+    }
+    effective: dict[int, tuple[str, str, Decimal, bool]] = {}
+    for category_id, name, color, target, applies_to_future in budget_rows:
+        effective.setdefault(
+            category_id,
+            (name, color, target, bool(applies_to_future)),
+        )
     return tuple(
         CategoryBudgetProgress(
             category_id,
@@ -235,8 +274,9 @@ def get_category_budgets(
             color,
             totals.get(category_id, Decimal()),
             target,
+            applies_to_future,
         )
-        for category_id, (name, color, target) in sorted(
+        for category_id, (name, color, target, applies_to_future) in sorted(
             effective.items(), key=lambda item: item[1][0].casefold()
         )
         if target > 0
@@ -249,10 +289,11 @@ def create_or_update_category_budget(
     month: int,
     target_amount: Decimal,
     *,
+    applies_to_future: bool = True,
     user_id: str | None = None,
     group_id: int | None = None,
     session_factory=SessionLocal,
-) -> None:
+) -> CategoryBudgetSaveResult:
     validate_owner(user_id, group_id)
     target_amount = Decimal(target_amount).quantize(Decimal("0.01"))
     if target_amount <= 0:
@@ -262,6 +303,38 @@ def create_or_update_category_budget(
     with session_factory.begin() as session:
         if session.get(Category, category_id) is None:
             raise ValueError("The selected category no longer exists.")
+        preserved_months = (
+            tuple(
+                (item_year, item_month)
+                for item_year, item_month in session.execute(
+                    select(
+                        MonthlyCategoryBudget.year,
+                        MonthlyCategoryBudget.month,
+                    )
+                    .where(
+                        direct_owner_scope(
+                            MonthlyCategoryBudget,
+                            user_id,
+                            group_id,
+                        ),
+                        MonthlyCategoryBudget.category_id == category_id,
+                        or_(
+                            MonthlyCategoryBudget.year > year,
+                            and_(
+                                MonthlyCategoryBudget.year == year,
+                                MonthlyCategoryBudget.month > month,
+                            ),
+                        ),
+                    )
+                    .order_by(
+                        MonthlyCategoryBudget.year,
+                        MonthlyCategoryBudget.month,
+                    )
+                ).all()
+            )
+            if applies_to_future
+            else ()
+        )
         budget = session.scalar(select(MonthlyCategoryBudget).where(
             direct_owner_scope(MonthlyCategoryBudget, user_id, group_id),
             MonthlyCategoryBudget.category_id == category_id,
@@ -275,9 +348,12 @@ def create_or_update_category_budget(
                 year=year,
                 month=month,
                 target_amount=target_amount,
+                applies_to_future=applies_to_future,
             ))
         else:
             budget.target_amount = target_amount
+            budget.applies_to_future = applies_to_future
+    return CategoryBudgetSaveResult(preserved_months)
 
 
 def delete_category_budget(
@@ -300,10 +376,19 @@ def delete_category_budget(
                 direct_owner_scope(MonthlyCategoryBudget, user_id, group_id),
                 MonthlyCategoryBudget.category_id == category_id,
                 or_(
-                    MonthlyCategoryBudget.year < year,
+                    and_(
+                        MonthlyCategoryBudget.applies_to_future.is_(True),
+                        MonthlyCategoryBudget.year < year,
+                    ),
                     and_(
                         MonthlyCategoryBudget.year == year,
-                        MonthlyCategoryBudget.month <= month,
+                        or_(
+                            MonthlyCategoryBudget.month == month,
+                            and_(
+                                MonthlyCategoryBudget.month < month,
+                                MonthlyCategoryBudget.applies_to_future.is_(True),
+                            ),
+                        ),
                     ),
                 ),
             )
@@ -328,9 +413,11 @@ def delete_category_budget(
                 year=year,
                 month=month,
                 target_amount=Decimal("0.00"),
+                applies_to_future=True,
             ))
         else:
             current.target_amount = Decimal("0.00")
+            current.applies_to_future = True
 
 
 def get_savings_goals(
