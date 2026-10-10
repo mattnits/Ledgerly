@@ -189,6 +189,7 @@ class GroupMembership(Base):
             "group_id",
             name="uq_group_membership",
         ),
+        Index("ix_group_memberships_group_id", "group_id"),
     )
 
 
@@ -262,6 +263,8 @@ class Account(Base):
             """,
             name="ck_account_single_owner",
         ),
+        Index("ix_accounts_user_id", "user_id"),
+        Index("ix_accounts_group_id", "group_id"),
     )
 
 
@@ -462,6 +465,12 @@ class Transaction(Base):
             "ix_transactions_dedupe_fingerprint",
             "dedupe_fingerprint",
         ),
+        Index(
+            "ix_transactions_account_deleted_date",
+            "account_id",
+            "is_deleted",
+            "transaction_date",
+        ),
     )
 
 
@@ -510,6 +519,9 @@ class MonthlyCategoryBudget(_OwnedMonthlyMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"), nullable=False)
     target_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    applies_to_future: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="1"
+    )
     category: Mapped["Category"] = relationship()
     user: Mapped["User | None"] = relationship(back_populates="category_budgets")
     group: Mapped["Group | None"] = relationship(back_populates="category_budgets")
@@ -645,6 +657,8 @@ class InvestmentAccount(Base):
             "employer_match_percent IS NULL OR employer_match_percent >= 0",
             name="ck_investment_account_match_percent",
         ),
+        Index("ix_investment_accounts_user_id", "user_id"),
+        Index("ix_investment_accounts_group_id", "group_id"),
     )
 
 

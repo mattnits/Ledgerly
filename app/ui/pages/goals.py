@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.db import SessionLocal
 from app.services.goals import (
@@ -964,10 +965,21 @@ class BudgetDialog(GenericDialog):
             )
         self.month = QLabel(date(year, month, 1).strftime("%B %Y"))
         self.amount = _money_editor(existing.target if existing else Decimal())
+        self.apply_to_future = QCheckBox("Apply to all future months")
+        self.apply_to_future.setChecked(
+            existing.applies_to_future if existing else True
+        )
+        self.apply_to_future.setToolTip(
+            "Existing budgets in future months keep their current values."
+        )
         form.addRow("Category", self.category)
         form.addRow("Month", self.month)
         form.addRow("Budget amount", self.amount)
-        _style_form_labels(form, (self.category, self.month, self.amount))
+        form.addRow("", self.apply_to_future)
+        _style_form_labels(
+            form,
+            (self.category, self.month, self.amount, self.apply_to_future),
+        )
         if existing:
             index = self.category.findData(existing.category_id)
             self.category.setCurrentIndex(index)
@@ -980,8 +992,9 @@ class BudgetDialog(GenericDialog):
             subtitle="Set this category's spending target for the selected month.",
             icon_name="fa6s.chart-pie",
             info_text=(
-                "This budget carries forward until you change or remove it. "
-                "Only expense transactions in this category count toward it."
+                "Future-month budgets already entered for this category are kept. "
+                "They apply to those months, and this amount resumes afterward "
+                "unless the future budget also repeats."
             ),
         )
         self.resize(640, 500)
@@ -1296,14 +1309,21 @@ class GoalsPage(QWidget):
     def selected_month(self) -> tuple[int, int]:
         return self.month_navigator.selected_month
 
-    def set_profile(self, *, user_id: str | None = None, group_id: int | None = None) -> None:
+    def set_profile(
+        self,
+        *,
+        user_id: str | None = None,
+        group_id: int | None = None,
+        reload: bool = True,
+    ) -> None:
         self.user_id = user_id
         self.group_id = group_id
         enabled = user_id is not None or group_id is not None
         self.add_budget_button.setEnabled(enabled)
         self.add_goal_button.setEnabled(enabled)
         self.monthly_card.edit_button.setEnabled(enabled)
-        self.reload()
+        if reload:
+            self.reload()
 
     def reload(self) -> None:
         if self.user_id is None and self.group_id is None:
@@ -1490,7 +1510,9 @@ class GoalsPage(QWidget):
             session_factory=self.session_factory,
         ).target or Decimal()
         dialog = MonthlySavingsGoalDialog(year, month, current, self)
+        saved = False
         def save() -> None:
+            nonlocal saved
             try:
                 set_monthly_savings_goal(
                     year, month, Decimal(str(dialog.amount.value())),
@@ -1500,10 +1522,19 @@ class GoalsPage(QWidget):
             except ValueError as exc:
                 QMessageBox.warning(dialog, "Invalid Goal", str(exc))
                 return
+            except SQLAlchemyError:
+                QMessageBox.critical(
+                    dialog,
+                    "Goal not saved",
+                    "Ledgerly could not save this goal. Please retry.",
+                )
+                return
+            saved = True
             dialog.accept()
-            self.reload()
         dialog.submitted.connect(save)
         dialog.exec()
+        if saved:
+            self.reload()
 
     def _edit_budget(self, category_id: int | None) -> None:
         existing = next((item for item in self._budget_items if item.category_id == category_id), None)
@@ -1513,24 +1544,51 @@ class GoalsPage(QWidget):
             return
         year, month = self.selected_month
         dialog = BudgetDialog(categories, year, month, existing, self)
+        saved = False
+        preserved_months: tuple[tuple[int, int], ...] = ()
         def save() -> None:
+            nonlocal saved, preserved_months
             selected_category = dialog.category.currentData()
             if selected_category is None:
                 QMessageBox.warning(dialog, "Invalid Budget", "Choose a category.")
                 return
             try:
-                create_or_update_category_budget(
+                result = create_or_update_category_budget(
                     selected_category, year, month, Decimal(str(dialog.amount.value())),
+                    applies_to_future=dialog.apply_to_future.isChecked(),
                     user_id=self.user_id, group_id=self.group_id,
                     session_factory=self.session_factory,
                 )
             except ValueError as exc:
                 QMessageBox.warning(dialog, "Invalid Budget", str(exc))
                 return
+            except SQLAlchemyError:
+                QMessageBox.critical(
+                    dialog,
+                    "Budget not saved",
+                    "Ledgerly could not save this budget. Please retry.",
+                )
+                return
+            saved = True
+            preserved_months = result.preserved_months
             dialog.accept()
-            self.reload()
         dialog.submitted.connect(save)
         dialog.exec()
+        if saved:
+            self.reload()
+            if category_id is None and preserved_months:
+                labels = ", ".join(
+                    date(item_year, item_month, 1).strftime("%B %Y")
+                    for item_year, item_month in preserved_months
+                )
+                QMessageBox.information(
+                    self,
+                    "Future budgets kept",
+                    (
+                        "The new budget was applied to future months. Existing "
+                        f"budget settings were kept for: {labels}."
+                    ),
+                )
 
     def _delete_budget(self, category_id: int) -> None:
         item = next((value for value in self._budget_items if value.category_id == category_id), None)
@@ -1559,7 +1617,9 @@ class GoalsPage(QWidget):
     def _edit_long_term_goal(self, goal_id: int | None) -> None:
         existing = next((item for item in self._goal_items if item.id == goal_id), None)
         dialog = SavingsGoalDialog(existing, self)
+        saved = False
         def save() -> None:
+            nonlocal saved
             try:
                 values = dict(
                     name=dialog.name.text(),
@@ -1578,10 +1638,19 @@ class GoalsPage(QWidget):
             except ValueError as exc:
                 QMessageBox.warning(dialog, "Invalid Savings Goal", str(exc))
                 return
+            except SQLAlchemyError:
+                QMessageBox.critical(
+                    dialog,
+                    "Savings goal not saved",
+                    "Ledgerly could not save this goal. Please retry.",
+                )
+                return
+            saved = True
             dialog.accept()
-            self.reload()
         dialog.submitted.connect(save)
         dialog.exec()
+        if saved:
+            self.reload()
 
     def _delete_long_term_goal(self, goal_id: int) -> None:
         item = next((value for value in self._goal_items if value.id == goal_id), None)

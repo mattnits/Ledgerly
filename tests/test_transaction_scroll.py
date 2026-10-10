@@ -19,6 +19,9 @@ from app.utils.constants import ClassificationSource, TransactionType
 
 
 class TransactionScrollTest(unittest.TestCase):
+    TEST_PAGE_SIZE = 20
+    TRANSACTION_COUNT = 30
+
     @staticmethod
     def _wait_for(predicate, timeout=5.0):
         deadline = time.monotonic() + timeout
@@ -57,18 +60,28 @@ class TransactionScrollTest(unittest.TestCase):
                     amount=Decimal("-1.00"),
                     transaction_type=TransactionType.EXPENSE,
                 )
-                for index in range(250)
+                for index in range(self.TRANSACTION_COUNT)
             )
 
         app = QApplication.instance() or QApplication([])
         table = StatementsTable(session_factory=sessions)
+        # Exercise pagination without constructing hundreds of heavyweight Qt
+        # rows. The production page size is covered independently; this test
+        # only needs more than one page to verify the preserved reload state.
+        table.PAGE_SIZE = self.TEST_PAGE_SIZE
         table.resize(1150, 520)
         table.show()
         table.set_user_id("test-user")
-        self._wait_for(lambda: not table._loading and table.loaded_count == 200)
+        self._wait_for(
+            lambda: not table._loading
+            and table.loaded_count == self.TEST_PAGE_SIZE
+        )
         table._load_more()
-        self._wait_for(lambda: not table._loading and table.loaded_count == 250)
-        self.assertEqual(table.loaded_count, 250)
+        self._wait_for(
+            lambda: not table._loading
+            and table.loaded_count == self.TRANSACTION_COUNT
+        )
+        self.assertEqual(table.loaded_count, self.TRANSACTION_COUNT)
         action_cell = table.rows[0].action_cell
         action_button = table.rows[0].action_button
         self._wait_for(
@@ -86,20 +99,21 @@ class TransactionScrollTest(unittest.TestCase):
         )
 
         scrollbar = table.table.verticalScrollBar()
-        self.assertGreater(scrollbar.maximum(), 150)
-        scrollbar.setValue(150)
+        self.assertGreater(scrollbar.maximum(), 0)
+        scrollbar.setValue(min(150, scrollbar.maximum()))
         original_position = scrollbar.value()
-        row = table.rows[160]
+        self.assertGreater(original_position, 0)
+        row = table.rows[self.TEST_PAGE_SIZE + 5]
         transaction_id = row.transaction_id
         generation = table._query_generation
         row.category_combo.setCurrentIndex(row.category_combo.findData(category_id))
         self._wait_for(
             lambda: table._query_generation > generation
             and not table._loading
-            and table.loaded_count == 250
+            and table.loaded_count == self.TRANSACTION_COUNT
         )
 
-        self.assertEqual(table.loaded_count, 250)
+        self.assertEqual(table.loaded_count, self.TRANSACTION_COUNT)
         self.assertEqual(scrollbar.value(), original_position)
         with sessions() as session:
             transaction = session.get(Transaction, transaction_id)

@@ -3,10 +3,12 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 import calendar
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
+import logging
+from time import perf_counter
 
-from sqlalchemy import select
+from sqlalchemy import Integer, and_, case, cast, func, or_, select
 
 from app.core.db import SessionLocal
 from app.services.finance_services import (
@@ -38,6 +40,7 @@ from app.services.profiles import (
     visible_owner_scope,
 )
 from app.services.transactions import get_transaction_months
+from app.services.summary_cache import cache_summary, get_cached_summary
 from app.utils.constants import TransactionType
 
 
@@ -49,6 +52,7 @@ SPENDING_ACCOUNT_COLORS = (
     "#ef7aa8", "#bd6a80", "#a66bff", "#e8895c",
 )
 NET_E_TRANSFER_COLOR = "#a66bff"
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -270,8 +274,27 @@ def get_dashboard_data(
     *,
     group_id: int | None = None,
 ) -> DashboardData:
+    started = perf_counter()
     if period not in ("monthly", "all"):
         raise ValueError(f"Unsupported dashboard period: {period}")
+    cache_key = (
+        "dashboard",
+        session_factory,
+        user_id,
+        group_id,
+        period,
+        selected_month,
+        date.today(),
+    )
+    cached = get_cached_summary(cache_key)
+    if cached is not None:
+        logger.debug(
+            "Dashboard summary cache hit (period=%s, month=%s-%02d)",
+            period,
+            selected_month[0],
+            selected_month[1],
+        )
+        return cached
 
     rows = []
     account_rows: list[tuple[int, str]] = []
@@ -282,8 +305,24 @@ def get_dashboard_data(
         tuple[date, Decimal, Decimal | None, str | None, int | None]
     ] = []
     budget_rows: list[tuple[int, str, int, int, Decimal]] = []
+    recent_rows: list[tuple[str, str, date, Decimal, str | None]] = []
     if user_id is not None or group_id is not None:
         validate_owner(user_id, group_id)
+        today = date.today()
+        if period == "monthly":
+            selected_start = date(*selected_month, 1)
+            selected_end = date(
+                selected_month[0] + (selected_month[1] == 12),
+                selected_month[1] % 12 + 1,
+                1,
+            )
+            investment_end = datetime.combine(selected_end, datetime.min.time())
+        else:
+            selected_start = selected_end = None
+            investment_end = datetime.combine(
+                today + timedelta(days=1),
+                datetime.min.time(),
+            )
         with session_factory() as session:
             account_rows = list(session.execute(
                 select(Account.id, Account.name)
@@ -297,11 +336,49 @@ def get_dashboard_data(
                     .where(GroupMembership.group_id == group_id)
                     .order_by(User.name, User.id)
                 ).all())
-            rows = session.execute(
+            transaction_conditions = [
+                visible_account_scope(user_id, group_id),
+                Transaction.is_deleted.is_(False),
+            ]
+            recent_conditions = list(transaction_conditions)
+            if period == "monthly":
+                previous_month = _month_before(selected_month)
+                query_start = min(
+                    date(selected_month[0], 1, 1),
+                    date(*previous_month, 1),
+                )
+                transaction_conditions.extend((
+                    Transaction.transaction_date >= query_start,
+                    Transaction.transaction_date < selected_end,
+                ))
+                recent_conditions.extend((
+                    Transaction.transaction_date >= selected_start,
+                    Transaction.transaction_date < selected_end,
+                ))
+
+            transaction_year = cast(
+                func.strftime("%Y", Transaction.transaction_date), Integer
+            )
+            transaction_month = cast(
+                func.strftime("%m", Transaction.transaction_date), Integer
+            )
+            normalized_amount = case(
+                (
+                    Transaction.transaction_type == TransactionType.EXPENSE,
+                    func.abs(Transaction.amount),
+                ),
+                else_=Transaction.amount,
+            )
+            sign_bucket = case(
+                (Transaction.amount > 0, 1),
+                (Transaction.amount < 0, -1),
+                else_=0,
+            )
+            aggregate_rows = session.execute(
                 select(
-                    Transaction.transaction_date,
-                    Transaction.description,
-                    Transaction.amount,
+                    transaction_year,
+                    transaction_month,
+                    func.sum(normalized_amount),
                     Transaction.transaction_type,
                     Account.id,
                     Account.name,
@@ -312,12 +389,63 @@ def get_dashboard_data(
                 )
                 .join(Account, Transaction.account_id == Account.id)
                 .outerjoin(Category, Transaction.category_id == Category.id)
-                .where(
-                    visible_account_scope(user_id, group_id),
-                    Transaction.is_deleted.is_(False),
+                .where(*transaction_conditions)
+                .group_by(
+                    transaction_year,
+                    transaction_month,
+                    Transaction.transaction_type,
+                    Account.id,
+                    Account.name,
+                    Account.user_id,
+                    Category.id,
+                    Category.name,
+                    Category.color,
+                    sign_bucket,
                 )
-                .order_by(Transaction.transaction_date.desc(), Transaction.id.desc())
             ).all()
+            rows = [
+                (
+                    date(year, month, 1),
+                    "",
+                    amount,
+                    transaction_type,
+                    account_id,
+                    account_name,
+                    account_user_id,
+                    category_id,
+                    category_name,
+                    category_color,
+                )
+                for (
+                    year,
+                    month,
+                    amount,
+                    transaction_type,
+                    account_id,
+                    account_name,
+                    account_user_id,
+                    category_id,
+                    category_name,
+                    category_color,
+                ) in aggregate_rows
+            ]
+            recent_rows = list(session.execute(
+                select(
+                    Transaction.description,
+                    Account.name,
+                    Transaction.transaction_date,
+                    Transaction.amount,
+                    Category.color,
+                )
+                .join(Account, Transaction.account_id == Account.id)
+                .outerjoin(Category, Transaction.category_id == Category.id)
+                .where(*recent_conditions)
+                .order_by(
+                    Transaction.transaction_date.desc(),
+                    Transaction.id.desc(),
+                )
+                .limit(5)
+            ).all())
             investment_rows = [
                 _InvestmentData(*row)
                 for row in session.execute(
@@ -333,15 +461,45 @@ def get_dashboard_data(
                     .where(
                         visible_owner_scope(InvestmentAccount, user_id, group_id),
                         InvestmentAccount.is_active.is_(True),
+                        InvestmentSnapshot.snapshot_datetime < investment_end,
                     )
                 ).all()
             ]
+            goal_conditions = [
+                direct_owner_scope(SavingsGoal, user_id, group_id)
+            ]
+            budget_conditions = [
+                direct_owner_scope(MonthlyCategoryBudget, user_id, group_id)
+            ]
+            savings_conditions = [
+                visible_owner_scope(SavingsSnapshot, user_id, group_id)
+            ]
+            if period == "monthly":
+                effective_through = or_(
+                    SavingsGoal.year < selected_month[0],
+                    and_(
+                        SavingsGoal.year == selected_month[0],
+                        SavingsGoal.month <= selected_month[1],
+                    ),
+                )
+                goal_conditions.append(effective_through)
+                budget_conditions.append(or_(
+                    MonthlyCategoryBudget.year < selected_month[0],
+                    and_(
+                        MonthlyCategoryBudget.year == selected_month[0],
+                        MonthlyCategoryBudget.month <= selected_month[1],
+                    ),
+                ))
+                savings_conditions.extend((
+                    SavingsSnapshot.snapshot_date >= selected_start,
+                    SavingsSnapshot.snapshot_date < selected_end,
+                ))
             savings_goal_rows = list(session.execute(
                 select(
                     SavingsGoal.year,
                     SavingsGoal.month,
                     SavingsGoal.target_amount,
-                ).where(direct_owner_scope(SavingsGoal, user_id, group_id))
+                ).where(*goal_conditions)
             ).all())
             savings_rows = list(session.execute(
                 select(
@@ -351,7 +509,7 @@ def get_dashboard_data(
                     SavingsSnapshot.user_id,
                     SavingsSnapshot.group_id,
                 )
-                .where(visible_owner_scope(SavingsSnapshot, user_id, group_id))
+                .where(*savings_conditions)
                 .order_by(SavingsSnapshot.snapshot_date)
             ).all())
             budget_rows = list(session.execute(
@@ -363,7 +521,7 @@ def get_dashboard_data(
                     MonthlyCategoryBudget.target_amount,
                 )
                 .join(Category, MonthlyCategoryBudget.category_id == Category.id)
-                .where(direct_owner_scope(MonthlyCategoryBudget, user_id, group_id))
+                .where(*budget_conditions)
                 .order_by(Category.name)
             ).all())
 
@@ -727,16 +885,22 @@ def get_dashboard_data(
 
     recent = tuple(
         RecentTransaction(
-            item.description,
-            item.account_name,
-            item.transaction_date,
-            item.amount,
-            item.category_color or "#718096",
+            description,
+            account_name,
+            transaction_date,
+            amount,
+            category_color or "#718096",
         )
-        for item in selected[:5]
+        for (
+            description,
+            account_name,
+            transaction_date,
+            amount,
+            category_color,
+        ) in recent_rows
     )
 
-    return DashboardData(
+    result = DashboardData(
         period_label=period_label,
         month_labels=month_labels,
         regular_income=summary.regular_income,
@@ -774,3 +938,11 @@ def get_dashboard_data(
         category_spending=category_spending,
         recent_transactions=recent,
     )
+    logger.debug(
+        "Dashboard summary finished in %.1f ms (period=%s, month=%s-%02d)",
+        (perf_counter() - started) * 1000,
+        period,
+        selected_month[0],
+        selected_month[1],
+    )
+    return cache_summary(cache_key, result)

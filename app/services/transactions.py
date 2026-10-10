@@ -2,6 +2,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
+import logging
+from time import perf_counter
 from typing import Any
 
 from sqlalchemy import String, and_, cast, func, or_, select
@@ -19,6 +21,7 @@ from app.utils.constants import (
 
 
 _UNCHANGED = object()
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -71,6 +74,7 @@ def fetch_transactions(
 ) -> TransactionQueryResult:
     """Fetch one page as detached plain data using a worker-owned session."""
 
+    started = perf_counter()
     validate_owner(params.user_id, params.group_id)
     account_scope = visible_account_scope(params.user_id, params.group_id)
     with session_factory() as session:
@@ -154,16 +158,21 @@ def fetch_transactions(
             select(func.count()).select_from(base.order_by(None).subquery())
         ) or 0
 
+        has_additional_filters = False
         if params.account_filter != "all":
             base = base.where(Account.id == params.account_filter)
+            has_additional_filters = True
         if params.needs_review_filter:
             base = base.where(needs_review_expression())
+            has_additional_filters = True
         if params.category_filter not in ("all", "deleted"):
             base = base.where(Transaction.category_id == params.category_filter)
+            has_additional_filters = True
         if params.transaction_type_filter != "all":
             base = base.where(
                 Transaction.transaction_type == params.transaction_type_filter
             )
+            has_additional_filters = True
 
         search = params.search.strip()
         if search:
@@ -183,10 +192,13 @@ def fetch_transactions(
                     for token in description_tokens
                 )))
             base = base.where(or_(*search_terms))
+            has_additional_filters = True
 
-        filtered_count = session.scalar(
-            select(func.count()).select_from(base.order_by(None).subquery())
-        ) or 0
+        filtered_count = total_count
+        if has_additional_filters:
+            filtered_count = session.scalar(
+                select(func.count()).select_from(base.order_by(None).subquery())
+            ) or 0
         sort_expressions = (
             Transaction.transaction_date,
             Transaction.description,
@@ -206,7 +218,7 @@ def fetch_transactions(
 
         rows = tuple(TransactionRowData(*record) for record in records)
 
-    return TransactionQueryResult(
+    result = TransactionQueryResult(
         rows=rows,
         total_count=total_count,
         filtered_count=filtered_count,
@@ -214,6 +226,13 @@ def fetch_transactions(
         categories=categories,
         available_months=available_months,
     )
+    logger.debug(
+        "Transaction page query finished in %.1f ms (rows=%s, offset=%s)",
+        (perf_counter() - started) * 1000,
+        len(rows),
+        params.offset,
+    )
+    return result
 
 
 def get_transaction_months(

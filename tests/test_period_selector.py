@@ -2,6 +2,7 @@ import os
 import unittest
 from datetime import date, timedelta
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -152,13 +153,20 @@ class PeriodSelectorTest(unittest.TestCase):
         statements = StatementsTable()
         investments = InvestmentsPage()
         goals = GoalsPage()
+        class TransactionPage:
+            def __init__(self, table):
+                self.statements_table = table
+
+        transactions = TransactionPage(statements)
         shell = SimpleNamespace(
             _syncing_month_selection=False,
             _selected_month=None,
+            _dirty_monthly_pages=set(),
             dashboard_page=dashboard,
-            transactions_page=SimpleNamespace(statements_table=statements),
+            transactions_page=transactions,
             investments_page=investments,
             goals_page=goals,
+            pages=SimpleNamespace(currentWidget=lambda: dashboard),
         )
         try:
             ShellWindow._set_selected_month(shell, (2026, 8))
@@ -175,9 +183,46 @@ class PeriodSelectorTest(unittest.TestCase):
                 (2026, 8),
             )
             self.assertEqual(goals.selected_month, (2026, 8))
+            self.assertNotIn(dashboard, shell._dirty_monthly_pages)
+            self.assertEqual(
+                shell._dirty_monthly_pages,
+                {transactions, investments, goals},
+            )
         finally:
             for page in (dashboard, statements, investments, goals):
                 page.close()
+
+    def test_profile_application_defers_hidden_page_queries(self):
+        dashboard = SimpleNamespace(
+            selected_month=(2026, 8),
+            set_profile=MagicMock(),
+            reload=MagicMock(),
+        )
+        transactions = SimpleNamespace(set_profile=MagicMock())
+        investments = SimpleNamespace(set_profile=MagicMock())
+        accounts = SimpleNamespace(set_profile=MagicMock())
+        goals = SimpleNamespace(set_profile=MagicMock())
+        shell = SimpleNamespace(
+            _selected_month=None,
+            dashboard_page=dashboard,
+            transactions_page=transactions,
+            investments_page=investments,
+            accounts_page=accounts,
+            goals_page=goals,
+            _set_selected_month=MagicMock(),
+        )
+
+        ShellWindow._apply_profile(shell, "user:test-user")
+
+        dashboard.set_profile.assert_called_once_with(
+            user_id="test-user", group_id=None
+        )
+        for page in (transactions, investments, accounts, goals):
+            page.set_profile.assert_called_once_with(
+                user_id="test-user",
+                group_id=None,
+                reload=False,
+            )
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Iterable
 
-from sqlalchemy import Select, and_, or_, select
+from sqlalchemy import Select, and_, case, func, or_, select
 
 from app.core.db import SessionLocal
 from app.models.models import (
@@ -178,9 +178,26 @@ def monthly_financial_summary(
     session_factory=SessionLocal,
 ) -> MonthlyFinancialSummary:
     start, end = _month_bounds(year, month)
+    signed_amount = case(
+        (
+            Transaction.transaction_type == TransactionType.EXPENSE,
+            func.abs(Transaction.amount),
+        ),
+        else_=Transaction.amount,
+    )
+    sign_bucket = case(
+        (Transaction.amount > 0, 1),
+        (Transaction.amount < 0, -1),
+        else_=0,
+    )
     with session_factory() as session:
         rows = session.execute(
-            select(Transaction.amount, Transaction.transaction_type, Category.name)
+            select(
+                func.sum(signed_amount),
+                Transaction.transaction_type,
+                Category.name,
+                sign_bucket,
+            )
             .join(Account, Transaction.account_id == Account.id)
             .outerjoin(Category, Transaction.category_id == Category.id)
             .where(
@@ -189,9 +206,17 @@ def monthly_financial_summary(
                 Transaction.transaction_date >= start,
                 Transaction.transaction_date < end,
             )
+            .group_by(
+                Transaction.transaction_type,
+                Category.name,
+                sign_bucket,
+            )
         ).all()
 
-    return summarize_transaction_rows(rows)
+    return summarize_transaction_rows(
+        (amount, transaction_type, category)
+        for amount, transaction_type, category, _sign in rows
+    )
 
 
 def category_spending_totals(
@@ -203,9 +228,19 @@ def category_spending_totals(
     session_factory=SessionLocal,
 ) -> dict[int, Decimal]:
     start, end = _month_bounds(year, month)
+    spending_amount = case(
+        (
+            Transaction.transaction_type == TransactionType.EXPENSE,
+            func.abs(Transaction.amount),
+        ),
+        else_=-Transaction.amount,
+    )
     with session_factory() as session:
         rows = session.execute(
-            select(Transaction.category_id, Transaction.amount, Transaction.transaction_type)
+            select(
+                Transaction.category_id,
+                func.sum(spending_amount),
+            )
             .join(Account, Transaction.account_id == Account.id)
             .where(
                 _account_scope(user_id, group_id),
@@ -218,13 +253,10 @@ def category_spending_totals(
                     TransactionType.REFUND_REIMBURSEMENT,
                 )),
             )
+            .group_by(Transaction.category_id)
         ).all()
 
-    totals: dict[int, Decimal] = {}
-    for category_id, amount, transaction_type in rows:
-        value = abs(amount) if transaction_type == TransactionType.EXPENSE else -amount
-        totals[category_id] = totals.get(category_id, Decimal()) + value
-    return totals
+    return {category_id: amount for category_id, amount in rows}
 
 
 def monthly_budget_progress(

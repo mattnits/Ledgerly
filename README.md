@@ -125,6 +125,15 @@ Ledgerly keeps this information local, but it does not replace normal device
 security. Protect your operating-system account, use disk encryption when
 appropriate, and keep regular backups of `finance.db`.
 
+### Switching databases manually
+
+Close every Ledgerly window before replacing `finance.db`. Move the current
+database and any matching `finance.db-wal` / `finance.db-shm` files together to
+a backup location so sidecar files from two different databases are never
+mixed, then copy in a complete Ledgerly database backup. On startup, Ledgerly
+checks the replacement before applying migrations. Damaged, incomplete, and
+unrelated SQLite files are left untouched and shown with a retry option.
+
 ## Run from source
 
 Clone the repository, then use the setup script for your platform.
@@ -195,6 +204,11 @@ Windows and Linux packages. Pushing a `v*` tag publishes the Windows installer,
 Windows portable ZIP, and Linux ZIP to GitHub Releases. Manual workflow runs
 retain the packages as downloadable workflow artifacts.
 
+Every pull request also runs two independent checks: **Tests** runs the full
+unit test suite, and **Build app** creates and smoke-tests packaged Windows and
+Linux apps. Repository branch protection should require both checks before
+merging.
+
 ## Tests
 
 Run the test suite without opening desktop windows:
@@ -203,11 +217,11 @@ Run the test suite without opening desktop windows:
 
 ```powershell
 $env:QT_QPA_PLATFORM = 'offscreen'
-python -m unittest discover -s tests -v
+python tests/run_suite.py
 ```
 
 ### Bash
 
 ```bash
-QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests -v
+QT_QPA_PLATFORM=offscreen python tests/run_suite.py
 ```

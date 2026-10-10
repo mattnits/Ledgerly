@@ -79,6 +79,25 @@ def set_splash_status(
     app.processEvents()
 
 
+def ask_to_retry_database(error: Exception) -> bool:
+    """Explain a recoverable database startup problem without backend details."""
+    message = QMessageBox()
+    message.setIcon(QMessageBox.Icon.Warning)
+    message.setWindowTitle("Database unavailable")
+    message.setText("Ledgerly could not safely open this database.")
+    message.setInformativeText(
+        f"{error}\n\n"
+        "To switch databases manually, close every Ledgerly window first and "
+        "replace the complete database backup. You can correct the file now and "
+        "retry without restarting Ledgerly."
+    )
+    message.setStandardButtons(
+        QMessageBox.StandardButton.Retry | QMessageBox.StandardButton.Close
+    )
+    message.setDefaultButton(QMessageBox.StandardButton.Retry)
+    return message.exec() == QMessageBox.StandardButton.Retry
+
+
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Ledgerly")
@@ -95,11 +114,30 @@ def main():
         # Keep these imports after the first paint. Importing the full UI pulls
         # in every page and icon dependency, which otherwise leaves the first
         # native window blank while Python finishes loading them.
-        from app.core.db import ensure_categories, init_db
+        from app.core.db import (
+            DatabaseSetupError,
+            prepare_database,
+            reset_database_connections,
+        )
+        # Make normal shutdown release SQLite/WAL sidecar handles promptly so
+        # a closed app is immediately safe to back up or switch manually.
+        app.aboutToQuit.connect(reset_database_connections)
 
         set_splash_status(app, splash, "Preparing your database...")
-        init_db()
-        ensure_categories()
+        while True:
+            try:
+                prepare_database()
+                break
+            except DatabaseSetupError as error:
+                # Release Windows file handles before asking the user to swap
+                # or repair the file. Otherwise the retry dialog itself could
+                # prevent a manual replacement.
+                reset_database_connections()
+                splash.hide()
+                if not ask_to_retry_database(error):
+                    return
+                splash.show()
+                set_splash_status(app, splash, "Checking your database...")
 
         set_splash_status(app, splash, "Loading your dashboard...")
         from app.ui.widgets.input_behavior import install_wheel_change_guard
