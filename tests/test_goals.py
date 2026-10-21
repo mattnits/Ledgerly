@@ -543,6 +543,149 @@ class GoalsPageLayoutTest(unittest.TestCase):
         monthly.close()
         quick.close()
 
+    def test_quick_stats_tiles_keep_icons_and_text_aligned_when_resized(self):
+        quick = QuickStatsCard()
+        quick.set_data(
+            MonthlySavingsBreakdown(
+                income=Decimal("5755"),
+                spending=Decimal("2970.79"),
+                work_rrsp_employee=Decimal("300"),
+                work_rrsp_employer=Decimal("150"),
+                net_savings=Decimal("2784.21"),
+                target=Decimal("2000"),
+            ),
+            "September 2026",
+        )
+
+        try:
+            quick.show()
+            for compact, width in ((False, 560), (True, 320)):
+                with self.subTest(compact=compact):
+                    quick.set_compact(compact)
+                    quick.resize(width, quick.sizeHint().height())
+                    self.app.processEvents()
+
+                    tiles = (
+                        quick.income,
+                        quick.spending,
+                        quick.rrsp,
+                        quick.net,
+                    )
+                    self.assertLessEqual(
+                        max(tile.height() for tile in tiles)
+                        - min(tile.height() for tile in tiles),
+                        1,
+                    )
+
+                    for tile in tiles:
+                        icon_position = tile.icon_label.mapTo(tile, QPoint())
+                        title_position = tile.title_label.mapTo(tile, QPoint())
+                        value_position = tile.value_label.mapTo(tile, QPoint())
+                        detail_position = tile.detail_label.mapTo(tile, QPoint())
+
+                        self.assertAlmostEqual(
+                            icon_position.y() + tile.icon_label.height() / 2,
+                            title_position.y() + tile.title_label.height() / 2,
+                            delta=1.0,
+                        )
+                        self.assertEqual(icon_position.x(), value_position.x())
+                        self.assertEqual(value_position.x(), detail_position.x())
+                        self.assertEqual(
+                            title_position.x(),
+                            icon_position.x()
+                            + tile.icon_label.width()
+                            + tile.header_layout.spacing(),
+                        )
+                        self.assertLessEqual(
+                            value_position.y()
+                            - (
+                                icon_position.y()
+                                + tile.icon_label.height()
+                            ),
+                            tile.tile_layout.spacing() + 2,
+                        )
+                        self.assertLessEqual(
+                            value_position.x() + tile.value_label.width(),
+                            tile.contentsRect().right() + 1,
+                        )
+                        self.assertEqual(
+                            tile.cursor().shape(), Qt.CursorShape.ArrowCursor
+                        )
+
+                    if not compact:
+                        self.assertEqual(
+                            quick.income.value_label.mapTo(quick, QPoint()).y(),
+                            quick.spending.value_label.mapTo(quick, QPoint()).y(),
+                        )
+                        self.assertEqual(
+                            quick.rrsp.value_label.mapTo(quick, QPoint()).y(),
+                            quick.net.value_label.mapTo(quick, QPoint()).y(),
+                        )
+                        for tile in tiles:
+                            for label in (
+                                tile.title_label,
+                                tile.value_label,
+                                tile.detail_label,
+                            ):
+                                self.assertLessEqual(
+                                    label.fontMetrics().horizontalAdvance(
+                                        label.text()
+                                    ),
+                                    label.width(),
+                                )
+
+            self.assertEqual(quick.income.detail_label.text(), "Total income")
+            self.assertEqual(quick.spending.detail_label.text(), "Total spending")
+            self.assertEqual(
+                quick.rrsp.detail_label.text(), "$300 you • $150 employer"
+            )
+            self.assertEqual(quick.net.detail_label.text(), "48% of income")
+            self.assertFalse(quick.rrsp.detail_label.wordWrap())
+        finally:
+            quick.close()
+
+    def test_month_change_refreshes_every_quick_stat(self):
+        october = MonthlySavingsBreakdown(
+            income=Decimal("1000"),
+            spending=Decimal("250"),
+            work_rrsp_employee=Decimal("50"),
+            work_rrsp_employer=Decimal("25"),
+            net_savings=Decimal("750"),
+            target=None,
+        )
+        september = MonthlySavingsBreakdown(
+            income=Decimal("5755"),
+            spending=Decimal("2970.79"),
+            work_rrsp_employee=Decimal("300"),
+            work_rrsp_employer=Decimal("150"),
+            net_savings=Decimal("2784.21"),
+            target=None,
+        )
+
+        def breakdown_for_month(year, month, **_scope):
+            return september if (year, month) == (2026, 9) else october
+
+        page = GoalsPage(session_factory=self.sessions)
+        try:
+            with patch(
+                "app.ui.pages.goals.get_monthly_savings_breakdown",
+                side_effect=breakdown_for_month,
+            ):
+                page.month_navigator.set_month(2026, 10)
+                page.set_profile(user_id="owner")
+                page.month_navigator.month_selector.setCurrentIndex(
+                    page.month_navigator.month_selector.findData(9)
+                )
+                self.app.processEvents()
+
+            self.assertEqual(page.quick_stats.month_label.text(), "September 2026")
+            self.assertEqual(page.quick_stats.income.value_label.text(), "$5,755")
+            self.assertEqual(page.quick_stats.spending.value_label.text(), "$2,970.79")
+            self.assertEqual(page.quick_stats.rrsp.value_label.text(), "$450")
+            self.assertEqual(page.quick_stats.net.value_label.text(), "$2,784.21")
+        finally:
+            page.close()
+
     def setUp(self):
         self.engine = create_engine(
             "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
@@ -698,6 +841,69 @@ class GoalsPageLayoutTest(unittest.TestCase):
         self.assertNotIn("Budget Rules", visible_text)
         page.close()
 
+    def test_summary_cards_fill_wide_row_and_reflow_across_widths(self):
+        page = GoalsPage(session_factory=self.sessions)
+        page.set_profile(user_id="owner")
+
+        try:
+            page.show()
+
+            page.resize(1400, 900)
+            self.app.processEvents()
+            page._reflow()
+            self.app.processEvents()
+            self.assertFalse(page._top_stacked)
+            self.assertFalse(page.quick_stats._compact)
+            self.assertEqual(
+                page.quick_stats.geometry().top(),
+                page.monthly_card.geometry().top(),
+            )
+            self.assertEqual(
+                page.quick_stats.geometry().bottom(),
+                page.monthly_card.geometry().bottom(),
+            )
+            self.assertLessEqual(
+                abs(
+                    page.quick_stats.income.height()
+                    - page.quick_stats.net.height()
+                ),
+                1,
+            )
+
+            page.resize(800, 900)
+            self.app.processEvents()
+            page._reflow()
+            self.app.processEvents()
+            self.assertTrue(page._top_stacked)
+            self.assertFalse(page.quick_stats._compact)
+            self.assertGreater(
+                page.quick_stats.geometry().top(),
+                page.monthly_card.geometry().bottom(),
+            )
+            self.assertEqual(
+                page.quick_stats.width(), page.monthly_card.width()
+            )
+
+            page.resize(440, 760)
+            self.app.processEvents()
+            page._reflow()
+            self.app.processEvents()
+            self.assertTrue(page._top_stacked)
+            self.assertTrue(page.quick_stats._compact)
+            tile_lefts = {
+                tile.mapTo(page.quick_stats, QPoint()).x()
+                for tile in (
+                    page.quick_stats.income,
+                    page.quick_stats.spending,
+                    page.quick_stats.rrsp,
+                    page.quick_stats.net,
+                )
+            }
+            self.assertEqual(len(tile_lefts), 1)
+            self.assertEqual(page.scroll.horizontalScrollBar().maximum(), 0)
+        finally:
+            page.close()
+
     def test_wide_layout_matches_reference_structure(self):
         page = GoalsPage(session_factory=self.sessions)
         page.set_profile(user_id="owner")
@@ -715,6 +921,35 @@ class GoalsPageLayoutTest(unittest.TestCase):
         )
         self.assertEqual(
             page.add_goal_button.objectName(), "secondaryActionButton"
+        )
+        self.assertEqual(page.quick_stats.height(), page.monthly_card.height())
+        self.assertEqual(
+            page.quick_stats.income.height(),
+            page.quick_stats.spending.height(),
+        )
+        self.assertEqual(
+            page.quick_stats.rrsp.height(),
+            page.quick_stats.net.height(),
+        )
+        header_icon_top = page.quick_stats.header_icon.mapTo(
+            page.quick_stats, QPoint()
+        ).y()
+        header_title_top = page.quick_stats.title_label.mapTo(
+            page.quick_stats, QPoint()
+        ).y()
+        header_month_top = page.quick_stats.month_label.mapTo(
+            page.quick_stats, QPoint()
+        ).y()
+        header_center = header_icon_top + page.quick_stats.header_icon.height() / 2
+        self.assertAlmostEqual(
+            header_center,
+            header_title_top + page.quick_stats.title_label.height() / 2,
+            delta=1.0,
+        )
+        self.assertAlmostEqual(
+            header_center,
+            header_month_top + page.quick_stats.month_label.height() / 2,
+            delta=1.0,
         )
         page.close()
 
