@@ -87,7 +87,13 @@ def _set_signed_value_color(
     label.setStyleSheet(f"color: {color};" if color else "")
 
 
-def _badge_pixmap(icon_name: str, color: str, size: int = 34) -> QPixmap:
+def _badge_pixmap(
+    icon_name: str,
+    color: str,
+    size: int = 34,
+    *,
+    subtle: bool = False,
+) -> QPixmap:
     """Render the compact coloured icon badges used throughout the Goals page."""
     background = QColor(color)
     if not background.isValid():
@@ -97,12 +103,17 @@ def _badge_pixmap(icon_name: str, color: str, size: int = 34) -> QPixmap:
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     tint = QColor(background)
-    tint.setAlpha(205)
-    painter.setPen(QPen(background.lighter(125), 1))
+    tint.setAlpha(42 if subtle else 205)
+    border = QColor(background.lighter(125))
+    if subtle:
+        border.setAlpha(88)
+    painter.setPen(QPen(border, 1))
     painter.setBrush(tint)
-    painter.drawRoundedRect(QRectF(1, 1, size - 2, size - 2), 9, 9)
-    icon_size = max(14, int(size * 0.48))
-    icon = awesome_icon(icon_name, color="#f8fbff").pixmap(icon_size, icon_size)
+    radius = max(6, round(size * 0.27)) if subtle else 9
+    painter.drawRoundedRect(QRectF(1, 1, size - 2, size - 2), radius, radius)
+    icon_size = max(12, int(size * (0.5 if subtle else 0.48)))
+    icon_color = background.name() if subtle else "#f8fbff"
+    icon = awesome_icon(icon_name, color=icon_color).pixmap(icon_size, icon_size)
     offset = (size - icon_size) // 2
     painter.drawPixmap(offset, offset, icon)
     painter.end()
@@ -255,49 +266,103 @@ class MetricTile(QFrame):
     def __init__(self, title: str, icon: str, color: str) -> None:
         super().__init__()
         self._dense = False
+        self._icon_name = icon
+        self._icon_color = color
         self.setObjectName("goalsMetricTile")
-        self.setMinimumHeight(88)
-        self.tile_layout = QGridLayout(self)
-        self.tile_layout.setContentsMargins(14, 12, 14, 11)
-        self.tile_layout.setHorizontalSpacing(8)
-        self.tile_layout.setVerticalSpacing(2)
-        icon_label = QLabel()
-        icon_label.setPixmap(awesome_icon(icon, color=color).pixmap(24, 24))
-        icon_label.setFixedSize(28, 28)
-        title_label = QLabel(title)
-        title_label.setObjectName("goalsMetricTitle")
-        title_label.setWordWrap(True)
-        title_label.setSizePolicy(
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
+        self.setMinimumHeight(92)
+        self.tile_layout = QVBoxLayout(self)
+        self.tile_layout.setContentsMargins(14, 11, 14, 11)
+        self.tile_layout.setSpacing(7)
+
+        self.header_widget = QWidget(self)
+        self.header_layout = QHBoxLayout(self.header_widget)
+        self.header_layout.setContentsMargins(0, 0, 0, 0)
+        self.header_layout.setSpacing(8)
+        self.icon_label = QLabel()
+        self.icon_label.setFixedSize(28, 28)
+        self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._update_icon()
+        self.title_label = QLabel(title)
+        self.title_label.setObjectName("goalsMetricTitle")
+        self.title_label.setWordWrap(True)
+        self.title_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.title_label.setSizePolicy(
             QSizePolicy.Policy.Ignored,
             QSizePolicy.Policy.Preferred,
         )
+        self.title_label.setMinimumWidth(0)
+        self.header_layout.addWidget(self.icon_label)
+        self.header_layout.addWidget(self.title_label, 1)
+
+        self.value_block = QWidget(self)
+        self.value_layout = QVBoxLayout(self.value_block)
+        self.value_layout.setContentsMargins(0, 0, 0, 0)
+        self.value_layout.setSpacing(1)
         self.value_label = QLabel("$0")
         self.value_label.setObjectName("goalsMetricValue")
+        self.value_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+        )
+        self.value_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
+        self.value_label.setMinimumWidth(0)
         self.detail_label = QLabel("")
         self.detail_label.setObjectName("goalsMetricDetail")
-        self.detail_label.setWordWrap(True)
-        self.tile_layout.addWidget(icon_label, 0, 0, 2, 1, alignment=Qt.AlignmentFlag.AlignTop)
-        self.tile_layout.addWidget(title_label, 0, 1)
-        self.tile_layout.addWidget(self.value_label, 1, 1)
-        self.tile_layout.addWidget(self.detail_label, 2, 0, 1, 2)
-        self.tile_layout.setColumnStretch(1, 1)
+        self.detail_label.setWordWrap(False)
+        self.detail_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+        )
+        self.detail_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
+        self.detail_label.setMinimumWidth(0)
+        self.value_layout.addWidget(self.value_label)
+        self.value_layout.addWidget(self.detail_label)
+        self.tile_layout.addWidget(self.header_widget)
+        self.tile_layout.addWidget(self.value_block)
+
+    def _update_icon(self) -> None:
+        size = 22 if self._dense else 28
+        self.icon_label.setFixedSize(size, size)
+        self.icon_label.setPixmap(
+            _badge_pixmap(
+                self._icon_name,
+                self._icon_color,
+                size,
+                subtle=True,
+            )
+        )
 
     def set_dense(self, dense: bool) -> None:
         self._dense = dense
-        self.setMinimumHeight(52 if dense else 88)
+        self.setMinimumHeight(58 if dense else 92)
         self.tile_layout.setContentsMargins(
             8 if dense else 14,
-            4 if dense else 12,
+            3 if dense else 11,
             8 if dense else 14,
-            4 if dense else 11,
+            3 if dense else 11,
         )
-        self.detail_label.setVisible(bool(self.detail_label.text()) and not dense)
+        self.tile_layout.setSpacing(3 if dense else 7)
+        self.header_layout.setSpacing(6 if dense else 8)
+        self._update_icon()
+        self.detail_label.setVisible(bool(self.detail_label.text()))
 
     def set_data(self, value: Decimal, detail: str = "") -> None:
         self.value_label.setText(_money(value))
         _set_signed_value_color(self.value_label, value)
         self.detail_label.setText(detail)
-        self.detail_label.setVisible(bool(detail) and not self._dense)
+        self.detail_label.setToolTip(detail)
+        self.detail_label.setVisible(bool(detail))
 
 
 class MonthlySavingsCard(SectionCard):
@@ -543,8 +608,8 @@ class QuickStatsCard(SectionCard):
         super().__init__("quickStatsCard")
         self._compact: bool | None = None
         self.root_layout = QVBoxLayout(self)
-        self.root_layout.setContentsMargins(18, 18, 18, 18)
-        self.root_layout.setSpacing(14)
+        self.root_layout.setContentsMargins(16, 14, 16, 16)
+        self.root_layout.setSpacing(10)
         self.header_widget = QWidget()
         self.header_widget.setSizePolicy(
             QSizePolicy.Policy.Expanding,
@@ -553,13 +618,23 @@ class QuickStatsCard(SectionCard):
         heading = QHBoxLayout(self.header_widget)
         heading.setContentsMargins(0, 0, 0, 0)
         heading.setSpacing(8)
-        icon = QLabel()
-        icon.setPixmap(awesome_icon("fa6s.chart-simple", color="#49a4ff").pixmap(20, 20))
+        self.header_icon = QLabel()
+        self.header_icon.setFixedSize(20, 20)
+        self.header_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.header_icon.setPixmap(
+            awesome_icon("fa6s.chart-simple", color="#49a4ff").pixmap(20, 20)
+        )
         self.title_label = QLabel("Quick Stats")
         self.title_label.setObjectName("goalsSectionTitle")
+        self.title_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
         self.month_label = QLabel()
         self.month_label.setObjectName("goalsMuted")
-        heading.addWidget(icon)
+        self.month_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        heading.addWidget(self.header_icon)
         heading.addWidget(self.title_label)
         heading.addStretch()
         heading.addWidget(self.month_label)
@@ -572,7 +647,7 @@ class QuickStatsCard(SectionCard):
         )
         self.grid = QGridLayout(self.metrics_widget)
         self.grid.setContentsMargins(0, 0, 0, 0)
-        self.grid.setSpacing(10)
+        self.grid.setSpacing(8)
         self.income = MetricTile("Income", "fa6s.wallet", "#49a4ff")
         self.spending = MetricTile("Spending", "fa6s.credit-card", "#ff6670")
         self.rrsp = MetricTile("RRSP Contributions", "fa6s.piggy-bank", "#bd69ee")
@@ -583,12 +658,21 @@ class QuickStatsCard(SectionCard):
         self.root_layout.addWidget(self.metrics_widget, 1)
 
     def set_dense(self, dense: bool) -> None:
-        margin = 10 if dense else 18
-        self.root_layout.setContentsMargins(margin, margin, margin, margin)
-        self.root_layout.setSpacing(8 if dense else 14)
-        self.grid.setSpacing(7 if dense else 10)
+        horizontal_margin = 8 if dense else 16
+        vertical_margin = 7 if dense else 14
+        self.root_layout.setContentsMargins(
+            horizontal_margin,
+            vertical_margin,
+            horizontal_margin,
+            vertical_margin,
+        )
+        self.root_layout.setSpacing(5 if dense else 10)
+        self.grid.setSpacing(5 if dense else 8)
         for tile in (self.income, self.spending, self.rrsp, self.net):
             tile.set_dense(dense)
+        self.grid.invalidate()
+        self.metrics_widget.updateGeometry()
+        self.updateGeometry()
 
     def set_compact(self, compact: bool) -> None:
         if compact == self._compact:
@@ -607,12 +691,13 @@ class QuickStatsCard(SectionCard):
 
     def set_data(self, data: MonthlySavingsBreakdown, month_label: str) -> None:
         self.month_label.setText(month_label)
-        self.income.set_data(data.income)
-        self.spending.set_data(data.spending)
+        self.income.set_data(data.income, "Total income")
+        self.spending.set_data(data.spending, "Total spending")
         total_rrsp = data.work_rrsp_employee + data.work_rrsp_employer
         self.rrsp.set_data(
             total_rrsp,
-            f"{_money(data.work_rrsp_employee)} employee • {_money(data.work_rrsp_employer)} employer",
+            f"{_money(data.work_rrsp_employee)} you \u2022 "
+            f"{_money(data.work_rrsp_employer)} employer",
         )
         ratio = (data.net_savings / data.income * Decimal(100)) if data.income else Decimal()
         self.net.set_data(data.net_savings, f"{ratio:.0f}% of income")
@@ -1109,11 +1194,14 @@ class GoalsPage(QWidget):
         self.top_layout.setSpacing(16)
         self.monthly_card = MonthlySavingsCard()
         self.quick_stats = QuickStatsCard()
-        for card in (self.monthly_card, self.quick_stats):
-            card.setSizePolicy(
-                QSizePolicy.Policy.Expanding,
-                QSizePolicy.Policy.Expanding,
-            )
+        self.monthly_card.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        self.quick_stats.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
         self.monthly_card.edit_requested.connect(self._edit_monthly_goal)
         self.content_layout.addWidget(self.top)
 
@@ -1134,6 +1222,11 @@ class GoalsPage(QWidget):
         budget_title.setObjectName("goalsSectionTitle")
         self.budget_subtitle = QLabel("Set monthly limits for your spending categories.")
         self.budget_subtitle.setObjectName("goalsMuted")
+        self.budget_subtitle.setWordWrap(True)
+        self.budget_subtitle.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
         budget_titles.addWidget(budget_title)
         budget_titles.addWidget(self.budget_subtitle)
         self.add_budget_button = QPushButton("Add Budget")
@@ -1219,6 +1312,11 @@ class GoalsPage(QWidget):
         goals_title.setObjectName("goalsSectionTitle")
         self.goals_subtitle = QLabel("Create and track specific longer-term savings goals.")
         self.goals_subtitle.setObjectName("goalsMuted")
+        self.goals_subtitle.setWordWrap(True)
+        self.goals_subtitle.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
         goals_titles.addWidget(goals_title)
         goals_titles.addWidget(self.goals_subtitle)
         self.add_goal_button = QPushButton("Add Goal")
@@ -1424,14 +1522,32 @@ class GoalsPage(QWidget):
         )
         if stacked != self._top_stacked:
             self._top_stacked = stacked
+            top_policy = self.top.sizePolicy()
+            top_policy.setVerticalPolicy(
+                QSizePolicy.Policy.Maximum
+                if stacked
+                else QSizePolicy.Policy.Expanding
+            )
+            self.top.setSizePolicy(top_policy)
             self.top_layout.removeWidget(self.monthly_card)
             self.top_layout.removeWidget(self.quick_stats)
             self.top_layout.addWidget(self.monthly_card, 0, 0)
-            self.top_layout.addWidget(self.quick_stats, 1 if stacked else 0, 0 if stacked else 1)
+            if stacked:
+                self.top_layout.addWidget(
+                    self.quick_stats,
+                    1,
+                    0,
+                    alignment=Qt.AlignmentFlag.AlignTop,
+                )
+            else:
+                # Side-by-side summary cards share the complete row height.
+                self.top_layout.addWidget(self.quick_stats, 0, 1)
             self.top_layout.setColumnStretch(0, 2)
             self.top_layout.setColumnStretch(1, 1 if not stacked else 0)
             self.top_layout.setRowStretch(0, 1)
-            self.top_layout.setRowStretch(1, 1 if stacked else 0)
+            # Quick Stats owns its natural height; any spare stacked-page
+            # height belongs to the more detailed monthly summary above it.
+            self.top_layout.setRowStretch(1, 0)
         self.monthly_card.set_compact(stacked and width < 780)
         self.quick_stats.set_compact(stacked and width < 480)
         compact = width < self.COMPACT_BUDGET_WIDTH
@@ -1447,7 +1563,10 @@ class GoalsPage(QWidget):
             self._goal_columns = columns
             self._render_goal_cards()
         content_policy = self.content.sizePolicy()
-        content_policy.setHorizontalPolicy(QSizePolicy.Policy.Expanding)
+        # The scroll area's viewport owns the width. Ignoring stale child
+        # size hints lets every responsive section shrink without creating
+        # hidden horizontal overflow after a wide-to-narrow resize.
+        content_policy.setHorizontalPolicy(QSizePolicy.Policy.Ignored)
         content_policy.setVerticalPolicy(
             QSizePolicy.Policy.Ignored if dense else QSizePolicy.Policy.Preferred
         )
