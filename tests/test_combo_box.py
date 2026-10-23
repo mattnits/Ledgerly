@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication, QDialog, QLineEdit, QScrollArea, QTo
 
 from app.ui.theme import APP_STYLESHEET, DROPDOWN_MAX_ROWS
 from app.ui.widgets.combo_box import AppComboBox
+from app.ui.widgets.dropdown import _dismiss_filter
 from app.ui.widgets.date_dropdown import DateDropdown
 
 
@@ -206,6 +207,18 @@ class AppComboBoxTest(unittest.TestCase):
             self.combo.hidePopup()
             self.combo.setParent(None)
             dialog.close()
+
+    def test_popup_dismiss_filter_releases_closed_combo(self):
+        self.combo.addItems(["First", "Second"])
+        self.combo.show()
+        self.combo.showPopup()
+        self.app.processEvents()
+        self.assertIs(_dismiss_filter().active_combo(), self.combo)
+
+        self.combo.hidePopup()
+        self.app.processEvents()
+
+        self.assertIsNone(_dismiss_filter().active_combo())
 
     def test_replaced_model_and_long_names_use_bounded_popup_width(self):
         model = QStandardItemModel(self.combo)

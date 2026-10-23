@@ -1,7 +1,9 @@
 """Shared list popup for Ledgerly's QComboBox-based selectors."""
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt
+import weakref
+
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QSize, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QFrame, QListView, QStyle,
@@ -11,6 +13,68 @@ from PySide6.QtWidgets import (
 from app.ui.theme import (
     DROPDOWN, DROPDOWN_MAX_ROWS, DROPDOWN_POPUP_STYLE, DROPDOWN_ROW_HEIGHT,
 )
+
+
+class _DropdownDismissFilter(QObject):
+    """One stable application filter for the currently open dropdown.
+
+    Installing each short-lived combo as an application event filter leaves
+    Qt holding widget filters during interpreter shutdown on some platforms.
+    Keeping one application-owned filter avoids that lifetime inversion.
+    """
+
+    def __init__(self, application: QApplication) -> None:
+        super().__init__(application)
+        self._active_ref = None
+        application.installEventFilter(self)
+
+    def watch(self, combo: "LedgerlyComboBox") -> None:
+        active = self.active_combo()
+        if active is not None and active is not combo:
+            active.hidePopup()
+        self._active_ref = weakref.ref(combo)
+
+    def clear(self, combo: "LedgerlyComboBox") -> None:
+        if self.active_combo() is combo:
+            self._active_ref = None
+
+    def active_combo(self):
+        return self._active_ref() if self._active_ref is not None else None
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        combo = self.active_combo()
+        if combo is None:
+            self._active_ref = None
+            return False
+        try:
+            popup = combo._popup_window
+            if not popup.isVisible():
+                self._active_ref = None
+                return False
+            if event.type() == QEvent.Type.ApplicationDeactivate:
+                combo.hidePopup()
+            elif event.type() == QEvent.Type.MouseButtonPress:
+                point = event.globalPosition().toPoint()
+                if not popup.frameGeometry().contains(point):
+                    combo.hidePopup()
+                    # A second click on the field closes it without reopening.
+                    return combo.rect().contains(combo.mapFromGlobal(point))
+        except RuntimeError:
+            # The weak Python wrapper can briefly outlive its C++ widget while
+            # a parent hierarchy is being destroyed.
+            self._active_ref = None
+        return False
+
+
+def _dismiss_filter() -> _DropdownDismissFilter:
+    application = QApplication.instance()
+    if application is None:
+        raise RuntimeError("A QApplication is required before creating dropdowns")
+    popup_filter = getattr(application, "_ledgerly_dropdown_filter", None)
+    if popup_filter is None:
+        popup_filter = _DropdownDismissFilter(application)
+        application._ledgerly_dropdown_filter = popup_filter
+    return popup_filter
 
 
 class DropdownItemDelegate(QStyledItemDelegate):
@@ -128,7 +192,7 @@ class LedgerlyComboBox(QComboBox):
         self._list.viewport().installEventFilter(self)
         self._list.clicked.connect(self._activate_popup_index)
         layout.addWidget(self._list)
-        self._app_filter_installed = False
+        self._dismiss_controller = None
         self._sync_cursor()
 
     def view(self) -> QListView:
@@ -166,9 +230,8 @@ class LedgerlyComboBox(QComboBox):
         self._list.setCurrentIndex(self.model().index(self.currentIndex(), self.modelColumn(), self.rootModelIndex()))
         self._position_popup()
         self._popup_window.show()
-        if not self._app_filter_installed:
-            QApplication.instance().installEventFilter(self)
-            self._app_filter_installed = True
+        self._dismiss_controller = _dismiss_filter()
+        self._dismiss_controller.watch(self)
         self._popup_window.raise_()
         self._list.setFocus(Qt.FocusReason.PopupFocusReason)
         self._list.scrollTo(self._list.currentIndex(), QAbstractItemView.ScrollHint.EnsureVisible)
@@ -220,14 +283,6 @@ class LedgerlyComboBox(QComboBox):
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
         if not hasattr(self, "_list"):
             return super().eventFilter(watched, event)
-        if self._popup_window.isVisible() and event.type() == QEvent.Type.MouseButtonPress:
-            point = event.globalPosition().toPoint()
-            if not self._popup_window.frameGeometry().contains(point):
-                self.hidePopup()
-                # A second click on the field closes it, without reopening.
-                return self.rect().contains(self.mapFromGlobal(point))
-        if event.type() == QEvent.Type.ApplicationDeactivate:
-            self.hidePopup()
         if watched is self._list.viewport() and event.type() == QEvent.Type.MouseMove:
             index = self._list.indexAt(event.position().toPoint())
             enabled = index.isValid() and bool(index.flags() & Qt.ItemFlag.ItemIsEnabled)
@@ -249,9 +304,8 @@ class LedgerlyComboBox(QComboBox):
                 self.focusNextPrevChild(event.key() == Qt.Key.Key_Tab)
                 return True
         if watched is self._popup_window and event.type() == QEvent.Type.Hide:
-            if self._app_filter_installed:
-                QApplication.instance().removeEventFilter(self)
-                self._app_filter_installed = False
+            if self._dismiss_controller is not None:
+                self._dismiss_controller.clear(self)
             # Reset QComboBox's pressed state after outside-click dismissal.
             super().hidePopup()
             self.update()
