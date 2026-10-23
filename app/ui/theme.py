@@ -40,6 +40,54 @@ _NATIVE_BUTTON_ICON_TEXT_SPACING = 4
 _qtawesome_available: bool | None = None
 
 
+def icon_render_device_pixel_ratio() -> float:
+    """Render icons at native display density, with 2x supersampling minimum."""
+    app = QApplication.instance()
+    screen_ratios = (
+        [screen.devicePixelRatio() for screen in app.screens()]
+        if app is not None
+        else []
+    )
+    return max(2.0, *screen_ratios)
+
+
+def high_dpi_canvas(width: int, height: int | None = None) -> QPixmap:
+    """Create a transparent pixmap whose logical dimensions stay unchanged."""
+    logical_height = width if height is None else height
+    ratio = icon_render_device_pixel_ratio()
+    pixmap = QPixmap(
+        max(1, round(width * ratio)),
+        max(1, round(logical_height * ratio)),
+    )
+    pixmap.setDevicePixelRatio(ratio)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    return pixmap
+
+
+def icon_pixmap(
+    icon: QIcon,
+    width: int,
+    height: int | None = None,
+    mode: QIcon.Mode = QIcon.Mode.Normal,
+    state: QIcon.State = QIcon.State.Off,
+) -> QPixmap:
+    """Rasterize a scalable icon sharply without changing its logical size."""
+    logical_height = width if height is None else height
+    ratio = icon_render_device_pixel_ratio()
+    size = QSize(width, logical_height)
+    try:
+        return icon.pixmap(size, ratio, mode, state)
+    except TypeError:
+        # Compatibility fallback for older Qt bindings without the DPR overload.
+        pixmap = icon.pixmap(
+            QSize(round(width * ratio), round(logical_height * ratio)),
+            mode,
+            state,
+        )
+        pixmap.setDevicePixelRatio(ratio)
+        return pixmap
+
+
 def awesome_icon(
     name: str,
     *,
@@ -95,10 +143,11 @@ def _icon_with_right_padding(icon: QIcon, size: int, padding: int) -> QIcon:
         QIcon.Mode.Selected,
     ):
         for state in (QIcon.State.Off, QIcon.State.On):
-            canvas = QPixmap(size + padding, size)
-            canvas.fill(Qt.GlobalColor.transparent)
+            canvas = high_dpi_canvas(size + padding, size)
             painter = QPainter(canvas)
-            painter.drawPixmap(0, 0, icon.pixmap(size, size, mode, state))
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            painter.drawPixmap(0, 0, icon_pixmap(icon, size, size, mode, state))
             painter.end()
             padded.addPixmap(canvas, mode, state)
     return padded
@@ -193,7 +242,7 @@ def set_label_icon(
     color: str = COLORS["text_muted"],
     size: int = 18,
 ) -> None:
-    label.setPixmap(awesome_icon(name, color=color).pixmap(size, size))
+    label.setPixmap(icon_pixmap(awesome_icon(name, color=color), size, size))
     label.setFixedSize(size, size)
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -231,8 +280,7 @@ def brand_icon(institution: str, *, size: int = 24) -> QIcon:
             int(source.height() * 0.80),
         )
 
-    target = QPixmap(size, size)
-    target.fill(Qt.GlobalColor.transparent)
+    target = high_dpi_canvas(size, size)
     painter = QPainter(target)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)

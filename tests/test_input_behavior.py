@@ -14,7 +14,12 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui.widgets.input_behavior import install_wheel_change_guard
-from app.ui.theme import refresh_button_icon_spacing, set_button_icon
+from app.ui.theme import (
+    awesome_icon,
+    icon_pixmap,
+    refresh_button_icon_spacing,
+    set_button_icon,
+)
 
 
 def send_wheel(widget, vertical_delta: int) -> None:
@@ -116,6 +121,13 @@ class WheelChangeGuardTest(unittest.TestCase):
         self.assertEqual(
             button.cursor().shape(), Qt.CursorShape.PointingHandCursor
         )
+
+    def test_icon_pixmaps_are_supersampled_without_changing_logical_size(self):
+        pixmap = icon_pixmap(awesome_icon("fa6s.check"), 16, 16)
+
+        self.assertGreaterEqual(pixmap.devicePixelRatio(), 2.0)
+        self.assertEqual(pixmap.deviceIndependentSize().width(), 16.0)
+        self.assertEqual(pixmap.deviceIndependentSize().height(), 16.0)
 
 
 if __name__ == "__main__":

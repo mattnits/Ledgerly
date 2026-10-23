@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QPushButton, QScrollArea
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QScrollArea
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -310,6 +310,83 @@ class InvestmentsPageUiTest(unittest.TestCase):
         )
         page.close()
 
+    def test_activity_tables_use_intended_padding_and_clear_rounded_bottom_corners(self):
+        create_investment_snapshot(
+            self.account_id,
+            date.today(),
+            "2500.00",
+            session_factory=self.sessions,
+        )
+        page = InvestmentsPage(session_factory=self.sessions)
+        page.set_user_id("owner")
+        page.resize(1400, 900)
+        page.show()
+        self.app.processEvents()
+
+        for panel, body, table, expected_margins in (
+            (
+                page.accounts_panel,
+                page.accounts_table_body,
+                page.accounts_table,
+                (14, 0, 14, 10),
+            ),
+            (
+                page.recent_panel,
+                page.recent_table_body,
+                page.recent_table,
+                (14, 8, 14, 10),
+            ),
+        ):
+            margins = body.layout().contentsMargins()
+            self.assertEqual(
+                (margins.left(), margins.top(), margins.right(), margins.bottom()),
+                expected_margins,
+            )
+            table_top_left = table.mapTo(panel, QPoint())
+            self.assertEqual(table_top_left.x(), expected_margins[0])
+            self.assertGreaterEqual(
+                table_top_left.y()
+                - body.mapTo(panel, QPoint()).y(),
+                expected_margins[1],
+            )
+            self.assertEqual(
+                panel.width() - table_top_left.x() - table.width(),
+                expected_margins[2],
+            )
+            self.assertGreaterEqual(
+                panel.height() - table_top_left.y() - table.height(),
+                expected_margins[3],
+            )
+        page.close()
+
+    def test_recent_empty_state_keeps_heading_compact_and_uses_remaining_space(self):
+        page = InvestmentsPage(session_factory=self.sessions)
+        page.set_user_id("owner")
+        page.resize(1400, 900)
+        page.show()
+        self.app.processEvents()
+
+        heading = page.recent_panel.layout().itemAt(0).widget()
+        title = next(
+            label for label in heading.findChildren(QLabel)
+            if label.text() == "Recent Portfolio Entries"
+        )
+        subtitle = next(
+            label for label in heading.findChildren(QLabel)
+            if label.text() == "Latest values and contributions for this period."
+        )
+
+        self.assertLessEqual(heading.height(), heading.sizeHint().height())
+        self.assertLessEqual(subtitle.geometry().top() - title.geometry().bottom(), 2)
+        self.assertEqual(
+            page.recent_empty.mapTo(page.recent_panel, QPoint()).y(),
+            heading.geometry().bottom()
+            + 1
+            + page.recent_table_body.layout().contentsMargins().top(),
+        )
+        self.assertGreater(page.recent_empty.height(), heading.height())
+        page.close()
+
     def test_empty_state_has_clear_call_to_action(self):
         page = InvestmentsPage(session_factory=self.sessions)
         page.set_user_id("empty")
@@ -414,8 +491,6 @@ class InvestmentsPageUiTest(unittest.TestCase):
                 initial_date=date.today() - timedelta(days=90),
                 user_id="owner",
                 is_work_related=True,
-                auto_track_from_payroll=True,
-                employee_contribution_percent="5",
                 employer_matching_enabled=True,
                 employer_match_percent="50",
                 session_factory=self.sessions,

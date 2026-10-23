@@ -3,7 +3,7 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication, QDialog
 
@@ -30,6 +30,22 @@ class SwitchUserDialogTest(unittest.TestCase):
         self.assertEqual(len(dialog.user_rows), 3)
         self.assertTrue(dialog.user_rows[0].property("selected"))
         self.assertFalse(dialog.user_rows[1].property("selected"))
+
+    def test_admin_star_is_vertically_centered_in_profile_row(self):
+        self.users[0]["is_admin"] = True
+        dialog = SwitchUserDialog(self.users, "one")
+        try:
+            dialog.show()
+            self.app.processEvents()
+
+            row = dialog.user_rows[0]
+            star = row.admin_star
+            self.assertIsNotNone(star)
+            star_top = star.mapTo(row, QPoint()).y()
+            star_center = star_top + star.height() / 2
+            self.assertAlmostEqual(star_center, row.height() / 2, delta=1.0)
+        finally:
+            dialog.close()
 
     def test_clicking_user_emits_id_and_accepts(self):
         dialog = SwitchUserDialog(self.users, "one")

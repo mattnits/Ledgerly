@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QColor
 
 from app.ui.sidebar import ElidedLabel, avatar_icon
-from app.ui.theme import COLORS, awesome_icon, set_button_icon
+from app.ui.theme import COLORS, awesome_icon, icon_pixmap, set_button_icon
 
 
 class UserChoiceRow(QFrame):
@@ -50,9 +50,9 @@ class UserChoiceRow(QFrame):
         self.avatar = QLabel()
         self.avatar.setFixedSize(42, 42)
         self.avatar.setProperty("profileType", self.profile_type)
-        self.avatar.setPixmap(avatar_icon(
+        self.avatar.setPixmap(icon_pixmap(avatar_icon(
             user["name"], user["color"], 42, profile_type=self.profile_type
-        ).pixmap(42, 42))
+        ), 42, 42))
         layout.addWidget(self.avatar)
 
         text_layout = QVBoxLayout()
@@ -64,19 +64,26 @@ class UserChoiceRow(QFrame):
         name_row.setContentsMargins(0, 0, 0, 0)
         name_row.setSpacing(6)
         name_row.addWidget(self.name_label, 1)
+        self.admin_star: QLabel | None = None
         if user.get("is_admin"):
             self.name_label.setAccessibleName(f"{user['name']}, Admin")
             self.admin_star = QLabel()
+            self.admin_star.setFixedSize(12, 12)
+            self.admin_star.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.admin_star.setPixmap(
-                awesome_icon("fa6s.star", color="#a7afb9").pixmap(12, 12)
+                icon_pixmap(awesome_icon("fa6s.star", color="#a7afb9"), 12, 12)
             )
             self.admin_star.setToolTip("Admin")
-            name_row.addWidget(self.admin_star)
         subtitle = QLabel(user.get("subtitle", "Personal"))
         subtitle.setObjectName("userChoiceSubtitle")
         text_layout.addLayout(name_row)
         text_layout.addWidget(subtitle)
         layout.addLayout(text_layout, 1)
+        if self.admin_star is not None:
+            layout.addWidget(
+                self.admin_star,
+                alignment=Qt.AlignmentFlag.AlignVCenter,
+            )
 
         if self.profile_type == "group" and can_edit_group:
             edit_button = QToolButton()
@@ -96,14 +103,14 @@ class UserChoiceRow(QFrame):
             )
             layout.addWidget(edit_button)
 
-        selected_icon = QLabel()
-        selected_icon.setObjectName("selectedUserIcon")
-        selected_icon.setFixedSize(24, 24)
-        selected_icon.setPixmap(
-            avatar_icon("✓", COLORS["primary"], 24).pixmap(24, 24)
+        self.selected_icon = QLabel()
+        self.selected_icon.setObjectName("selectedUserIcon")
+        self.selected_icon.setFixedSize(24, 24)
+        self.selected_icon.setPixmap(
+            icon_pixmap(avatar_icon("✓", COLORS["primary"], 24), 24, 24)
         )
-        selected_icon.setVisible(selected)
-        layout.addWidget(selected_icon)
+        self.selected_icon.setVisible(selected)
+        layout.addWidget(self.selected_icon)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(
@@ -168,7 +175,11 @@ class SwitchUserDialog(QDialog):
         icon = QLabel()
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon.setPixmap(
-            awesome_icon("fa6s.arrow-right-arrow-left", color="#56a9ff").pixmap(27, 27)
+            icon_pixmap(
+                awesome_icon("fa6s.arrow-right-arrow-left", color="#56a9ff"),
+                27,
+                27,
+            )
         )
         icon_layout.addWidget(icon)
         header.addWidget(icon_frame, alignment=Qt.AlignmentFlag.AlignTop)

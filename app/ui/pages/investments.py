@@ -30,9 +30,13 @@ from app.core.db import SessionLocal
 from app.services.investments import (
     InvestmentAccountSummary,
     PortfolioPoint,
+    WorkRrspContributionRecord,
+    calculate_employer_match,
     create_investment_account,
     create_investment_snapshot,
+    create_work_rrsp_contribution,
     delete_investment_account,
+    delete_work_rrsp_contribution,
     get_account_summaries,
     get_account_history,
     get_all_time_work_rrsp_summary,
@@ -42,8 +46,9 @@ from app.services.investments import (
     get_portfolio_history,
     get_recent_snapshots,
     get_total_contributions,
-    get_work_rrsp_monthly_history,
+    get_work_rrsp_contribution_history,
     update_investment_account,
+    update_work_rrsp_contribution,
 )
 from app.ui.widgets.account_badge import AccountBadge
 from app.ui.widgets.combo_box import AppComboBox, FramelessPopupComboBox
@@ -485,10 +490,10 @@ class InvestmentAccountDialog(GenericDialog):
         )
         work_heading = QVBoxLayout()
         work_heading.setSpacing(2)
-        work_title = QLabel("Work RRSP / Payroll Tracking")
+        work_title = QLabel("Work RRSP / Matching")
         work_title.setObjectName("investmentDialogSectionTitle")
         work_subtitle = QLabel(
-            "Automatically calculate your contributions from Salary transactions."
+            "Record paystub contributions manually and calculate employer matching."
         )
         work_subtitle.setObjectName("investmentDialogSectionSubtitle")
         work_subtitle.setWordWrap(True)
@@ -499,15 +504,6 @@ class InvestmentAccountDialog(GenericDialog):
         work_layout.addLayout(work_header)
         work_form = QFormLayout()
         configure_form(work_form)
-        self.employee_percent = FlexiblePercentSpinBox()
-        self.employee_percent.setRange(0, 99.9999)
-        self.employee_percent.setDecimals(4)
-        self.employee_percent.setSuffix(" %")
-        self.employee_percent.setValue(float(
-            account.employee_contribution_percent
-            if account and account.employee_contribution_percent is not None
-            else Decimal("5.00")
-        ))
         self.employer_matching = QCheckBox("Enabled")
         self.employer_matching.setChecked(
             account.employer_matching_enabled if account else True
@@ -529,20 +525,12 @@ class InvestmentAccountDialog(GenericDialog):
         match_description = QLabel("of employee contribution")
         match_description.setObjectName("investmentDialogSectionSubtitle")
         match_layout.addWidget(match_description)
-        self.auto_track = QCheckBox("Enabled")
-        self.auto_track.setChecked(
-            account.auto_track_from_payroll if account else True
-        )
-        work_form.addRow("Employee contribution", self.employee_percent)
         work_form.addRow("Employer matching", self.employer_matching)
         work_form.addRow("Employer match", match_field)
-        work_form.addRow("Auto-track from Salary transactions", self.auto_track)
         work_layout.addLayout(work_form)
         note = QLabel(
-            "Salary deposits are treated as take-home pay after the configured "
-            "RRSP deduction. The app estimates your employee contribution by "
-            "reversing that deduction. Tracking starts on the Initial date and "
-            "includes them once each month is complete; the current month is excluded."
+            "Record the RRSP contribution shown on your paystub. Employer matching "
+            "is calculated automatically."
         )
         note.setObjectName("workRrspInfoNote")
         note.setWordWrap(True)
@@ -568,9 +556,9 @@ class InvestmentAccountDialog(GenericDialog):
             parent,
             submit_label="Save Account" if account else "Add Account",
             subtitle=(
-                "Update account details and payroll tracking settings."
+                "Update account details and Work RRSP matching settings."
                 if account
-                else "Create an account and optionally add payroll tracking for work RRSPs."
+                else "Create an account and optionally configure Work RRSP matching."
             ),
             icon_name="fa6s.chart-line",
         )
@@ -604,10 +592,6 @@ class InvestmentAccountDialog(GenericDialog):
         )
         return {
             "is_work_related": enabled,
-            "auto_track_from_payroll": enabled and self.auto_track.isChecked(),
-            "employee_contribution_percent": (
-                Decimal(str(self.employee_percent.value())) if enabled else None
-            ),
             "employer_matching_enabled": (
                 enabled and self.employer_matching.isChecked()
             ),
@@ -696,6 +680,163 @@ class PortfolioEntryDialog(GenericDialog):
         self.resize(620, 500)
 
 
+class WorkRrspContributionDialog(GenericDialog):
+    """Create or edit a paystub-sourced Work RRSP contribution."""
+
+    def __init__(
+        self,
+        accounts: tuple[InvestmentAccountSummary, ...],
+        parent=None,
+        *,
+        selected_account_id: int | None = None,
+        contribution: WorkRrspContributionRecord | None = None,
+        session_factory=SessionLocal,
+    ) -> None:
+        self.accounts = accounts
+        self.contribution_record = contribution
+        self.session_factory = session_factory
+
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(16)
+        form = QFormLayout()
+        form.setHorizontalSpacing(18)
+        form.setVerticalSpacing(12)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+
+        self.account = FramelessPopupComboBox()
+        for account in accounts:
+            self.account.addItem(
+                brand_icon(account.institution, size=18),
+                f"{account.institution} — {account.account_name}",
+                account.id,
+            )
+        target_account_id = (
+            contribution.investment_account_id
+            if contribution is not None
+            else selected_account_id
+        )
+        if target_account_id is not None:
+            index = self.account.findData(target_account_id)
+            if index >= 0:
+                self.account.setCurrentIndex(index)
+
+        recorded_on = contribution.contribution_date if contribution else date.today()
+        self.entry_date = DatePickerEdit(_qdate(recorded_on))
+        self.employee_contribution = QLineEdit()
+        self.employee_contribution.setPlaceholderText("0.00")
+        if contribution is not None:
+            self.employee_contribution.setText(f"{contribution.employee_contribution:.2f}")
+        form.addRow("Work RRSP Account", self.account)
+        form.addRow("Date", self.entry_date)
+        form.addRow("Your Contribution", self.employee_contribution)
+        layout.addLayout(form)
+
+        summary = QFrame()
+        summary.setObjectName("investmentDialogSection")
+        summary_layout = QGridLayout(summary)
+        summary_layout.setContentsMargins(16, 14, 16, 14)
+        summary_layout.setHorizontalSpacing(12)
+        summary_layout.setVerticalSpacing(10)
+        summary_layout.addWidget(QLabel("Employer Match"), 0, 0)
+        self.match_rate_label = QLabel("0%")
+        self.match_rate_label.setStyleSheet(f"color: {COLORS['text_muted']};")
+        summary_layout.addWidget(self.match_rate_label, 0, 1)
+        self.match_amount_label = QLabel("$0.00")
+        self.match_amount_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        summary_layout.addWidget(self.match_amount_label, 0, 2)
+        total_caption = QLabel("Total Contribution")
+        total_caption.setStyleSheet(f"color: {COLORS['text']}; font-weight: 700;")
+        summary_layout.addWidget(total_caption, 1, 0, 1, 2)
+        self.total_amount_label = QLabel("$0.00")
+        self.total_amount_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.total_amount_label.setStyleSheet(
+            f"color: {COLORS['positive']}; font-weight: 700;"
+        )
+        summary_layout.addWidget(self.total_amount_label, 1, 2)
+        summary_layout.setColumnStretch(0, 1)
+        layout.addWidget(summary)
+
+        self.error_label = QLabel()
+        self.error_label.setWordWrap(True)
+        self.error_label.setStyleSheet(f"color: {COLORS['negative']};")
+        layout.addWidget(self.error_label)
+        layout.addStretch()
+
+        super().__init__(
+            "Edit RRSP Contribution" if contribution else "Add RRSP Contribution",
+            content,
+            parent,
+            submit_label="Save Contribution",
+            subtitle="Record the employee contribution shown on your paystub.",
+            icon_name="fa6s.piggy-bank",
+        )
+        self.setMinimumSize(500, 430)
+        self.resize(620, 520)
+        self.employee_contribution.textChanged.connect(self._refresh_summary)
+        self.account.currentIndexChanged.connect(self._refresh_summary)
+        self.submitted.connect(self._save)
+        self._refresh_summary()
+
+    def _selected_account(self) -> InvestmentAccountSummary | None:
+        selected_id = self.account.currentData()
+        return next((item for item in self.accounts if item.id == selected_id), None)
+
+    def _employee_amount(self) -> Decimal:
+        amount = _parse_optional_money(
+            self.employee_contribution.text(), "Employee contribution"
+        )
+        return amount if amount is not None else Decimal("0.00")
+
+    def _refresh_summary(self, *_args) -> None:
+        account = self._selected_account()
+        rate = (
+            account.employer_match_percent or Decimal()
+            if account and account.employer_matching_enabled
+            else Decimal()
+        )
+        try:
+            employee = max(self._employee_amount(), Decimal())
+            match = calculate_employer_match(employee, rate)
+        except ValueError:
+            employee = match = Decimal()
+        rate_text = format(rate, "f")
+        if "." in rate_text:
+            rate_text = rate_text.rstrip("0").rstrip(".")
+        self.match_rate_label.setText(f"{rate_text}%")
+        self.match_amount_label.setText(_currency(match))
+        self.total_amount_label.setText(_currency(employee + match))
+
+    def _save(self) -> None:
+        try:
+            account_id = self.account.currentData()
+            if account_id is None:
+                raise ValueError("Select a Work RRSP account")
+            employee = self._employee_amount()
+            recorded_on = _date_from_editor(self.entry_date)
+            if self.contribution_record is None:
+                create_work_rrsp_contribution(
+                    int(account_id),
+                    recorded_on,
+                    employee,
+                    session_factory=self.session_factory,
+                )
+            else:
+                update_work_rrsp_contribution(
+                    self.contribution_record.id,
+                    recorded_on,
+                    employee,
+                    investment_account_id=int(account_id),
+                    session_factory=self.session_factory,
+                )
+        except ValueError as exc:
+            self.error_label.setText(str(exc))
+            return
+        self.accept()
+
+
 class WorkRrspDetailDialog(GenericDialog):
     def __init__(
         self,
@@ -704,24 +845,9 @@ class WorkRrspDetailDialog(GenericDialog):
         *,
         session_factory=SessionLocal,
     ) -> None:
-        current_month = (date.today().year, date.today().month)
-        completed_month = _previous_month(current_month)
-        current = get_monthly_work_rrsp_summary(
-            account.id, *current_month, session_factory=session_factory
-        )
-        completed = get_monthly_work_rrsp_summary(
-            account.id, *completed_month, session_factory=session_factory
-        )
-        all_time = get_all_time_work_rrsp_summary(
-            account.id, session_factory=session_factory
-        )
-        history = get_work_rrsp_monthly_history(
-            account.id, session_factory=session_factory
-        )
-        self.current_summary = current
-        self.completed_summary = completed
-        self.all_time_summary = all_time
-        self.history = history
+        self.account = account
+        self.session_factory = session_factory
+        self.current_month = (date.today().year, date.today().month)
 
         content = QWidget()
         layout = QVBoxLayout(content)
@@ -747,66 +873,50 @@ class WorkRrspDetailDialog(GenericDialog):
         )
         layout.addWidget(current_value)
 
+        add_button = QPushButton("Add Contribution")
+        add_button.setObjectName("pageActionButton")
+        add_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        set_button_icon(add_button, "fa6s.plus", color="#ffffff", active_color="#ffffff")
+        layout.addWidget(add_button, alignment=Qt.AlignmentFlag.AlignRight)
+
         totals = QGridLayout()
         totals.setHorizontalSpacing(20)
         totals.setVerticalSpacing(7)
         totals.addWidget(QLabel(""), 0, 0)
         totals.addWidget(
-            QLabel(date(*completed_month, 1).strftime("%B %Y")), 0, 1
+            QLabel("This Month"), 0, 1
         )
         totals.addWidget(QLabel("All Time"), 0, 2)
-        for row, (caption, current_amount, all_time_amount) in enumerate((
-            (
-                "You contributed",
-                completed.employee_contribution,
-                all_time.employee_contribution,
-            ),
-            (
-                "Employer matched",
-                completed.employer_match,
-                all_time.employer_match,
-            ),
-            (
-                "Total contributed",
-                completed.total_contribution,
-                all_time.total_contribution,
-            ),
+        self.summary_labels: list[tuple[QLabel, QLabel]] = []
+        for row, caption in enumerate((
+            "You contributed", "Employer matched", "Total contributed"
         ), start=1):
             totals.addWidget(QLabel(caption), row, 0)
-            current_label = QLabel(_currency(current_amount))
-            all_time_label = QLabel(_currency(all_time_amount))
+            current_label = QLabel("$0.00")
+            all_time_label = QLabel("$0.00")
             current_label.setStyleSheet(f"color: {COLORS['positive']};")
             all_time_label.setStyleSheet(f"color: {COLORS['positive']};")
             totals.addWidget(current_label, row, 1)
             totals.addWidget(all_time_label, row, 2)
+            self.summary_labels.append((current_label, all_time_label))
         layout.addLayout(totals)
 
         history_title = QLabel("Contribution History")
         history_title.setObjectName("sectionTitle")
         layout.addWidget(history_title)
         self.history_table = GenericTable((
-            "Month",
+            "Date",
             "Employee Contribution",
             "Employer Match",
             "Total Contribution",
+            "Actions",
         ))
         self.history_table.setMinimumHeight(220)
-        self.history_table.set_rows(tuple(
-            (
-                date(item.year, item.month, 1).strftime("%b %Y"),
-                _currency(item.summary.employee_contribution),
-                _currency(item.summary.employer_match),
-                _currency(item.summary.total_contribution),
-            )
-            for item in history
-        ))
-        self.history_table.setVisible(bool(history))
         layout.addWidget(self.history_table)
         self.history_empty = QLabel(
-            "No Salary data is available for contribution history."
+            "No RRSP contributions recorded yet."
         )
         self.history_empty.setObjectName("emptyLabel")
-        self.history_empty.setVisible(not history)
         layout.addWidget(self.history_empty)
 
         super().__init__(
@@ -814,12 +924,105 @@ class WorkRrspDetailDialog(GenericDialog):
             content,
             parent,
             submit_label="Close",
-            subtitle="Payroll-derived contributions are separate from portfolio snapshots.",
+            subtitle="Manual payroll contributions are separate from portfolio snapshots.",
             icon_name="fa6s.piggy-bank",
         )
         self.cancel_button.hide()
         self.submitted.connect(self.accept)
+        add_button.clicked.connect(self._add_contribution)
         self.resize(760, 620)
+        self._reload()
+
+    def _reload(self) -> None:
+        current = get_monthly_work_rrsp_summary(
+            self.account.id, *self.current_month, session_factory=self.session_factory
+        )
+        all_time = get_all_time_work_rrsp_summary(
+            self.account.id, session_factory=self.session_factory
+        )
+        history = get_work_rrsp_contribution_history(
+            self.account.id, session_factory=self.session_factory
+        )
+        self.current_summary = current
+        self.all_time_summary = all_time
+        self.history = history
+        current_values = (
+            current.employee_contribution, current.employer_match, current.total_contribution
+        )
+        all_time_values = (
+            all_time.employee_contribution, all_time.employer_match, all_time.total_contribution
+        )
+        for labels, current_amount, all_time_amount in zip(
+            self.summary_labels, current_values, all_time_values
+        ):
+            labels[0].setText(_currency(current_amount))
+            labels[1].setText(_currency(all_time_amount))
+        rows = []
+        for item in history:
+            actions = QWidget()
+            action_layout = QHBoxLayout(actions)
+            action_layout.setContentsMargins(2, 2, 2, 2)
+            action_layout.setSpacing(6)
+            edit_button = QPushButton("Edit")
+            edit_button.setObjectName("tableIconButton")
+            edit_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            delete_button = QPushButton("Delete")
+            delete_button.setObjectName("dangerButton")
+            delete_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            edit_button.clicked.connect(
+                lambda checked=False, selected=item: self._edit_contribution(selected)
+            )
+            delete_button.clicked.connect(
+                lambda checked=False, selected=item: self._delete_contribution(selected)
+            )
+            action_layout.addWidget(edit_button)
+            action_layout.addWidget(delete_button)
+            rows.append((
+                item.contribution_date.strftime("%b %d, %Y"),
+                _currency(item.employee_contribution),
+                _currency(item.employer_match),
+                _currency(item.total_contribution),
+                actions,
+            ))
+        self.history_table.set_rows(rows)
+        self.history_table.setVisible(bool(rows))
+        self.history_empty.setVisible(not rows)
+
+    def _add_contribution(self) -> None:
+        dialog = WorkRrspContributionDialog(
+            (self.account,),
+            self,
+            selected_account_id=self.account.id,
+            session_factory=self.session_factory,
+        )
+        if dialog.exec():
+            self._reload()
+
+    def _edit_contribution(self, contribution: WorkRrspContributionRecord) -> None:
+        dialog = WorkRrspContributionDialog(
+            (self.account,),
+            self,
+            contribution=contribution,
+            session_factory=self.session_factory,
+        )
+        if dialog.exec():
+            self._reload()
+
+    def _delete_contribution(self, contribution: WorkRrspContributionRecord) -> None:
+        answer = QMessageBox.warning(
+            self,
+            "Delete RRSP Contribution",
+            "Delete this RRSP contribution? Portfolio snapshots and Salary "
+            "transactions will not be changed.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        delete_work_rrsp_contribution(
+            contribution.id, session_factory=self.session_factory
+        )
+        self._reload()
 
 
 class InvestmentsPage(QWidget):
@@ -1080,6 +1283,10 @@ class InvestmentsPage(QWidget):
         trailing: QWidget | None = None,
     ) -> QWidget:
         heading = QWidget()
+        heading.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Maximum,
+        )
         layout = QHBoxLayout(heading)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
@@ -1544,11 +1751,16 @@ class InvestmentsPage(QWidget):
         )
         heading.setContentsMargins(14, 12, 14, 3)
         panel_layout.addWidget(heading)
+        self.accounts_table_body = QWidget()
+        self.accounts_table_body.setObjectName("investmentTableBody")
+        accounts_body_layout = QVBoxLayout(self.accounts_table_body)
+        accounts_body_layout.setContentsMargins(14, 0, 14, 10)
+        accounts_body_layout.setSpacing(0)
         self.accounts_empty = QLabel("No investment accounts yet")
         self.accounts_empty.setObjectName("emptyLabel")
         self.accounts_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.accounts_empty.setContentsMargins(18, 20, 18, 20)
-        panel_layout.addWidget(self.accounts_empty)
+        accounts_body_layout.addWidget(self.accounts_empty)
         self.accounts_table = GenericTable((
             "Account",
             "Institution",
@@ -1581,7 +1793,8 @@ class InvestmentsPage(QWidget):
         self.accounts_table.horizontalHeaderItem(5).setTextAlignment(
             Qt.AlignmentFlag.AlignCenter
         )
-        panel_layout.addWidget(self.accounts_table)
+        accounts_body_layout.addWidget(self.accounts_table)
+        panel_layout.addWidget(self.accounts_table_body, 1)
         return panel
 
     def _build_recent_panel(self) -> QFrame:
@@ -1601,6 +1814,11 @@ class InvestmentsPage(QWidget):
         )
         heading.setContentsMargins(14, 12, 14, 3)
         panel_layout.addWidget(heading)
+        self.recent_table_body = QWidget()
+        self.recent_table_body.setObjectName("investmentTableBody")
+        recent_body_layout = QVBoxLayout(self.recent_table_body)
+        recent_body_layout.setContentsMargins(14, 8, 14, 10)
+        recent_body_layout.setSpacing(0)
         self.recent_table = GenericTable((
             "Date",
             "Account",
@@ -1611,7 +1829,9 @@ class InvestmentsPage(QWidget):
         self.recent_table.setMaximumHeight(230)
         self.recent_table.verticalHeader().setDefaultSectionSize(30)
         self.recent_table.horizontalHeader().setFixedHeight(38)
-        self.recent_table.horizontalHeader().setMinimumSectionSize(76)
+        # Keep all four columns visible when the responsive card is stacked;
+        # the body inset must not introduce a nested horizontal scrollbar.
+        self.recent_table.horizontalHeader().setMinimumSectionSize(60)
         self.recent_table.horizontalHeader().setSectionResizeMode(
             1,
             QHeaderView.ResizeMode.Stretch,
@@ -1624,12 +1844,13 @@ class InvestmentsPage(QWidget):
         self.recent_table.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
-        panel_layout.addWidget(self.recent_table)
+        recent_body_layout.addWidget(self.recent_table)
         self.recent_empty = QLabel("No portfolio entries for this period")
         self.recent_empty.setObjectName("emptyLabel")
         self.recent_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.recent_empty.setMinimumHeight(120)
-        panel_layout.addWidget(self.recent_empty)
+        recent_body_layout.addWidget(self.recent_empty)
+        panel_layout.addWidget(self.recent_table_body, 1)
         return panel
 
     def _build_work_rrsp_panel(self) -> QFrame:
@@ -1640,7 +1861,7 @@ class InvestmentsPage(QWidget):
         panel_layout.setSpacing(9)
         panel_layout.addWidget(self._section_heading(
             "Work RRSP Contributions",
-            "Payroll-derived employee and employer contributions.",
+            "Manual paystub contributions with saved employer matching.",
             "fa6s.piggy-bank",
         ))
         self.work_rrsp_empty = QLabel("No work RRSP accounts configured.")
@@ -1956,11 +2177,15 @@ class InvestmentsPage(QWidget):
         )
         self.work_rrsp_empty.setVisible(not accounts)
         self.work_rrsp_content.setVisible(bool(accounts))
-        completed_month = _previous_month((date.today().year, date.today().month))
-        completed_month_label = date(*completed_month, 1).strftime("%b %Y")
+        display_month = (
+            self.period_selector.selected_month
+            if self.period_selector.period == "monthly"
+            else (date.today().year, date.today().month)
+        )
+        display_month_label = date(*display_month, 1).strftime("%b %Y")
         for account in accounts:
             monthly = get_monthly_work_rrsp_summary(
-                account.id, *completed_month, session_factory=self.session_factory
+                account.id, *display_month, session_factory=self.session_factory
             )
             all_time = get_all_time_work_rrsp_summary(
                 account.id, session_factory=self.session_factory
@@ -1982,8 +2207,24 @@ class InvestmentsPage(QWidget):
             details.clicked.connect(
                 lambda checked=False, selected=account: self._open_work_rrsp_details(selected)
             )
+            add_contribution = QPushButton("Add Contribution")
+            add_contribution.setObjectName("pageActionButton")
+            add_contribution.setCursor(Qt.CursorShape.PointingHandCursor)
+            set_button_icon(
+                add_contribution,
+                "fa6s.plus",
+                color="#ffffff",
+                active_color="#ffffff",
+                size=13,
+            )
+            add_contribution.clicked.connect(
+                lambda checked=False, selected=account: self._open_add_rrsp_contribution(
+                    selected
+                )
+            )
             header.addWidget(name)
             header.addStretch()
+            header.addWidget(add_contribution)
             header.addWidget(details)
             block_layout.addLayout(header)
 
@@ -2022,7 +2263,7 @@ class InvestmentsPage(QWidget):
                     f"color: {COLORS['positive']}; font-size: 18px; font-weight: 700;"
                 )
                 month_value = QLabel(
-                    f"+{_currency(this_month)} in {completed_month_label}"
+                    f"+{_currency(this_month)} in {display_month_label}"
                 )
                 month_value.setStyleSheet(
                     f"color: {COLORS['text_dim']}; font-size: 10px;"
@@ -2042,12 +2283,15 @@ class InvestmentsPage(QWidget):
                 if account.last_updated is not None
                 else "No data"
             )
-            status = "Auto-tracking Salary transactions"
-            if not account.auto_track_from_payroll:
-                status = "Payroll auto-tracking is disabled"
-            footer = QLabel(f"Current Value  {value_text}  ·  {status}")
+            footer = QLabel(
+                f"Current Value  {value_text}  ·  Manual payroll contribution tracking"
+            )
             footer.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 11px;")
             block_layout.addWidget(footer)
+            if not all_time.contribution_count:
+                empty = QLabel("No RRSP contributions recorded yet.")
+                empty.setObjectName("emptyLabel")
+                block_layout.addWidget(empty)
             self.work_rrsp_layout.addWidget(block)
         self._reflow_rrsp_cards(stack=self._layout_mode == "narrow")
 
@@ -2069,6 +2313,24 @@ class InvestmentsPage(QWidget):
             self.window(),
             session_factory=self.session_factory,
         ).exec()
+        self.reload()
+
+    def _open_add_rrsp_contribution(
+        self, account: InvestmentAccountSummary
+    ) -> None:
+        dialog = WorkRrspContributionDialog(
+            tuple(
+                item
+                for item in self._accounts
+                if item.is_work_related
+                and (item.account_type or "").strip().casefold() == "rrsp"
+            ),
+            self.window(),
+            selected_account_id=account.id,
+            session_factory=self.session_factory,
+        )
+        if dialog.exec():
+            self.reload()
 
     def _render_recent(self, start_date: date | None, end_date: date | None) -> None:
         entries = get_recent_snapshots(
@@ -2156,8 +2418,8 @@ class InvestmentsPage(QWidget):
             self.window(),
             "Delete Investment Account",
             f"Delete {account.account_name} — {account.institution}?\n\n"
-            "This permanently deletes the account and all portfolio history "
-            "for this account. This cannot be undone.",
+            "This permanently deletes the account, portfolio history, and any "
+            "Work RRSP contribution history for this account. This cannot be undone.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )

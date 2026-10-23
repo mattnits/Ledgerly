@@ -30,6 +30,7 @@ from app.ui.sidebar import ElidedLabel, avatar_icon
 from app.ui.theme import (
     COLORS,
     awesome_icon,
+    icon_pixmap,
     set_button_icon,
     spaced_text_icon,
     spaced_text_icon_size,
@@ -151,7 +152,7 @@ class AddUserDialog(QDialog):
         icon = QLabel()
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon.setPixmap(
-            awesome_icon("fa6s.user-plus", color="#56a9ff").pixmap(27, 27)
+            icon_pixmap(awesome_icon("fa6s.user-plus", color="#56a9ff"), 27, 27)
         )
         icon_layout.addWidget(icon)
         header.addWidget(icon_frame, alignment=Qt.AlignmentFlag.AlignTop)
@@ -597,9 +598,9 @@ class AddUserDialog(QDialog):
         fallback = "New group" if self.creation_type == "group" else "New user"
         name = self.name_input.text().strip() or fallback
         color = self.selected_color.name()
-        self.color_preview.setPixmap(avatar_icon(
+        self.color_preview.setPixmap(icon_pixmap(avatar_icon(
             name, color, 76, profile_type=self.creation_type
-        ).pixmap(76, 76))
+        ), 76, 76))
         self.color_preview.setProperty("profileType", self.creation_type)
         self.color_preview.setToolTip(color.upper())
         self.preview_name.setText(name)

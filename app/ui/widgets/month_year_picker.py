@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.ui.theme import COLORS, awesome_icon, set_button_icon
+from app.ui.theme import COLORS, awesome_icon, icon_pixmap, set_button_icon
 from app.ui.widgets.combo_box import AppComboBox
 
 
@@ -290,7 +290,7 @@ class MonthYearPicker(QWidget):
         self.calendar_icon = QLabel()
         self.calendar_icon.setObjectName("monthYearCalendarIcon")
         self.calendar_icon.setPixmap(
-            awesome_icon("fa6s.calendar-days", color="#d5dde7").pixmap(14, 14)
+            icon_pixmap(awesome_icon("fa6s.calendar-days", color="#d5dde7"), 14, 14)
         )
         self.calendar_icon.setFixedWidth(22)
 

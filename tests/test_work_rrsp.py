@@ -5,18 +5,22 @@ from decimal import Decimal
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication
-from sqlalchemy import create_engine, select
+from PySide6.QtWidgets import QApplication, QLabel
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.services.dashboard import get_dashboard_data
+import app.services.investments as investment_services
 from app.core.db import Base
+from app.models.models import Account, Category, Transaction, User, WorkRRSPContribution
+from app.services.dashboard import get_dashboard_data
 from app.services.goals import get_monthly_savings_breakdown
 from app.services.investments import (
-    calculate_work_rrsp_for_salary,
+    calculate_employer_match,
     create_investment_account,
     create_investment_snapshot,
+    create_work_rrsp_contribution,
+    delete_work_rrsp_contribution,
     get_account_current_value,
     get_account_history,
     get_account_summaries,
@@ -24,25 +28,17 @@ from app.services.investments import (
     get_monthly_contribution_summary,
     get_monthly_work_rrsp_summary,
     get_owner_work_rrsp_summary,
-    get_portfolio_history,
     get_total_portfolio_value,
-    get_work_rrsp_monthly_history,
+    get_work_rrsp_contribution_history,
     update_investment_account,
-)
-from app.models.models import (
-    Account,
-    Category,
-    InvestmentAccount,
-    SavingsSnapshot,
-    Transaction,
-    User,
+    update_work_rrsp_contribution,
 )
 from app.ui.pages.investments import (
     InvestmentAccountDialog,
     InvestmentsPage,
+    WorkRrspContributionDialog,
     WorkRrspDetailDialog,
 )
-from app.ui.widgets.combo_box import AppComboBox
 from app.utils.constants import TransactionType
 
 
@@ -58,8 +54,8 @@ class WorkRrspFixture:
         with self.sessions.begin() as session:
             session.add(User(id="owner", name="Owner", color="#123456"))
             salary = Category(name="Salary", color="#10b981")
-            other_income = Category(name="Other Income", color="#64748b")
-            session.add_all((salary, other_income))
+            spending = Category(name="Food", color="#ef4444")
+            session.add_all((salary, spending))
             session.flush()
             bank = Account(
                 user_id="owner",
@@ -71,7 +67,7 @@ class WorkRrspFixture:
             session.flush()
             self.bank_id = bank.id
             self.salary_id = salary.id
-            self.other_income_id = other_income.id
+            self.spending_id = spending.id
 
         self.work_id = create_investment_account(
             "Canada Life",
@@ -79,11 +75,8 @@ class WorkRrspFixture:
             account_type="RRSP",
             user_id="owner",
             is_work_related=True,
-            auto_track_from_payroll=True,
-            employee_contribution_percent="5",
             employer_matching_enabled=True,
             employer_match_percent="50",
-            initial_date=date(2026, 1, 1),
             session_factory=self.sessions,
         )
         self.personal_id = create_investment_account(
@@ -93,21 +86,11 @@ class WorkRrspFixture:
             user_id="owner",
             session_factory=self.sessions,
         )
+
     def tearDown(self):
         self.engine.dispose()
 
-    def add_transaction(
-        self,
-        day,
-        amount,
-        transaction_type=TransactionType.INCOME,
-        category="salary",
-    ):
-        category_id = {
-            "salary": self.salary_id,
-            "other": self.other_income_id,
-            None: None,
-        }[category]
+    def add_transaction(self, day, amount, transaction_type, category_id):
         with self.sessions.begin() as session:
             session.add(Transaction(
                 account_id=self.bank_id,
@@ -120,376 +103,221 @@ class WorkRrspFixture:
 
 
 class WorkRrspServiceTest(WorkRrspFixture, unittest.TestCase):
-    def test_personal_rrsp_does_not_auto_track_payroll(self):
-        self.add_transaction(date(2026, 8, 1), "950")
-        summary = get_monthly_work_rrsp_summary(
-            self.personal_id, 2026, 8, session_factory=self.sessions
+    def test_create_contribution_calculates_and_saves_match_snapshot(self):
+        contribution_id = create_work_rrsp_contribution(
+            self.work_id, date(2026, 9, 15), "300", session_factory=self.sessions
         )
-        self.assertEqual(summary.salary_count, 0)
-        self.assertEqual(summary.total_contribution, Decimal("0.00"))
-
-    def test_salary_reversal_and_employer_match_formula(self):
-        result = calculate_work_rrsp_for_salary("950", "5", "50")
-        self.assertEqual(result.pre_rrsp_take_home, Decimal("1000.00"))
-        self.assertEqual(result.employee_contribution, Decimal("50.00"))
-        self.assertEqual(result.employer_match, Decimal("25.00"))
-        self.assertEqual(result.total_contribution, Decimal("75.00"))
-
-    def test_employee_rate_must_be_below_100_and_full_match_is_allowed(self):
-        with self.assertRaisesRegex(ValueError, "less than 100"):
-            calculate_work_rrsp_for_salary("950", "100", "50")
-        result = calculate_work_rrsp_for_salary("950", "5", "100")
-        self.assertEqual(result.employee_contribution, Decimal("50.00"))
-        self.assertEqual(result.employer_match, Decimal("50.00"))
-
-    def test_multiple_salary_transactions_aggregate_independently(self):
-        self.add_transaction(date(2026, 8, 1), "950")
-        self.add_transaction(date(2026, 8, 15), "1900")
-        summary = get_monthly_work_rrsp_summary(
-            self.work_id, 2026, 8, session_factory=self.sessions
-        )
-        self.assertEqual(summary.salary_count, 2)
-        self.assertEqual(summary.deposited_salary_total, Decimal("2850.00"))
-        self.assertEqual(summary.pre_rrsp_take_home_total, Decimal("3000.00"))
-        self.assertEqual(summary.employee_contribution, Decimal("150.00"))
-        self.assertEqual(summary.employer_match, Decimal("75.00"))
-        self.assertEqual(summary.total_contribution, Decimal("225.00"))
-
-    def test_salary_before_payroll_tracking_start_date_is_ignored(self):
-        with self.sessions.begin() as session:
-            session.get(
-                InvestmentAccount, self.work_id
-            ).payroll_tracking_start_date = date(2026, 8, 10)
-        self.add_transaction(date(2026, 8, 9), "950")
-        self.add_transaction(date(2026, 8, 10), "950")
-        self.add_transaction(date(2026, 8, 20), "950")
-        summary = get_monthly_work_rrsp_summary(
-            self.work_id, 2026, 8, session_factory=self.sessions
-        )
-        self.assertEqual(summary.salary_count, 2)
-        self.assertEqual(summary.employee_contribution, Decimal("100.00"))
-
-    def test_retroactive_initial_date_calculates_each_elapsed_month(self):
-        self.add_transaction(date(2026, 5, 31), "950")
-        self.add_transaction(date(2026, 6, 15), "950")
-        self.add_transaction(date(2026, 7, 15), "950")
-        self.add_transaction(date(2026, 8, 15), "950")
-        retroactive_id = create_investment_account(
-            "Retroactive",
-            "Past Work RRSP",
-            account_type="RRSP",
-            initial_date=date(2026, 6, 1),
-            user_id="owner",
-            is_work_related=True,
-            auto_track_from_payroll=True,
-            employee_contribution_percent="5",
-            employer_matching_enabled=True,
-            employer_match_percent="50",
-            session_factory=self.sessions,
-        )
-
-        history = get_work_rrsp_monthly_history(
-            retroactive_id, session_factory=self.sessions
-        )
-
-        self.assertEqual(
-            [(item.year, item.month) for item in history],
-            [(2026, 8), (2026, 7), (2026, 6)],
-        )
-        self.assertEqual(
-            [item.summary.total_contribution for item in history],
-            [Decimal("75.00"), Decimal("75.00"), Decimal("75.00")],
-        )
-
-    def test_july_start_value_grows_with_each_completed_payroll_month(self):
-        with self.sessions.begin() as session:
-            session.get(
-                InvestmentAccount, self.work_id
-            ).payroll_tracking_start_date = date(2026, 7, 1)
-        create_investment_snapshot(
-            self.work_id,
-            date(2026, 7, 1),
-            "1000",
-            session_factory=self.sessions,
-        )
-        self.add_transaction(date(2026, 7, 15), "950")
-        self.add_transaction(date(2026, 8, 15), "950")
-        self.add_transaction(date(2026, 9, 15), "950")
-
-        summaries = {
-            item.id: item
-            for item in get_account_summaries(
-                user_id="owner",
-                session_factory=self.sessions,
-            )
-        }
-        self.assertEqual(
-            summaries[self.work_id].current_value,
-            Decimal("1225.00"),
-        )
-        self.assertEqual(
-            summaries[self.work_id].last_updated.date(),
-            date(2026, 9, 30),
-        )
-        self.assertEqual(
-            get_account_current_value(
-                self.work_id,
-                session_factory=self.sessions,
-            ),
-            Decimal("1225.00"),
-        )
-        self.assertEqual(
-            get_total_portfolio_value(
-                user_id="owner",
-                session_factory=self.sessions,
-            ),
-            Decimal("1225.00"),
-        )
-
-        expected = [
-            (date(2026, 7, 1), Decimal("1000.00")),
-            (date(2026, 7, 31), Decimal("1075.00")),
-            (date(2026, 8, 31), Decimal("1150.00")),
-            (date(2026, 9, 30), Decimal("1225.00")),
-        ]
-        portfolio_history = get_portfolio_history(
-            user_id="owner",
-            end_date=date(2026, 9, 30),
-            session_factory=self.sessions,
-        )
-        account_history = get_account_history(
-            self.work_id,
-            session_factory=self.sessions,
-        )
-        self.assertEqual(
-            [
-                (point.snapshot_datetime.date(), point.total_value)
-                for point in portfolio_history
-            ],
-            expected,
-        )
-        self.assertEqual(
-            [
-                (point.snapshot_datetime.date(), point.total_value)
-                for point in account_history
-            ],
-            expected,
-        )
-
-    def test_work_rrsp_without_opening_value_starts_at_zero_and_grows(self):
-        with self.sessions.begin() as session:
-            session.get(
-                InvestmentAccount, self.work_id
-            ).payroll_tracking_start_date = date(2026, 7, 1)
-        self.add_transaction(date(2026, 7, 15), "950")
-        self.add_transaction(date(2026, 8, 15), "950")
-        self.add_transaction(date(2026, 9, 15), "950")
-
-        self.assertEqual(
-            get_account_current_value(
-                self.work_id,
-                session_factory=self.sessions,
-            ),
-            Decimal("225.00"),
-        )
-        history = get_account_history(
-            self.work_id,
-            session_factory=self.sessions,
-        )
-        self.assertEqual(
-            [point.total_value for point in history],
-            [Decimal("75.00"), Decimal("150.00"), Decimal("225.00")],
-        )
-
-    def test_current_month_is_excluded_until_it_is_complete(self):
-        today = date.today()
-        previous_year = today.year - (today.month == 1)
-        previous_month = (today.month - 2) % 12 + 1
-        self.add_transaction(date(previous_year, previous_month, 15), "950")
-        self.add_transaction(date(today.year, today.month, 1), "1900")
-
-        current = get_monthly_work_rrsp_summary(
-            self.work_id,
-            today.year,
-            today.month,
-            session_factory=self.sessions,
-        )
-        all_time = get_all_time_work_rrsp_summary(
-            self.work_id, session_factory=self.sessions
-        )
-        history = get_work_rrsp_monthly_history(
-            self.work_id, session_factory=self.sessions
-        )
-        dashboard = get_dashboard_data(
-            "owner",
-            "monthly",
-            (today.year, today.month),
-            self.sessions,
-        )
-        goals = get_monthly_savings_breakdown(
-            today.year,
-            today.month,
-            user_id="owner",
-            session_factory=self.sessions,
-        )
-
-        self.assertEqual(current.total_contribution, Decimal("0.00"))
-        self.assertEqual(all_time.total_contribution, Decimal("75.00"))
-        self.assertEqual(dashboard.work_rrsp_employee, Decimal("0.00"))
-        self.assertEqual(dashboard.employer_rrsp_match, Decimal("0.00"))
-        self.assertEqual(goals.work_rrsp_employee, Decimal("0.00"))
-        self.assertEqual(goals.work_rrsp_employer, Decimal("0.00"))
-        self.assertEqual(
-            [(item.year, item.month) for item in history],
-            [(previous_year, previous_month)],
-        )
-
-    def test_other_income_and_e_transfer_are_ignored(self):
-        self.add_transaction(date(2026, 8, 1), "950")
-        self.add_transaction(date(2026, 8, 2), "1000", category="other")
-        self.add_transaction(
-            date(2026, 8, 3),
-            "1000",
-            transaction_type=TransactionType.E_TRANSFER,
-        )
-        summary = get_monthly_work_rrsp_summary(
-            self.work_id, 2026, 8, session_factory=self.sessions
-        )
-        self.assertEqual(summary.salary_count, 1)
-        self.assertEqual(summary.employee_contribution, Decimal("50.00"))
-
-    def test_contribution_history_groups_by_month(self):
-        self.add_transaction(date(2026, 7, 15), "950")
-        self.add_transaction(date(2026, 8, 1), "950")
-        self.add_transaction(date(2026, 8, 15), "950")
-        history = get_work_rrsp_monthly_history(
-            self.work_id, session_factory=self.sessions
-        )
-        self.assertEqual([(item.year, item.month) for item in history], [
-            (2026, 8),
-            (2026, 7),
-        ])
-        self.assertEqual(
-            history[0].summary.employee_contribution, Decimal("100.00")
-        )
-        self.assertEqual(history[1].summary.employer_match, Decimal("25.00"))
-
-    def test_multiple_work_accounts_use_their_own_rates(self):
-        self.add_transaction(date(2026, 8, 1), "950")
-        second_work_id = create_investment_account(
-            "Second",
-            "Second Work RRSP",
-            account_type="RRSP",
-            user_id="owner",
-            is_work_related=True,
-            auto_track_from_payroll=True,
-            employee_contribution_percent="10",
-            employer_matching_enabled=False,
-            initial_date=date(2026, 1, 1),
-            session_factory=self.sessions,
-        )
-        summary = get_owner_work_rrsp_summary(
-            2026, 8, user_id="owner", session_factory=self.sessions
-        )
-        self.assertEqual(summary.salary_count, 2)
-        self.assertEqual(summary.employee_contribution, Decimal("155.56"))
-        self.assertEqual(summary.employer_match, Decimal("25.00"))
-
-    def test_snapshot_controls_current_value_and_total_portfolio_value(self):
-        create_investment_snapshot(
-            self.work_id,
-            date(2026, 8, 31),
-            "4120",
-            session_factory=self.sessions,
-        )
-        create_investment_snapshot(
-            self.personal_id,
-            date(2026, 8, 31),
-            "1000",
-            session_factory=self.sessions,
-        )
-        self.add_transaction(date(2026, 8, 1), "950")
-        summaries = {
-            item.id: item
-            for item in get_account_summaries(
-                user_id="owner", session_factory=self.sessions
-            )
-        }
-        self.assertEqual(summaries[self.work_id].current_value, Decimal("4120.00"))
-        self.assertEqual(
-            get_total_portfolio_value(
-                user_id="owner", session_factory=self.sessions
-            ),
-            Decimal("5120.00"),
-        )
-
-    def test_dashboard_savings_and_investment_breakdowns(self):
-        self.add_transaction(date(2026, 8, 1), "950")
-        create_investment_snapshot(
-            self.personal_id,
-            date(2026, 8, 31),
-            "1000",
-            "800",
-            session_factory=self.sessions,
-        )
-        with self.sessions.begin() as session:
-            session.add(SavingsSnapshot(
-                user_id="owner",
-                snapshot_date=date(2026, 8, 31),
-                amount_saved_this_month=Decimal("1000"),
-            ))
-        data = get_dashboard_data("owner", "monthly", (2026, 8), self.sessions)
-        self.assertEqual(data.cash_savings_actual, Decimal("1000.00"))
-        self.assertEqual(data.work_rrsp_employee, Decimal("50.00"))
-        self.assertEqual(data.savings_actual, Decimal("950.00"))
-        self.assertEqual(data.employer_rrsp_match, Decimal("25.00"))
-        self.assertEqual(data.manual_investing_total, Decimal("800.00"))
-        self.assertEqual(data.investing_total, Decimal("875.00"))
-        self.assertEqual(data.total_spending, Decimal("0"))
-        self.assertEqual(data.total_income, Decimal("950.00"))
-
-    def test_editing_rates_recalculates_without_changing_transactions(self):
-        self.add_transaction(date(2026, 8, 1), "950")
         with self.sessions() as session:
-            before = tuple(session.execute(
-                select(Transaction.id, Transaction.amount)
-            ).all())
+            row = session.get(WorkRRSPContribution, contribution_id)
+            self.assertEqual(row.employee_contribution, Decimal("300.00"))
+            self.assertEqual(row.employer_match, Decimal("150.00"))
+            self.assertEqual(row.total_contribution, Decimal("450.00"))
+            self.assertEqual((row.year, row.month), (2026, 9))
+
+    def test_calculate_employer_match_allows_fifty_and_one_hundred_percent(self):
+        self.assertEqual(calculate_employer_match("300", "50"), Decimal("150.00"))
+        self.assertEqual(calculate_employer_match("300", "100"), Decimal("300.00"))
+
+    def test_matching_disabled_saves_zero_match(self):
         update_investment_account(
             self.work_id,
             institution="Canada Life",
             account_name="Work RRSP",
             account_type="RRSP",
             is_work_related=True,
-            auto_track_from_payroll=True,
-            employee_contribution_percent="10",
             employer_matching_enabled=False,
+            session_factory=self.sessions,
+        )
+        contribution_id = create_work_rrsp_contribution(
+            self.work_id, date(2026, 9, 15), "300", session_factory=self.sessions
+        )
+        with self.sessions() as session:
+            row = session.get(WorkRRSPContribution, contribution_id)
+            self.assertEqual(row.employer_match, Decimal("0.00"))
+            self.assertEqual(row.total_contribution, Decimal("300.00"))
+
+    def test_multiple_entries_in_same_month_aggregate(self):
+        create_work_rrsp_contribution(
+            self.work_id, date(2026, 9, 15), "150", session_factory=self.sessions
+        )
+        create_work_rrsp_contribution(
+            self.work_id, date(2026, 9, 30), "150", session_factory=self.sessions
+        )
+        summary = get_monthly_work_rrsp_summary(
+            self.work_id, 2026, 9, session_factory=self.sessions
+        )
+        self.assertEqual(summary.contribution_count, 2)
+        self.assertEqual(summary.employee_contribution, Decimal("300.00"))
+        self.assertEqual(summary.employer_match, Decimal("150.00"))
+        self.assertEqual(summary.total_contribution, Decimal("450.00"))
+
+    def test_different_months_and_all_time_aggregate_separately(self):
+        create_work_rrsp_contribution(
+            self.work_id, date(2026, 8, 31), "100", session_factory=self.sessions
+        )
+        create_work_rrsp_contribution(
+            self.work_id, date(2026, 9, 15), "200", session_factory=self.sessions
+        )
+        august = get_monthly_work_rrsp_summary(
+            self.work_id, 2026, 8, session_factory=self.sessions
+        )
+        september = get_monthly_work_rrsp_summary(
+            self.work_id, 2026, 9, session_factory=self.sessions
+        )
+        all_time = get_all_time_work_rrsp_summary(
+            self.work_id, session_factory=self.sessions
+        )
+        self.assertEqual(august.total_contribution, Decimal("150.00"))
+        self.assertEqual(september.total_contribution, Decimal("300.00"))
+        self.assertEqual(all_time.total_contribution, Decimal("450.00"))
+
+    def test_history_contains_each_paycheque_not_monthly_synthetic_rows(self):
+        first = create_work_rrsp_contribution(
+            self.work_id, date(2026, 9, 15), "150", session_factory=self.sessions
+        )
+        second = create_work_rrsp_contribution(
+            self.work_id, date(2026, 9, 30), "150", session_factory=self.sessions
+        )
+        history = get_work_rrsp_contribution_history(
+            self.work_id, session_factory=self.sessions
+        )
+        self.assertEqual([item.id for item in history], [second, first])
+
+    def test_editing_contribution_updates_summary(self):
+        contribution_id = create_work_rrsp_contribution(
+            self.work_id, date(2026, 9, 15), "100", session_factory=self.sessions
+        )
+        update_work_rrsp_contribution(
+            contribution_id,
+            date(2026, 10, 1),
+            "300",
+            session_factory=self.sessions,
+        )
+        september = get_monthly_work_rrsp_summary(
+            self.work_id, 2026, 9, session_factory=self.sessions
+        )
+        october = get_monthly_work_rrsp_summary(
+            self.work_id, 2026, 10, session_factory=self.sessions
+        )
+        self.assertEqual(september.total_contribution, Decimal("0.00"))
+        self.assertEqual(october.total_contribution, Decimal("450.00"))
+
+    def test_deleting_contribution_updates_summary_only(self):
+        create_investment_snapshot(
+            self.work_id, date(2026, 9, 30), "2500", session_factory=self.sessions
+        )
+        contribution_id = create_work_rrsp_contribution(
+            self.work_id, date(2026, 9, 15), "300", session_factory=self.sessions
+        )
+        delete_work_rrsp_contribution(contribution_id, session_factory=self.sessions)
+        summary = get_monthly_work_rrsp_summary(
+            self.work_id, 2026, 9, session_factory=self.sessions
+        )
+        self.assertEqual(summary.total_contribution, Decimal("0.00"))
+        self.assertEqual(
+            get_account_current_value(self.work_id, session_factory=self.sessions),
+            Decimal("2500.00"),
+        )
+
+    def test_saved_match_is_not_recalculated_when_plan_changes(self):
+        create_work_rrsp_contribution(
+            self.work_id, date(2026, 9, 15), "300", session_factory=self.sessions
+        )
+        update_investment_account(
+            self.work_id,
+            institution="Canada Life",
+            account_name="Work RRSP",
+            account_type="RRSP",
+            is_work_related=True,
+            employer_matching_enabled=True,
+            employer_match_percent="100",
             session_factory=self.sessions,
         )
         summary = get_all_time_work_rrsp_summary(
             self.work_id, session_factory=self.sessions
         )
-        with self.sessions() as session:
-            after = tuple(session.execute(
-                select(Transaction.id, Transaction.amount)
-            ).all())
-        self.assertEqual(summary.employee_contribution, Decimal("105.56"))
-        self.assertEqual(before, after)
-        self.assertEqual(len(after), 1)
+        self.assertEqual(summary.employer_match, Decimal("150.00"))
 
-    def test_personal_accounts_and_manual_contributions_remain_unaffected(self):
+    def test_salary_transactions_do_not_affect_rrsp_totals(self):
+        self.add_transaction(
+            date(2026, 9, 1), "950", TransactionType.INCOME, self.salary_id
+        )
+        summary = get_owner_work_rrsp_summary(
+            2026, 9, user_id="owner", session_factory=self.sessions
+        )
+        self.assertEqual(summary.contribution_count, 0)
+        self.assertEqual(summary.total_contribution, Decimal("0.00"))
+
+    def test_dashboard_and_goals_use_saved_contributions(self):
+        self.add_transaction(
+            date(2026, 9, 1), "1000", TransactionType.INCOME, self.salary_id
+        )
+        self.add_transaction(
+            date(2026, 9, 2), "-400", TransactionType.EXPENSE, self.spending_id
+        )
+        create_work_rrsp_contribution(
+            self.work_id, date(2026, 9, 15), "300", session_factory=self.sessions
+        )
+        dashboard = get_dashboard_data(
+            "owner", "monthly", (2026, 9), self.sessions
+        )
+        goals = get_monthly_savings_breakdown(
+            2026, 9, user_id="owner", session_factory=self.sessions
+        )
+        self.assertEqual(dashboard.work_rrsp_employee, Decimal("300.00"))
+        self.assertEqual(dashboard.employer_rrsp_match, Decimal("150.00"))
+        self.assertEqual(dashboard.savings_actual, Decimal("1050.00"))
+        self.assertEqual(goals.net_savings, Decimal("1050.00"))
+
+    def test_manual_portfolio_contribution_is_separate_and_not_double_counted(self):
         create_investment_snapshot(
             self.personal_id,
-            date(2026, 8, 31),
+            date(2026, 9, 30),
             "1000",
-            "200",
+            "800",
             session_factory=self.sessions,
         )
-        contribution = get_monthly_contribution_summary(
-            2026, 8, user_id="owner", session_factory=self.sessions
+        create_work_rrsp_contribution(
+            self.work_id, date(2026, 9, 15), "300", session_factory=self.sessions
         )
-        self.assertEqual(contribution.manual, Decimal("200.00"))
-        self.assertEqual(contribution.work_rrsp_employee, Decimal("0.00"))
-        self.assertEqual(contribution.total, Decimal("200.00"))
+        summary = get_monthly_contribution_summary(
+            2026, 9, user_id="owner", session_factory=self.sessions
+        )
+        self.assertEqual(summary.manual, Decimal("800.00"))
+        self.assertEqual(summary.work_rrsp_employee, Decimal("300.00"))
+        self.assertEqual(summary.work_rrsp_employer, Decimal("150.00"))
+        self.assertEqual(summary.total, Decimal("1250.00"))
+
+    def test_portfolio_value_and_history_come_only_from_snapshots(self):
+        create_investment_snapshot(
+            self.work_id, date(2026, 9, 30), "2500", session_factory=self.sessions
+        )
+        create_work_rrsp_contribution(
+            self.work_id, date(2026, 10, 1), "300", session_factory=self.sessions
+        )
+        self.assertEqual(
+            get_account_current_value(self.work_id, session_factory=self.sessions),
+            Decimal("2500.00"),
+        )
+        self.assertEqual(
+            get_total_portfolio_value(user_id="owner", session_factory=self.sessions),
+            Decimal("2500.00"),
+        )
+        history = get_account_history(self.work_id, session_factory=self.sessions)
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0].total_value, Decimal("2500.00"))
+
+    def test_personal_rrsp_rejects_work_contribution(self):
+        with self.assertRaisesRegex(ValueError, "Work RRSP"):
+            create_work_rrsp_contribution(
+                self.personal_id,
+                date(2026, 9, 15),
+                "300",
+                session_factory=self.sessions,
+            )
+
+    def test_old_salary_reverse_engineering_function_is_removed(self):
+        self.assertFalse(hasattr(investment_services, "calculate_work_rrsp_for_salary"))
 
 
 class WorkRrspUiTest(WorkRrspFixture, unittest.TestCase):
@@ -497,99 +325,55 @@ class WorkRrspUiTest(WorkRrspFixture, unittest.TestCase):
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
-    def test_add_dialog_reveals_work_controls_only_for_rrsp(self):
-        dialog = InvestmentAccountDialog()
-        self.assertEqual(dialog.account_type.currentText(), "General Investment")
-        self.assertEqual(dialog.selected_account_type(), "General")
-        self.assertEqual(
-            [dialog.account_type.itemText(index) for index in range(
-                dialog.account_type.count()
-            )],
-            ["General Investment", "TFSA", "FHSA", "RRSP"],
-        )
-        self.assertFalse(dialog.work_related.isVisible())
-        dialog.account_type.setCurrentText("RRSP")
-        dialog.show()
-        self.app.processEvents()
-        self.assertFalse(dialog.work_related.isHidden())
-        dialog.work_related.setChecked(True)
-        self.assertFalse(dialog.work_section.isHidden())
-        settings = dialog.work_settings()
-        self.assertTrue(settings["is_work_related"])
-        self.assertTrue(settings["auto_track_from_payroll"])
-        self.assertNotIn(".0000", dialog.employee_percent.text())
-        self.assertNotIn(".0000", dialog.employer_match_percent.text())
-        dialog.employee_percent.setValue(5.25)
-        self.assertIn("5.25", dialog.employee_percent.text())
-        dialog.close()
-
-    def test_add_dialog_account_type_uses_shared_bar_free_popup(self):
-        dialog = InvestmentAccountDialog()
-        self.assertIsInstance(dialog.account_type, AppComboBox)
-        dialog.close()
-
-    def test_account_dialog_scrollbar_only_appears_when_content_needs_it(self):
-        dialog = InvestmentAccountDialog()
-        dialog.resize(660, 700)
-        dialog.show()
-        self.app.processEvents()
-        self.assertEqual(dialog.scroll.verticalScrollBar().maximum(), 0)
-
-        dialog.account_type.setCurrentText("RRSP")
-        dialog.work_related.setChecked(True)
-        self.app.processEvents()
-        self.assertGreater(dialog.scroll.verticalScrollBar().maximum(), 0)
-
-        dialog.resize(700, 1050)
-        self.app.processEvents()
-        self.assertEqual(dialog.scroll.verticalScrollBar().maximum(), 0)
-        dialog.close()
-
-    def test_detail_dialog_receives_monthly_all_time_and_history_totals(self):
-        today = date.today()
-        self.add_transaction(date(today.year, today.month, 1), "950")
-        self.add_transaction(
-            date(today.year - (today.month == 1), (today.month - 2) % 12 + 1, 1),
-            "950",
-        )
-        account = next(
-            item for item in get_account_summaries(
+    def _work_account(self):
+        return next(
+            item
+            for item in get_account_summaries(
                 user_id="owner", session_factory=self.sessions
             )
             if item.id == self.work_id
         )
-        dialog = WorkRrspDetailDialog(
-            account, session_factory=self.sessions
-        )
-        self.assertEqual(
-            dialog.current_summary.total_contribution, Decimal("0.00")
-        )
-        self.assertEqual(
-            dialog.completed_summary.total_contribution, Decimal("75.00")
-        )
-        self.assertEqual(
-            dialog.all_time_summary.total_contribution, Decimal("75.00")
-        )
-        self.assertEqual(dialog.history_table.rowCount(), 1)
+
+    def test_account_dialog_has_matching_but_no_obsolete_auto_fields(self):
+        dialog = InvestmentAccountDialog()
+        dialog.account_type.setCurrentText("RRSP")
+        dialog.work_related.setChecked(True)
+        settings = dialog.work_settings()
+        self.assertTrue(settings["is_work_related"])
+        self.assertIn("employer_matching_enabled", settings)
+        self.assertFalse(hasattr(dialog, "employee_percent"))
+        self.assertFalse(hasattr(dialog, "auto_track"))
+        labels = " ".join(child.text() for child in dialog.findChildren(QLabel))
+        self.assertNotIn("Salary transactions", labels)
         dialog.close()
 
-    def test_investments_page_keeps_generic_table_and_adds_work_summary(self):
-        today = date.today()
-        self.add_transaction(date(today.year, today.month, 1), "950")
+    def test_contribution_dialog_updates_match_live(self):
+        dialog = WorkRrspContributionDialog(
+            (self._work_account(),), session_factory=self.sessions
+        )
+        dialog.employee_contribution.setText("300")
+        self.app.processEvents()
+        self.assertEqual(dialog.match_amount_label.text(), "$150.00")
+        self.assertEqual(dialog.total_amount_label.text(), "$450.00")
+        dialog.close()
+
+    def test_detail_dialog_empty_state_and_individual_history_rows(self):
+        account = self._work_account()
+        empty_dialog = WorkRrspDetailDialog(account, session_factory=self.sessions)
+        self.assertEqual(empty_dialog.history_table.rowCount(), 0)
+        self.assertFalse(empty_dialog.history_empty.isHidden())
+        empty_dialog.close()
+        create_work_rrsp_contribution(
+            self.work_id, date.today(), "300", session_factory=self.sessions
+        )
+        dialog = WorkRrspDetailDialog(account, session_factory=self.sessions)
+        self.assertEqual(dialog.history_table.rowCount(), 1)
+        self.assertEqual(dialog.history_table.columnCount(), 5)
+        dialog.close()
+
+    def test_investments_page_shows_only_work_rrsp_contribution_block(self):
         page = InvestmentsPage(session_factory=self.sessions)
         page.set_user_id("owner")
-        headers = [
-            page.accounts_table.horizontalHeaderItem(column).text()
-            for column in range(page.accounts_table.columnCount())
-        ]
-        self.assertEqual(headers, [
-            "Account",
-            "Institution",
-            "Account #",
-            "Current Value",
-            "Last Updated",
-            "Action",
-        ])
         self.assertEqual(page.work_rrsp_layout.count(), 1)
         self.assertTrue(page.work_rrsp_empty.isHidden())
         page.close()

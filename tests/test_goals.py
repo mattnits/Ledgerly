@@ -28,6 +28,10 @@ from app.services.goals import (
     set_monthly_savings_goal,
     update_savings_goal,
 )
+from app.services.investments import (
+    create_investment_account,
+    create_work_rrsp_contribution,
+)
 from app.models.models import (
     Account,
     Category,
@@ -93,7 +97,7 @@ class GoalsServiceTest(unittest.TestCase):
     def tearDown(self):
         self.engine.dispose()
 
-    def test_monthly_goal_ignores_snapshot_and_rrsp_contributions(self):
+    def test_monthly_goal_uses_saved_rrsp_contributions_not_savings_snapshot(self):
         with self.sessions.begin() as session:
             session.add_all((
                 Transaction(
@@ -112,24 +116,28 @@ class GoalsServiceTest(unittest.TestCase):
                     transaction_type=TransactionType.EXPENSE,
                     category_id=self.food_id,
                 ),
-                InvestmentAccount(
-                    user_id="owner",
-                    institution="Work",
-                    account_name="Work RRSP",
-                    account_type="RRSP",
-                    is_work_related=True,
-                    auto_track_from_payroll=True,
-                    employee_contribution_percent=Decimal("10"),
-                    employer_matching_enabled=True,
-                    employer_match_percent=Decimal("100"),
-                    created_at=datetime(2020, 1, 1),
-                ),
                 SavingsSnapshot(
                     user_id="owner",
                     snapshot_date=date(2026, 9, 30),
                     amount_saved_this_month=Decimal("9999.00"),
                 ),
             ))
+        work_id = create_investment_account(
+            "Work",
+            "Work RRSP",
+            account_type="RRSP",
+            user_id="owner",
+            is_work_related=True,
+            employer_matching_enabled=True,
+            employer_match_percent=Decimal("100"),
+            session_factory=self.sessions,
+        )
+        create_work_rrsp_contribution(
+            work_id,
+            date(2026, 9, 15),
+            Decimal("100"),
+            session_factory=self.sessions,
+        )
         set_monthly_savings_goal(
             2026, 9, Decimal("750"), user_id="owner", session_factory=self.sessions
         )
@@ -140,7 +148,7 @@ class GoalsServiceTest(unittest.TestCase):
         self.assertEqual(result.spending, Decimal("300.00"))
         self.assertEqual(result.work_rrsp_employee, Decimal("100.00"))
         self.assertEqual(result.work_rrsp_employer, Decimal("100.00"))
-        self.assertEqual(result.net_savings, Decimal("600.00"))
+        self.assertEqual(result.net_savings, Decimal("800.00"))
         self.assertEqual(result.target, Decimal("750.00"))
 
     def test_monthly_goal_carries_forward_until_a_later_change(self):
@@ -1011,6 +1019,26 @@ class GoalsPageLayoutTest(unittest.TestCase):
                     center_x(row.progress),
                     delta=1.0,
                 )
+                category_header = page.budget_header_labels["category"]
+                category_header_text_left = (
+                    category_header.mapTo(page, QPoint()).x()
+                    + category_header.contentsMargins().left()
+                )
+                category_icon_left = row.category_icon.mapTo(page, QPoint()).x()
+                self.assertEqual(category_header_text_left, category_icon_left)
+                self.assertTrue(
+                    category_header.alignment() & Qt.AlignmentFlag.AlignLeft
+                )
+                self.assertGreaterEqual(
+                    category_header.contentsRect().width(),
+                    category_header.fontMetrics().horizontalAdvance(
+                        category_header.text()
+                    ),
+                )
+                self.assertEqual(
+                    row.category_icon.mapTo(page, QPoint()).x(),
+                    row.mapTo(page, QPoint()).x() + BudgetRow.LEFT_MARGIN,
+                )
                 icon_lefts = {
                     row.category_icon.mapTo(page, QPoint(0, 0)).x()
                     for row in rows
@@ -1021,8 +1049,38 @@ class GoalsPageLayoutTest(unittest.TestCase):
                 }
                 self.assertEqual(len(icon_lefts), 1)
                 self.assertEqual(len(text_lefts), 1)
+                self.assertTrue(
+                    all(row.category.text() == row.item.category_name for row in rows)
+                )
+                self.assertTrue(all(not row.category.toolTip() for row in rows))
         finally:
             page.close()
+
+    def test_budget_category_elides_and_adds_tooltip_only_on_overflow(self):
+        name = "Professional Development and Continuing Education"
+        row = BudgetRow(
+            CategoryBudgetProgress(
+                category_id=1,
+                category_name=name,
+                category_color="#398cff",
+                spent=Decimal("0"),
+                target=Decimal("200"),
+            ),
+            compact=False,
+        )
+        try:
+            row.resize(620, 46)
+            row.show()
+            self.app.processEvents()
+            self.assertTrue(row.category.text().endswith("…"))
+            self.assertEqual(row.category.toolTip(), name)
+
+            row.resize(1800, 46)
+            self.app.processEvents()
+            self.assertEqual(row.category.text(), name)
+            self.assertEqual(row.category.toolTip(), "")
+        finally:
+            row.close()
 
     def test_fullscreen_720p_layout_fits_populated_sections_without_scrolling(self):
         with self.sessions.begin() as session:
@@ -1070,7 +1128,7 @@ class GoalsPageLayoutTest(unittest.TestCase):
             self.assertEqual(page.scroll.horizontalScrollBar().maximum(), 0)
             self.assertEqual(
                 page.monthly_card.breakdown_names["employee"].text(),
-                "RRSP employee (excluded)",
+                "RRSP employee",
             )
             self.assertIs(
                 page.monthly_card.breakdown_frame.parentWidget(),

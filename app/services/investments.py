@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import re
@@ -10,14 +10,11 @@ from sqlalchemy.orm import aliased
 
 from app.core.db import SessionLocal
 from app.models.models import (
-    Account,
-    Category,
     GroupMembership,
     InvestmentAccount,
     InvestmentSnapshot,
-    Transaction,
+    WorkRRSPContribution,
 )
-from app.utils.constants import TransactionType
 
 
 MONEY_QUANTUM = Decimal("0.01")
@@ -37,11 +34,8 @@ class InvestmentAccountSummary:
     user_id: str | None
     group_id: int | None
     is_work_related: bool
-    auto_track_from_payroll: bool
-    employee_contribution_percent: Decimal | None
     employer_matching_enabled: bool
     employer_match_percent: Decimal | None
-    payroll_tracking_start_date: date | None
 
     @property
     def display_name(self) -> str:
@@ -77,29 +71,23 @@ class ContributionComparison:
 
 
 @dataclass(frozen=True)
-class WorkRrspCalculation:
-    deposited_salary: Decimal
-    pre_rrsp_take_home: Decimal
-    employee_contribution: Decimal
-    employer_match: Decimal
-    total_contribution: Decimal
-
-
-@dataclass(frozen=True)
 class WorkRrspSummary:
-    salary_count: int = 0
-    deposited_salary_total: Decimal = Decimal("0.00")
-    pre_rrsp_take_home_total: Decimal = Decimal("0.00")
+    contribution_count: int = 0
     employee_contribution: Decimal = Decimal("0.00")
     employer_match: Decimal = Decimal("0.00")
     total_contribution: Decimal = Decimal("0.00")
 
 
 @dataclass(frozen=True)
-class WorkRrspMonthlyHistory:
-    year: int
-    month: int
-    summary: WorkRrspSummary
+class WorkRrspContributionRecord:
+    id: int
+    investment_account_id: int
+    contribution_date: date
+    employee_contribution: Decimal
+    employer_match: Decimal
+    total_contribution: Decimal
+    created_at: datetime
+    updated_at: datetime
 
 
 @dataclass(frozen=True)
@@ -170,35 +158,17 @@ def _percent(
     return percent.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
 
 
-def calculate_work_rrsp_for_salary(
-    deposited_salary: Decimal | str | int | float,
-    employee_rate: Decimal | str | int | float,
+def calculate_employer_match(
+    employee_contribution: Decimal | str | int | float,
     employer_match_rate: Decimal | str | int | float = Decimal("0"),
-) -> WorkRrspCalculation:
-    """Reverse an after-RRSP salary deposit and calculate its match."""
-    deposited = _money(deposited_salary, "Deposited salary")
-    if deposited < 0:
-        raise ValueError("Deposited salary cannot be negative")
-    employee_percent = _percent(
-        employee_rate, "Employee contribution", below_100=True
-    ) or Decimal()
+) -> Decimal:
+    """Calculate a saved employer match from an actual paystub contribution."""
+    employee = _money(employee_contribution, "Employee contribution")
+    if employee < 0:
+        raise ValueError("Employee contribution cannot be negative")
     match_percent = _percent(employer_match_rate, "Employer match") or Decimal()
-    rate = employee_percent / Decimal("100")
-    pre_rrsp = (deposited / (Decimal("1") - rate)).quantize(
+    return (employee * match_percent / Decimal("100")).quantize(
         MONEY_QUANTUM, rounding=ROUND_HALF_UP
-    )
-    employee = (pre_rrsp - deposited).quantize(
-        MONEY_QUANTUM, rounding=ROUND_HALF_UP
-    )
-    employer = (employee * match_percent / Decimal("100")).quantize(
-        MONEY_QUANTUM, rounding=ROUND_HALF_UP
-    )
-    return WorkRrspCalculation(
-        deposited,
-        pre_rrsp,
-        employee,
-        employer,
-        employee + employer,
     )
 
 
@@ -287,234 +257,119 @@ def _work_rrsp_account(account, session_factory=SessionLocal):
     return account
 
 
-def _salary_rows_for_work_rrsp(
-    account,
-    *,
-    start: date | None = None,
-    end: date | None = None,
-    session_factory=SessionLocal,
-) -> tuple[tuple[date, Decimal], ...]:
-    account = _work_rrsp_account(account, session_factory)
-    return _salary_rows_by_work_account(
-        (account,),
-        start=start,
-        end=end,
-        session_factory=session_factory,
-    ).get(account.id, ())
-
-
-def _salary_rows_by_work_account(
-    accounts,
-    *,
-    start: date | None = None,
-    end: date | None = None,
-    session_factory=SessionLocal,
-) -> dict[int, tuple[tuple[date, Decimal], ...]]:
-    """Fetch salary rows once and fan them out to eligible work accounts."""
-    eligible = tuple(
-        account
-        for account in accounts
-        if account.is_work_related
-        and account.auto_track_from_payroll
-        and account.user_id is not None
-    )
-    if not eligible:
-        return {}
-    account_starts = {
-        account.id: (
-            account.payroll_tracking_start_date or account.created_at.date()
-        )
-        for account in eligible
-    }
-    conditions = [
-        Account.user_id.in_({account.user_id for account in eligible}),
-        Transaction.is_deleted.is_(False),
-        Transaction.transaction_type == TransactionType.INCOME,
-        func.lower(func.trim(Category.name)) == "salary",
-        Transaction.amount > 0,
-        Transaction.transaction_date >= min(account_starts.values()),
-        # Payroll-derived RRSP amounts are finalized one completed month at a
-        # time. Excluding the open month keeps Goals, Dashboard, and
-        # Investments from showing a partial contribution total.
-        Transaction.transaction_date < date.today().replace(day=1),
-    ]
-    if start is not None:
-        conditions.append(Transaction.transaction_date >= start)
-    if end is not None:
-        conditions.append(Transaction.transaction_date < end)
-    with session_factory() as session:
-        rows = session.execute(
-            select(
-                Account.user_id,
-                Transaction.transaction_date,
-                Transaction.amount,
-            )
-            .join(Account, Transaction.account_id == Account.id)
-            .join(Category, Transaction.category_id == Category.id)
-            .where(*conditions)
-            .order_by(Transaction.transaction_date, Transaction.id)
-        ).all()
-    rows_by_user: dict[str, list[tuple[date, Decimal]]] = {}
-    for user_id, transaction_date, amount in rows:
-        rows_by_user.setdefault(user_id, []).append((transaction_date, amount))
-    return {
-        account.id: tuple(
-            row
-            for row in rows_by_user.get(account.user_id, ())
-            if row[0] >= account_starts[account.id]
-        )
-        for account in eligible
-    }
-
-
-def _summarize_work_rrsp_rows(account, rows) -> WorkRrspSummary:
-    employee_rate = account.employee_contribution_percent or Decimal()
-    match_rate = (
-        account.employer_match_percent or Decimal()
-        if account.employer_matching_enabled
-        else Decimal()
-    )
-    calculations = [
-        calculate_work_rrsp_for_salary(amount, employee_rate, match_rate)
-        for _, amount in rows
-    ]
-    return WorkRrspSummary(
-        salary_count=len(calculations),
-        deposited_salary_total=sum(
-            (item.deposited_salary for item in calculations), Decimal("0.00")
-        ),
-        pre_rrsp_take_home_total=sum(
-            (item.pre_rrsp_take_home for item in calculations), Decimal("0.00")
-        ),
-        employee_contribution=sum(
-            (item.employee_contribution for item in calculations), Decimal("0.00")
-        ),
-        employer_match=sum(
-            (item.employer_match for item in calculations), Decimal("0.00")
-        ),
-        total_contribution=sum(
-            (item.total_contribution for item in calculations), Decimal("0.00")
-        ),
-    )
-
-
-def _is_auto_tracked_work_rrsp(account) -> bool:
+def _is_work_rrsp(account) -> bool:
     return bool(
         account.is_work_related
-        and account.auto_track_from_payroll
         and (account.account_type or "").strip().casefold() == "rrsp"
     )
 
 
-def _month_end(day: date) -> date:
-    next_month = date(
-        day.year + (day.month == 12),
-        day.month % 12 + 1,
-        1,
+def _work_rrsp_summary_from_row(row) -> WorkRrspSummary:
+    return WorkRrspSummary(
+        contribution_count=int(row[0] or 0),
+        employee_contribution=row[1] or Decimal("0.00"),
+        employer_match=row[2] or Decimal("0.00"),
+        total_contribution=row[3] or Decimal("0.00"),
     )
-    return next_month - timedelta(days=1)
 
 
-def _work_rrsp_rows_after_baseline(
-    account,
-    rows: tuple[tuple[date, Decimal], ...],
-    baseline_at: datetime | None,
+def _query_work_rrsp_summary(session, *conditions) -> WorkRrspSummary:
+    row = session.execute(
+        select(
+            func.count(WorkRRSPContribution.id),
+            func.sum(WorkRRSPContribution.employee_contribution),
+            func.sum(WorkRRSPContribution.employer_match),
+            func.sum(WorkRRSPContribution.total_contribution),
+        ).where(*conditions)
+    ).one()
+    return _work_rrsp_summary_from_row(row)
+
+
+def _require_work_rrsp_account(session, account_id: int) -> InvestmentAccount:
+    account = session.get(InvestmentAccount, account_id)
+    if account is None:
+        raise ValueError("Investment account was not found")
+    if not _is_work_rrsp(account):
+        raise ValueError("Contributions can only be recorded for a Work RRSP")
+    return account
+
+
+def create_work_rrsp_contribution(
+    investment_account_id: int,
+    contribution_date: date | datetime,
+    employee_contribution: Decimal | str | int | float,
     *,
-    through: date | None = None,
-) -> tuple[tuple[date, Decimal], ...]:
-    if baseline_at is None:
-        return tuple(
-            row for row in rows if through is None or row[0] <= through
+    session_factory=SessionLocal,
+) -> int:
+    employee = _money(employee_contribution, "Employee contribution")
+    if employee <= 0:
+        raise ValueError("Employee contribution must be greater than zero")
+    recorded_on = _as_date(contribution_date)
+    with session_factory() as session, session.begin():
+        account = _require_work_rrsp_account(session, investment_account_id)
+        match = calculate_employer_match(
+            employee,
+            account.employer_match_percent or Decimal()
+            if account.employer_matching_enabled
+            else Decimal(),
         )
-
-    baseline_date = baseline_at.date()
-    tracking_start = (
-        account.payroll_tracking_start_date or account.created_at.date()
-    )
-    # The snapshot created on the tracking start date is the opening balance,
-    # so that date's payroll contribution belongs on top of it. Any later
-    # snapshot is an authoritative balance and already includes same-day activity.
-    include_baseline_date = baseline_date <= tracking_start
-    return tuple(
-        row
-        for row in rows
-        if (
-            row[0] >= baseline_date
-            if include_baseline_date
-            else row[0] > baseline_date
+        contribution = WorkRRSPContribution(
+            investment_account_id=account.id,
+            contribution_date=recorded_on,
+            year=recorded_on.year,
+            month=recorded_on.month,
+            employee_contribution=employee,
+            employer_match=match,
+            total_contribution=employee + match,
         )
-        and (through is None or row[0] <= through)
-    )
+        session.add(contribution)
+        session.flush()
+        return contribution.id
 
 
-def _effective_work_rrsp_value(
-    account,
-    base_value: Decimal,
-    baseline_at: datetime | None,
-    rows: tuple[tuple[date, Decimal], ...],
+def update_work_rrsp_contribution(
+    contribution_id: int,
+    contribution_date: date | datetime,
+    employee_contribution: Decimal | str | int | float,
     *,
-    through: date | None = None,
-) -> tuple[Decimal, tuple[tuple[date, Decimal], ...]]:
-    eligible_rows = _work_rrsp_rows_after_baseline(
-        account,
-        rows,
-        baseline_at,
-        through=through,
-    )
-    contribution = _summarize_work_rrsp_rows(
-        account,
-        eligible_rows,
-    ).total_contribution
-    return base_value + contribution, eligible_rows
+    investment_account_id: int | None = None,
+    session_factory=SessionLocal,
+) -> None:
+    employee = _money(employee_contribution, "Employee contribution")
+    if employee <= 0:
+        raise ValueError("Employee contribution must be greater than zero")
+    recorded_on = _as_date(contribution_date)
+    with session_factory() as session, session.begin():
+        contribution = session.get(WorkRRSPContribution, contribution_id)
+        if contribution is None:
+            raise ValueError("RRSP contribution was not found")
+        account_id = investment_account_id or contribution.investment_account_id
+        account = _require_work_rrsp_account(session, account_id)
+        match = calculate_employer_match(
+            employee,
+            account.employer_match_percent or Decimal()
+            if account.employer_matching_enabled
+            else Decimal(),
+        )
+        contribution.investment_account_id = account.id
+        contribution.contribution_date = recorded_on
+        contribution.year = recorded_on.year
+        contribution.month = recorded_on.month
+        contribution.employee_contribution = employee
+        contribution.employer_match = match
+        contribution.total_contribution = employee + match
 
 
-def _effective_work_rrsp_history(
-    account,
-    snapshots,
-    salary_rows: tuple[tuple[date, Decimal], ...],
-) -> tuple[PortfolioPoint, ...]:
-    event_datetimes = {
-        snapshot.snapshot_datetime for snapshot in snapshots
-    }
-    event_datetimes.update(
-        datetime.combine(_month_end(transaction_date), time.min)
-        for transaction_date, _amount in salary_rows
-    )
-    points = []
-    for event_datetime in sorted(event_datetimes):
-        available_snapshots = tuple(
-            snapshot
-            for snapshot in snapshots
-            if snapshot.snapshot_datetime <= event_datetime
-        )
-        latest_snapshot = (
-            max(
-                available_snapshots,
-                key=lambda snapshot: (
-                    snapshot.snapshot_datetime,
-                    snapshot.id,
-                ),
-            )
-            if available_snapshots
-            else None
-        )
-        value, _eligible_rows = _effective_work_rrsp_value(
-            account,
-            (
-                latest_snapshot.total_value
-                if latest_snapshot is not None
-                else Decimal("0.00")
-            ),
-            (
-                latest_snapshot.snapshot_datetime
-                if latest_snapshot is not None
-                else None
-            ),
-            salary_rows,
-            through=event_datetime.date(),
-        )
-        points.append(PortfolioPoint(event_datetime, value))
-    return tuple(points)
+def delete_work_rrsp_contribution(
+    contribution_id: int,
+    *,
+    session_factory=SessionLocal,
+) -> None:
+    with session_factory() as session, session.begin():
+        contribution = session.get(WorkRRSPContribution, contribution_id)
+        if contribution is None:
+            raise ValueError("RRSP contribution was not found")
+        session.delete(contribution)
 
 
 def get_monthly_work_rrsp_summary(
@@ -527,14 +382,15 @@ def get_monthly_work_rrsp_summary(
     if not 1 <= month <= 12:
         raise ValueError("month must be between 1 and 12")
     account = _work_rrsp_account(investment_account, session_factory)
-    start = date(year, month, 1)
-    end = date(year + (month == 12), month % 12 + 1, 1)
-    return _summarize_work_rrsp_rows(
-        account,
-        _salary_rows_for_work_rrsp(
-            account, start=start, end=end, session_factory=session_factory
-        ),
-    )
+    if not _is_work_rrsp(account):
+        return WorkRrspSummary()
+    with session_factory() as session:
+        return _query_work_rrsp_summary(
+            session,
+            WorkRRSPContribution.investment_account_id == account.id,
+            WorkRRSPContribution.year == year,
+            WorkRRSPContribution.month == month,
+        )
 
 
 def get_all_time_work_rrsp_summary(
@@ -543,56 +399,42 @@ def get_all_time_work_rrsp_summary(
     session_factory=SessionLocal,
 ) -> WorkRrspSummary:
     account = _work_rrsp_account(investment_account, session_factory)
-    return _summarize_work_rrsp_rows(
-        account,
-        _salary_rows_for_work_rrsp(account, session_factory=session_factory),
-    )
+    if not _is_work_rrsp(account):
+        return WorkRrspSummary()
+    with session_factory() as session:
+        return _query_work_rrsp_summary(
+            session,
+            WorkRRSPContribution.investment_account_id == account.id,
+        )
 
 
-def get_work_rrsp_monthly_history(
+def get_work_rrsp_contribution_history(
     investment_account,
     *,
     session_factory=SessionLocal,
-) -> tuple[WorkRrspMonthlyHistory, ...]:
+) -> tuple[WorkRrspContributionRecord, ...]:
     account = _work_rrsp_account(investment_account, session_factory)
-    grouped: dict[tuple[int, int], list[tuple[date, Decimal]]] = {}
-    for transaction_date, amount in _salary_rows_for_work_rrsp(
-        account, session_factory=session_factory
-    ):
-        grouped.setdefault(
-            (transaction_date.year, transaction_date.month), []
-        ).append((transaction_date, amount))
-    return tuple(
-        WorkRrspMonthlyHistory(
-            year,
-            month,
-            _summarize_work_rrsp_rows(account, rows),
-        )
-        for (year, month), rows in sorted(grouped.items(), reverse=True)
-    )
-
-
-def _combine_work_rrsp_summaries(
-    summaries: tuple[WorkRrspSummary, ...],
-) -> WorkRrspSummary:
-    return WorkRrspSummary(
-        salary_count=sum(item.salary_count for item in summaries),
-        deposited_salary_total=sum(
-            (item.deposited_salary_total for item in summaries), Decimal("0.00")
-        ),
-        pre_rrsp_take_home_total=sum(
-            (item.pre_rrsp_take_home_total for item in summaries), Decimal("0.00")
-        ),
-        employee_contribution=sum(
-            (item.employee_contribution for item in summaries), Decimal("0.00")
-        ),
-        employer_match=sum(
-            (item.employer_match for item in summaries), Decimal("0.00")
-        ),
-        total_contribution=sum(
-            (item.total_contribution for item in summaries), Decimal("0.00")
-        ),
-    )
+    if not _is_work_rrsp(account):
+        return ()
+    with session_factory() as session:
+        rows = session.execute(
+            select(
+                WorkRRSPContribution.id,
+                WorkRRSPContribution.investment_account_id,
+                WorkRRSPContribution.contribution_date,
+                WorkRRSPContribution.employee_contribution,
+                WorkRRSPContribution.employer_match,
+                WorkRRSPContribution.total_contribution,
+                WorkRRSPContribution.created_at,
+                WorkRRSPContribution.updated_at,
+            )
+            .where(WorkRRSPContribution.investment_account_id == account.id)
+            .order_by(
+                WorkRRSPContribution.contribution_date.desc(),
+                WorkRRSPContribution.id.desc(),
+            )
+        ).all()
+    return tuple(WorkRrspContributionRecord(*row) for row in rows)
 
 
 def get_owner_work_rrsp_summary(
@@ -603,26 +445,19 @@ def get_owner_work_rrsp_summary(
     group_id: int | None = None,
     session_factory=SessionLocal,
 ) -> WorkRrspSummary:
-    accounts = get_work_rrsp_accounts(
-        user_id=user_id,
-        group_id=group_id,
-        session_factory=session_factory,
-    )
-    start = date(year, month, 1)
-    end = date(year + (month == 12), month % 12 + 1, 1)
-    rows_by_account = _salary_rows_by_work_account(
-        accounts,
-        start=start,
-        end=end,
-        session_factory=session_factory,
-    )
-    return _combine_work_rrsp_summaries(tuple(
-        _summarize_work_rrsp_rows(
-            account,
-            rows_by_account.get(account.id, ()),
+    if not 1 <= month <= 12:
+        raise ValueError("month must be between 1 and 12")
+    with session_factory() as session:
+        return _query_work_rrsp_summary(
+            session,
+            _visible_account_scope(user_id, group_id),
+            InvestmentAccount.is_active.is_(True),
+            InvestmentAccount.is_work_related.is_(True),
+            func.lower(func.trim(InvestmentAccount.account_type)) == "rrsp",
+            WorkRRSPContribution.investment_account_id == InvestmentAccount.id,
+            WorkRRSPContribution.year == year,
+            WorkRRSPContribution.month == month,
         )
-        for account in accounts
-    ))
 
 
 def get_monthly_contribution_summary(
@@ -659,22 +494,15 @@ def get_total_contribution_summary(
     group_id: int | None = None,
     session_factory=SessionLocal,
 ) -> InvestmentContributionSummary:
-    accounts = get_work_rrsp_accounts(
-        user_id=user_id,
-        group_id=group_id,
-        session_factory=session_factory,
-    )
-    rows_by_account = _salary_rows_by_work_account(
-        accounts,
-        session_factory=session_factory,
-    )
-    work = _combine_work_rrsp_summaries(tuple(
-        _summarize_work_rrsp_rows(
-            account,
-            rows_by_account.get(account.id, ()),
+    with session_factory() as session:
+        work = _query_work_rrsp_summary(
+            session,
+            _visible_account_scope(user_id, group_id),
+            InvestmentAccount.is_active.is_(True),
+            InvestmentAccount.is_work_related.is_(True),
+            func.lower(func.trim(InvestmentAccount.account_type)) == "rrsp",
+            WorkRRSPContribution.investment_account_id == InvestmentAccount.id,
         )
-        for account in accounts
-    ))
     return InvestmentContributionSummary(
         manual=_get_manual_total_contributions(
             user_id=user_id,
@@ -711,22 +539,8 @@ def get_account_current_value(
     *,
     session_factory=SessionLocal,
 ) -> Decimal:
-    with session_factory() as session:
-        account = session.get(InvestmentAccount, account_id)
-        if account is None:
-            return Decimal("0.00")
-        session.expunge(account)
     snapshot = get_latest_snapshot(account_id, session_factory=session_factory)
-    base_value = snapshot.total_value if snapshot is not None else Decimal("0.00")
-    if not _is_auto_tracked_work_rrsp(account):
-        return base_value
-    value, _rows = _effective_work_rrsp_value(
-        account,
-        base_value,
-        snapshot.snapshot_datetime if snapshot is not None else None,
-        _salary_rows_for_work_rrsp(account, session_factory=session_factory),
-    )
-    return value
+    return snapshot.total_value if snapshot is not None else Decimal("0.00")
 
 
 def get_account_summaries(
@@ -763,11 +577,8 @@ def get_account_summaries(
                 InvestmentAccount.user_id,
                 InvestmentAccount.group_id,
                 InvestmentAccount.is_work_related,
-                InvestmentAccount.auto_track_from_payroll,
-                InvestmentAccount.employee_contribution_percent,
                 InvestmentAccount.employer_matching_enabled,
                 InvestmentAccount.employer_match_percent,
-                InvestmentAccount.payroll_tracking_start_date,
             )
             .outerjoin(
                 latest_dates,
@@ -787,45 +598,7 @@ def get_account_summaries(
                 InvestmentAccount.id,
             )
         ).all()
-    summaries = tuple(InvestmentAccountSummary(*row) for row in rows)
-    work_accounts = tuple(
-        account for account in summaries if _is_auto_tracked_work_rrsp(account)
-    )
-    if not work_accounts:
-        return summaries
-
-    salary_rows = _salary_rows_by_work_account(
-        work_accounts,
-        session_factory=session_factory,
-    )
-    effective_summaries = []
-    for account in summaries:
-        if not _is_auto_tracked_work_rrsp(account):
-            effective_summaries.append(account)
-            continue
-        current_value, eligible_rows = _effective_work_rrsp_value(
-            account,
-            account.current_value,
-            account.last_updated,
-            salary_rows.get(account.id, ()),
-        )
-        derived_update = (
-            datetime.combine(_month_end(max(row[0] for row in eligible_rows)), time.min)
-            if eligible_rows
-            else None
-        )
-        last_updated = max(
-            (value for value in (account.last_updated, derived_update) if value),
-            default=None,
-        )
-        effective_summaries.append(
-            replace(
-                account,
-                current_value=current_value,
-                last_updated=last_updated,
-            )
-        )
-    return tuple(effective_summaries)
+    return tuple(InvestmentAccountSummary(*row) for row in rows)
 
 
 def get_total_portfolio_value(
@@ -887,42 +660,11 @@ def get_portfolio_history(
             )
         ).all()
 
-    snapshots_by_account = {
-        account.id: tuple(
-            row for row in rows if row.investment_account_id == account.id
-        )
-        for account in accounts
-    }
-    work_accounts = tuple(
-        account for account in accounts if _is_auto_tracked_work_rrsp(account)
-    )
-    salary_rows = _salary_rows_by_work_account(
-        work_accounts,
-        end=end.date() if end is not None else None,
-        session_factory=session_factory,
-    )
-
     account_events: list[tuple[datetime, int, Decimal]] = []
-    for account in accounts:
-        snapshots = snapshots_by_account[account.id]
-        if _is_auto_tracked_work_rrsp(account):
-            account_events.extend(
-                (point.snapshot_datetime, account.id, point.total_value)
-                for point in _effective_work_rrsp_history(
-                    account,
-                    snapshots,
-                    salary_rows.get(account.id, ()),
-                )
-            )
-        else:
-            account_events.extend(
-                (
-                    snapshot.snapshot_datetime,
-                    account.id,
-                    snapshot.total_value,
-                )
-                for snapshot in snapshots
-            )
+    account_events.extend(
+        (row.snapshot_datetime, row.investment_account_id, row.total_value)
+        for row in rows
+    )
     account_events.sort(key=lambda event: (event[0], event[1]))
 
     latest_values: dict[int, Decimal] = {}
@@ -1036,17 +778,6 @@ def get_monthly_contribution_comparison(
     previous_month = (month - 2) % 12 + 1
     previous_start = date(previous_year, previous_month, 1)
     current_end = date(year + (month == 12), month % 12 + 1, 1)
-    accounts = get_work_rrsp_accounts(
-        user_id=user_id,
-        group_id=group_id,
-        session_factory=session_factory,
-    )
-    salary_rows = _salary_rows_by_work_account(
-        accounts,
-        start=previous_start,
-        end=current_end,
-        session_factory=session_factory,
-    )
     manual_by_month = _get_manual_contributions_by_month(
         previous_start,
         current_end,
@@ -1056,23 +787,12 @@ def get_monthly_contribution_comparison(
     )
 
     def total_for(month_key: tuple[int, int]) -> Decimal:
-        month_start = date(*month_key, 1)
-        month_end = date(
-            month_key[0] + (month_key[1] == 12),
-            month_key[1] % 12 + 1,
-            1,
+        work = get_owner_work_rrsp_summary(
+            *month_key,
+            user_id=user_id,
+            group_id=group_id,
+            session_factory=session_factory,
         )
-        work = _combine_work_rrsp_summaries(tuple(
-            _summarize_work_rrsp_rows(
-                account,
-                tuple(
-                    row
-                    for row in salary_rows.get(account.id, ())
-                    if month_start <= row[0] < month_end
-                ),
-            )
-            for account in accounts
-        ))
         return (
             manual_by_month.get(month_key, Decimal())
             + work.employee_contribution
@@ -1173,15 +893,6 @@ def get_account_history(
         ).all()
         for snapshot in snapshots:
             session.expunge(snapshot)
-    if _is_auto_tracked_work_rrsp(account):
-        return _effective_work_rrsp_history(
-            account,
-            snapshots,
-            _salary_rows_for_work_rrsp(
-                account,
-                session_factory=session_factory,
-            ),
-        )
     return tuple(snapshots)
 
 
@@ -1204,28 +915,24 @@ def get_investment_months(
         (int(year), int(month))
         for year, month in snapshot_months
     }
-    work_accounts = get_work_rrsp_accounts(
-        user_id=user_id,
-        group_id=group_id,
-        session_factory=session_factory,
-    )
-    salary_rows = _salary_rows_by_work_account(
-        work_accounts,
-        session_factory=session_factory,
-    )
-    for account in work_accounts:
-        months.update(
-            (transaction_date.year, transaction_date.month)
-            for transaction_date, _amount in salary_rows.get(account.id, ())
-        )
+    with session_factory() as session:
+        contribution_months = session.execute(
+            select(WorkRRSPContribution.year, WorkRRSPContribution.month)
+            .join(InvestmentAccount)
+            .where(
+                _visible_account_scope(user_id, group_id),
+                InvestmentAccount.is_active.is_(True),
+                InvestmentAccount.is_work_related.is_(True),
+            )
+            .distinct()
+        ).all()
+    months.update((year, month) for year, month in contribution_months)
     return months
 
 
 def _validated_work_rrsp_settings(
     account_type: str | None,
     is_work_related: bool,
-    auto_track_from_payroll: bool,
-    employee_contribution_percent,
     employer_matching_enabled: bool,
     employer_match_percent,
     *,
@@ -1235,8 +942,6 @@ def _validated_work_rrsp_settings(
     if not work_related:
         return {
             "is_work_related": False,
-            "auto_track_from_payroll": False,
-            "employee_contribution_percent": None,
             "employer_matching_enabled": False,
             "employer_match_percent": None,
         }
@@ -1244,21 +949,12 @@ def _validated_work_rrsp_settings(
         raise ValueError("Work-related tracking is only available for RRSP accounts")
     if group_id is not None:
         raise ValueError("A work RRSP must belong to a specific user")
-    employee_percent = _percent(
-        employee_contribution_percent,
-        "Employee contribution",
-        below_100=True,
-    )
-    if employee_percent is None:
-        raise ValueError("Employee contribution percentage is required")
     matching = bool(employer_matching_enabled)
     match_percent = _percent(employer_match_percent, "Employer match")
     if matching and match_percent is None:
         raise ValueError("Employer match percentage is required")
     return {
         "is_work_related": True,
-        "auto_track_from_payroll": bool(auto_track_from_payroll),
-        "employee_contribution_percent": employee_percent,
         "employer_matching_enabled": matching,
         "employer_match_percent": match_percent if matching else None,
     }
@@ -1275,8 +971,6 @@ def create_investment_account(
     user_id: str | None = None,
     group_id: int | None = None,
     is_work_related: bool = False,
-    auto_track_from_payroll: bool = False,
-    employee_contribution_percent: Decimal | str | int | float | None = None,
     employer_matching_enabled: bool = False,
     employer_match_percent: Decimal | str | int | float | None = None,
     session_factory=SessionLocal,
@@ -1300,14 +994,10 @@ def create_investment_account(
     work_settings = _validated_work_rrsp_settings(
         account_type,
         is_work_related,
-        auto_track_from_payroll,
-        employee_contribution_percent,
         employer_matching_enabled,
         employer_match_percent,
         group_id=group_id,
     )
-    tracking_start_date = _as_date(initial_date or date.today())
-
     with session_factory() as session, session.begin():
         candidates = session.scalars(
             select(InvestmentAccount).where(
@@ -1327,9 +1017,6 @@ def create_investment_account(
             account_number_last7=last7,
             account_type=account_type,
             is_active=True,
-            payroll_tracking_start_date=(
-                tracking_start_date if work_settings["is_work_related"] else None
-            ),
             **work_settings,
         )
         session.add(account)
@@ -1353,8 +1040,6 @@ def update_investment_account(
     account_number: str | None = None,
     account_type: str | None = None,
     is_work_related: bool = False,
-    auto_track_from_payroll: bool = False,
-    employee_contribution_percent: Decimal | str | int | float | None = None,
     employer_matching_enabled: bool = False,
     employer_match_percent: Decimal | str | int | float | None = None,
     session_factory=SessionLocal,
@@ -1386,8 +1071,6 @@ def update_investment_account(
         settings = _validated_work_rrsp_settings(
             account.account_type,
             is_work_related,
-            auto_track_from_payroll,
-            employee_contribution_percent,
             employer_matching_enabled,
             employer_match_percent,
             group_id=account.group_id,
@@ -1414,7 +1097,7 @@ def delete_investment_account(
     *,
     session_factory=SessionLocal,
 ) -> None:
-    """Permanently delete an investment account and all of its snapshots."""
+    """Permanently delete an account, its snapshots, and its RRSP contributions."""
     with session_factory() as session, session.begin():
         account = session.get(InvestmentAccount, account_id)
         if account is None:

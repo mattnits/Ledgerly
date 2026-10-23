@@ -55,7 +55,7 @@ class DatabaseMigrationTest(unittest.TestCase):
         self.assertEqual(applies_to_future, 1)
         engine.dispose()
 
-    def test_missing_payroll_start_date_is_added_without_losing_accounts(self):
+    def test_manual_rrsp_table_is_added_without_losing_legacy_account_data(self):
         engine = create_engine("sqlite://")
         metadata = MetaData()
         accounts = Table(
@@ -87,7 +87,8 @@ class DatabaseMigrationTest(unittest.TestCase):
                 is_active=True,
                 is_work_related=True,
                 auto_track_from_payroll=True,
-                employer_matching_enabled=False,
+                employer_matching_enabled=True,
+                employer_match_percent=50,
             ))
 
         init_db(engine)
@@ -105,10 +106,12 @@ class DatabaseMigrationTest(unittest.TestCase):
         with engine.connect() as connection:
             row = connection.execute(select(migrated)).mappings().one()
 
-        self.assertIn("payroll_tracking_start_date", columns)
-        self.assertIsNone(row["payroll_tracking_start_date"])
+        self.assertNotIn("payroll_tracking_start_date", columns)
         self.assertEqual(row["account_name"], "Existing RRSP")
         self.assertTrue(row["auto_track_from_payroll"])
+        self.assertTrue(row["employer_matching_enabled"])
+        self.assertEqual(row["employer_match_percent"], 50)
+        self.assertIn("work_rrsp_contributions", inspect(engine).get_table_names())
         self.assertIn("ix_investment_accounts_user_id", indexes)
         self.assertIn("ix_investment_accounts_group_id", indexes)
         engine.dispose()
