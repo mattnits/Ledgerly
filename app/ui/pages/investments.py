@@ -628,7 +628,6 @@ class PortfolioEntryDialog(GenericDialog):
 
         self.account = FramelessPopupComboBox()
         self.account.setObjectName("investmentEntryAccount")
-        self.account.setMaxVisibleItems(8)
         for account in accounts:
             masked_number = _masked_account_number(account.account_number_last7)
             suffix = f" ({masked_number})" if masked_number else ""
@@ -1167,7 +1166,6 @@ class InvestmentsPage(QWidget):
         self.account_selector = FramelessPopupComboBox()
         self.account_selector.setObjectName("investmentChartAccountSelector")
         self.account_selector.setMinimumWidth(190)
-        self.account_selector.setMaxVisibleItems(8)
         self.account_selector.currentIndexChanged.connect(
             self._account_chart_changed
         )

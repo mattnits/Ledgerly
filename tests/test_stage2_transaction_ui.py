@@ -103,16 +103,13 @@ class Stage2TransactionUiTest(unittest.TestCase):
                 ),
                 QColor("#ffffff"),
             )
-        category_filter_longest = max(
-            table.category_selector.fontMetrics().horizontalAdvance(
-                table.category_selector.itemText(index)
-            )
-            for index in range(table.category_selector.count())
-        )
+        table.category_selector.showPopup()
+        app.processEvents()
         self.assertGreaterEqual(
-            table.category_selector.view().minimumWidth(),
-            category_filter_longest + 64,
+            table.category_selector.view().window().width(),
+            table.category_selector.width(),
         )
+        table.category_selector.hidePopup()
         for row in table.rows:
             for index in range(row.category_combo.count()):
                 self.assertEqual(
@@ -122,16 +119,16 @@ class Stage2TransactionUiTest(unittest.TestCase):
                     ),
                     QColor("#ffffff"),
                 )
-            longest_category = max(
-                row.category_combo.fontMetrics().horizontalAdvance(
-                    row.category_combo.itemText(index)
+            row.category_combo.showPopup()
+            app.processEvents()
+            if row.category_combo.isEnabled():
+                self.assertGreaterEqual(
+                    row.category_combo.view().window().width(),
+                    row.category_combo.width(),
                 )
-                for index in range(row.category_combo.count())
-            )
-            self.assertGreaterEqual(
-                row.category_combo.view().minimumWidth(),
-                longest_category + 64,
-            )
+            else:
+                self.assertFalse(row.category_combo.view().window().isVisible())
+            row.category_combo.hidePopup()
         self.assertEqual(
             table.table.columnWidth(StatementsTable.ACTION_COLUMN),
             80,
@@ -268,7 +265,7 @@ class Stage2TransactionUiTest(unittest.TestCase):
             for child in popup.findChildren(QWidget)
             if child.metaObject().className() == "QComboBoxPrivateScroller"
         ]
-        self.assertEqual(popup.objectName(), "framelessComboPopup")
+        self.assertEqual(popup.objectName(), "ledgerlyDropdownPopup")
         self.assertEqual(native_scrollers, [])
         self.assertEqual(popup.height(), combo.view().height())
         self.assertEqual(combo.view().geometry().top(), 0)

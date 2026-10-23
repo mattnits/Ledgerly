@@ -173,7 +173,7 @@ class ProfileMenu(QFrame):
     closed = Signal()
 
     def __init__(self, profile: dict, parent=None, *, anchor_widget=None) -> None:
-        super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
         self._closed_notified = False
         self._anchor_widget = anchor_widget
         self._app_filter_installed = False

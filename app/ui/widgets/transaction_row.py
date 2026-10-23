@@ -150,7 +150,7 @@ class TransactionRow(QObject):
         )
         self.imported_label.setStyleSheet("color: #a8adb4;")
 
-        self.transaction_type_combo = WheelSafeComboBox()
+        self.transaction_type_combo = WheelSafeComboBox(compact=True)
         self.transaction_type_combo.setIconSize(spaced_text_icon_size())
         self.transaction_type_combo.setObjectName("transactionTypeCombo")
         self.transaction_type_combo.setFixedHeight(34)
@@ -179,16 +179,6 @@ class TransactionRow(QObject):
                 label,
                 Qt.ItemDataRole.ToolTipRole,
             )
-        longest_transaction_type = max(
-            (
-                self.transaction_type_combo.fontMetrics().horizontalAdvance(label)
-                for label in TRANSACTION_TYPE_LABELS.values()
-            ),
-            default=0,
-        )
-        self.transaction_type_combo.view().setMinimumWidth(
-            longest_transaction_type + 72
-        )
         self.transaction_type_combo.setCurrentIndex(
             self.transaction_type_combo.findData(transaction_type)
         )
@@ -204,7 +194,7 @@ class TransactionRow(QObject):
         transaction_type_layout.setSpacing(0)
         transaction_type_layout.addWidget(self.transaction_type_combo)
 
-        self.category_combo = WheelSafeComboBox()
+        self.category_combo = WheelSafeComboBox(compact=True)
         self.category_combo.setIconSize(spaced_text_icon_size())
         self._set_category_options(transaction_type, category_id)
         self._style_category()
@@ -322,18 +312,6 @@ class TransactionRow(QObject):
                     QColor("#ffffff"),
                     Qt.ItemDataRole.ForegroundRole,
                 )
-            longest_label = max(
-                (
-                    self.category_combo.fontMetrics().horizontalAdvance(
-                        self.category_combo.itemText(index)
-                    )
-                    for index in range(self.category_combo.count())
-                ),
-                default=0,
-            )
-            self.category_combo.view().setMinimumWidth(
-                max(220, longest_label + 64)
-            )
             selected = self.category_combo.findData(category_id)
             self.category_combo.setCurrentIndex(max(0, selected))
         self.category_combo.setEnabled(
@@ -367,16 +345,6 @@ class TransactionRow(QObject):
             QComboBox:hover {{ border-color: #737980; }}
             QComboBox:focus {{ border: 1px solid #4c99f3; }}
             QComboBox::drop-down {{ border: none; width: 0px; }}
-            QComboBox QAbstractItemView {{
-                color: #e0e2e5;
-                background: #22262b;
-                border: 1px solid #40464e;
-                selection-background-color: #3b4858;
-                selection-color: #ffffff;
-                padding: 0;
-                margin: 0;
-                outline: none;
-            }}
         """)
 
     def _category_selected(self, index: int) -> None:
