@@ -1,5 +1,5 @@
 from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
 from app.ui.theme import (
     awesome_icon,
     contrasting_text,
+    high_dpi_canvas,
+    icon_pixmap,
     refresh_button_icon_spacing,
     set_button_icon,
 )
@@ -86,10 +88,10 @@ def avatar_icon(
     if not background.isValid():
         background = QColor("#398cff")
 
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.GlobalColor.transparent)
+    pixmap = high_dpi_canvas(size, size)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
     painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(background)
     if profile_type == "group":
@@ -104,7 +106,7 @@ def avatar_icon(
     painter.setFont(font)
     painter.setPen(QColor(contrasting_text(background.name())))
     painter.drawText(
-        pixmap.rect(),
+        QRect(0, 0, size, size),
         Qt.AlignmentFlag.AlignCenter,
         (name.strip()[:1] or "?").upper(),
     )
@@ -171,7 +173,7 @@ class ProfileMenu(QFrame):
     closed = Signal()
 
     def __init__(self, profile: dict, parent=None, *, anchor_widget=None) -> None:
-        super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
         self._closed_notified = False
         self._anchor_widget = anchor_widget
         self._app_filter_installed = False
@@ -199,12 +201,12 @@ class ProfileMenu(QFrame):
         avatar.setObjectName("profileMenuAvatar")
         avatar.setProperty("profileType", profile.get("type", "user"))
         avatar.setFixedSize(36, 36)
-        avatar.setPixmap(avatar_icon(
+        avatar.setPixmap(icon_pixmap(avatar_icon(
             profile.get("name", ""),
             profile.get("color", "#398cff"),
             36,
             profile_type=profile.get("type", "user"),
-        ).pixmap(36, 36))
+        ), 36, 36))
         text = QWidget()
         text_layout = QVBoxLayout(text)
         text_layout.setContentsMargins(0, 0, 0, 0)
@@ -222,7 +224,9 @@ class ProfileMenu(QFrame):
         if profile.get("type") == "user" and profile.get("is_admin"):
             star = QLabel()
             star.setToolTip("Admin")
-            star.setPixmap(awesome_icon("fa6s.star", color="#f4c95d").pixmap(13, 13))
+            star.setPixmap(
+                icon_pixmap(awesome_icon("fa6s.star", color="#f4c95d"), 13, 13)
+            )
             header_layout.addWidget(star, alignment=Qt.AlignmentFlag.AlignTop)
         layout.addWidget(header)
 
@@ -363,7 +367,7 @@ class Sidebar(QFrame):
         self.brand_layout.setSpacing(8)
         self.brand_icon = QLabel()
         self.brand_icon.setPixmap(
-            awesome_icon("fa6s.wallet", color="#55a8ff").pixmap(20, 20)
+            icon_pixmap(awesome_icon("fa6s.wallet", color="#55a8ff"), 20, 20)
         )
         self.brand_icon.setFixedSize(20, 20)
         self.brand_title = QLabel("Ledgerly")
@@ -746,7 +750,7 @@ class Sidebar(QFrame):
         self.current_user_avatar.setProperty(
             "profileType", current_user.get("type", "user")
         )
-        self.current_user_avatar.setPixmap(icon.pixmap(34, 34))
+        self.current_user_avatar.setPixmap(icon_pixmap(icon, 34, 34))
         profile_label = "group" if current_user.get("type") == "group" else "user"
         self.current_user_avatar.setToolTip(f"Current {profile_label}: {user_name}")
         self.current_user_name.setText(user_name)

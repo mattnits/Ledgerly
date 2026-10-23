@@ -93,7 +93,7 @@ class PeriodSelectorTest(unittest.TestCase):
                 Qt.WidgetAttribute.WA_StyledBackground
             )
         )
-        self.assertEqual(popup_container.objectName(), "monthYearPopup")
+        self.assertEqual(popup_container.objectName(), "ledgerlyDropdownPopup")
         self.assertEqual(
             popup_container.height(), selector.month_selector.view().height()
         )

@@ -2,229 +2,33 @@ from __future__ import annotations
 
 from datetime import date
 
-from PySide6.QtCore import QEvent, QSize, QSignalBlocker, Qt, QTimer, Signal
+from PySide6.QtCore import QSignalBlocker, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLayout,
-    QListView,
     QSizePolicy,
-    QStyle,
-    QStyledItemDelegate,
-    QStyleOptionViewItem,
     QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from app.ui.theme import COLORS, awesome_icon, set_button_icon
+from app.ui.theme import COLORS, awesome_icon, icon_pixmap, set_button_icon
 from app.ui.widgets.combo_box import AppComboBox
+from app.ui.widgets.dropdown import DropdownItemDelegate
 
 
-class MonthYearItemDelegate(QStyledItemDelegate):
-    """Paint a clean popup row without native menu checks or padding."""
-
-    ROW_HEIGHT = 34
-
-    def paint(
-        self,
-        painter: QPainter,
-        option: QStyleOptionViewItem,
-        index,
-    ) -> None:
-        painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        selected = bool(option.state & QStyle.StateFlag.State_Selected)
-        hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
-        row = option.rect.adjusted(3, 1, -3, -1)
-        if selected:
-            painter.setBrush(QColor("#4468f2"))
-            painter.setPen(QPen(QColor("#5d7cff"), 1))
-            painter.drawRoundedRect(row, 6, 6)
-        elif hovered:
-            painter.setBrush(QColor("#27313c"))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRoundedRect(row, 6, 6)
-
-        painter.setPen(QColor("#ffffff" if selected else "#e5e8ee"))
-        painter.setFont(option.font)
-        painter.drawText(
-            row.adjusted(10, 0, -10, 0),
-            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-            str(index.data(Qt.ItemDataRole.DisplayRole) or ""),
-        )
-        painter.restore()
-
-    def sizeHint(self, option, index) -> QSize:  # noqa: N802
-        size = super().sizeHint(option, index)
-        size.setHeight(self.ROW_HEIGHT)
-        return size
+# Kept as an import alias for callers that inspect popup row metrics.
+MonthYearItemDelegate = DropdownItemDelegate
 
 
 class MonthYearChoice(AppComboBox):
-    """Month/year combo with a consistent chevron and clean list popup."""
+    """Month/year field retaining its integrated chevron and shared popup."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        popup = QListView(self)
-        popup.setMouseTracking(True)
-        popup.setUniformItemSizes(True)
-        popup.setSpacing(0)
-        popup.setCursor(Qt.CursorShape.PointingHandCursor)
-        popup.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
-        popup.setItemDelegate(MonthYearItemDelegate(popup))
-        self.setView(popup)
-        popup.setVerticalScrollMode(
-            QAbstractItemView.ScrollMode.ScrollPerItem
-        )
-        self._popup_window = QFrame(
-            self,
-            Qt.WindowType.Popup
-            | Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.NoDropShadowWindowHint,
-        )
-        self._popup_window.setObjectName("monthYearPopup")
-        self._popup_window.setAttribute(
-            Qt.WidgetAttribute.WA_StyledBackground, True
-        )
-        self._popup_window.setAttribute(
-            Qt.WidgetAttribute.WA_TranslucentBackground, False
-        )
-        self._popup_window.setAutoFillBackground(True)
-        popup_layout = QVBoxLayout(self._popup_window)
-        popup_layout.setContentsMargins(0, 0, 0, 0)
-        popup_layout.setSpacing(0)
-        popup_layout.addWidget(popup)
-        popup.clicked.connect(self._activate_popup_index)
-        popup.installEventFilter(self)
-        self._popup_window.setStyleSheet("""
-            QFrame#monthYearPopup {
-                background: #171b21;
-                border: none;
-            }
-            QFrame#monthYearPopup QListView {
-                color: #e5e8ee;
-                background: #171b21;
-                border: 1px solid #343c48;
-                padding: 0;
-                margin: 0;
-                outline: none;
-            }
-            QFrame#monthYearPopup QScrollBar:vertical {
-                width: 10px;
-                margin: 3px 2px 3px 0;
-                background: transparent;
-            }
-            QFrame#monthYearPopup QScrollBar::handle:vertical {
-                min-height: 28px;
-                background: #59616d;
-                border-radius: 4px;
-            }
-            QFrame#monthYearPopup QScrollBar::add-line:vertical,
-            QFrame#monthYearPopup QScrollBar::sub-line:vertical,
-            QFrame#monthYearPopup QScrollBar::add-page:vertical,
-            QFrame#monthYearPopup QScrollBar::sub-page:vertical {
-                height: 0;
-                background: transparent;
-                border: none;
-            }
-        """)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-
-    def showPopup(self) -> None:  # noqa: N802
-        view = self.view()
-        current = self.model().index(self.currentIndex(), self.modelColumn())
-        if current.isValid():
-            view.setCurrentIndex(current)
-        self._fit_popup_rows()
-        self._popup_window.show()
-        self._popup_window.raise_()
-        view.setFocus(Qt.FocusReason.PopupFocusReason)
-        QTimer.singleShot(0, self._fit_popup_rows)
-
-    def hidePopup(self) -> None:  # noqa: N802
-        self._popup_window.hide()
-
-    def eventFilter(self, watched, event) -> bool:  # noqa: N802
-        if watched is self.view() and event.type() == QEvent.Type.KeyPress:
-            if event.key() == Qt.Key.Key_Escape:
-                self.hidePopup()
-                self.setFocus(Qt.FocusReason.PopupFocusReason)
-                return True
-            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                self._activate_popup_index(self.view().currentIndex())
-                return True
-        return super().eventFilter(watched, event)
-
-    def _activate_popup_index(self, index) -> None:
-        if not index.isValid():
-            return
-        self.setCurrentIndex(index.row())
-        self.hidePopup()
-        self.setFocus(Qt.FocusReason.PopupFocusReason)
-
-    def _fit_popup_rows(self) -> None:
-        view = self.view()
-        popup = self._popup_window
-        if self.count() == 0:
-            return
-
-        # QComboBox switches custom list views back to pixel scrolling each
-        # time it opens them. Restore row scrolling so the first and last
-        # visible entries are always complete rather than partially clipped.
-        view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerItem)
-        row_height = MonthYearItemDelegate.ROW_HEIGHT
-        desired_rows = min(self.count(), self.maxVisibleItems())
-        desired_height = desired_rows * row_height + 2
-        screen = self.screen()
-        if screen is None:
-            return
-        available = screen.availableGeometry()
-        field_top_left = self.mapToGlobal(self.rect().topLeft())
-        field_bottom_right = self.mapToGlobal(self.rect().bottomRight())
-        field_top = field_top_left.y()
-        field_bottom = field_bottom_right.y()
-        popup_gap = 4
-        space_below = available.bottom() - field_bottom - popup_gap
-        space_above = field_top - available.top() - popup_gap
-        if desired_height <= space_below:
-            opens_above = False
-        elif desired_height <= space_above:
-            opens_above = True
-        else:
-            opens_above = space_above > space_below
-        available_height = space_above if opens_above else space_below
-        fitting_rows = max(1, (available_height - 2) // row_height)
-        target_rows = min(desired_rows, fitting_rows)
-        target_height = target_rows * row_height + 2
-        target_width = self.width()
-        target_x = min(
-            max(field_top_left.x(), available.left()),
-            available.right() - target_width + 1,
-        )
-        target_y = (
-            field_top - popup_gap - target_height
-            if opens_above
-            else field_bottom + popup_gap + 1
-        )
-        popup.setGeometry(
-            target_x,
-            target_y,
-            target_width,
-            target_height,
-        )
-        if popup.layout() is not None:
-            popup.layout().activate()
-        current = self.model().index(self.currentIndex(), 0)
-        if current.isValid():
-            view.scrollTo(
-                current,
-                QAbstractItemView.ScrollHint.PositionAtCenter,
-            )
+        super().__init__(parent, compact=True)
 
     def paintEvent(self, event) -> None:  # noqa: N802
         super().paintEvent(event)
@@ -290,7 +94,7 @@ class MonthYearPicker(QWidget):
         self.calendar_icon = QLabel()
         self.calendar_icon.setObjectName("monthYearCalendarIcon")
         self.calendar_icon.setPixmap(
-            awesome_icon("fa6s.calendar-days", color="#d5dde7").pixmap(14, 14)
+            icon_pixmap(awesome_icon("fa6s.calendar-days", color="#d5dde7"), 14, 14)
         )
         self.calendar_icon.setFixedWidth(22)
 
@@ -299,7 +103,6 @@ class MonthYearPicker(QWidget):
         self.month_selector.setAccessibleName("Month")
         self.month_selector.setToolTip("Select month")
         self.month_selector.setFixedWidth(month_width)
-        self.month_selector.setMaxVisibleItems(12)
         for month in range(1, 13):
             self.month_selector.addItem(
                 date(2000, month, 1).strftime("%B"), month
@@ -314,7 +117,6 @@ class MonthYearPicker(QWidget):
         self.year_selector.setAccessibleName("Year")
         self.year_selector.setToolTip("Select year")
         self.year_selector.setFixedWidth(year_width)
-        self.year_selector.setMaxVisibleItems(10)
         self._populate_years()
 
         display_layout.addWidget(self.calendar_icon)
@@ -489,17 +291,6 @@ class MonthYearPicker(QWidget):
             QComboBox#monthYearMonthSelector::down-arrow,
             QComboBox#monthYearYearSelector::down-arrow {{
                 image: none;
-            }}
-            QComboBox#monthYearMonthSelector QAbstractItemView,
-            QComboBox#monthYearYearSelector QAbstractItemView {{
-                color: #e5e8ee;
-                background: #171b21;
-                border: 1px solid #343c48;
-                selection-color: #ffffff;
-                selection-background-color: #4468f2;
-                padding: 0;
-                margin: 0;
-                outline: none;
             }}
             QFrame#monthYearDivider {{
                 background: #34404d;

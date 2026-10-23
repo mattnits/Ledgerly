@@ -36,6 +36,7 @@ from app.services.transactions import (
     set_transaction_deleted,
 )
 from app.ui.widgets.date_dropdown import DateDropdown
+from app.ui.theme import DROPDOWN_FILTER_STYLE
 from app.ui.widgets.combo_box import AppComboBox
 from app.ui.widgets.generic_table import GenericTable
 from app.ui.widgets.loading_state import LoadingOverlay
@@ -265,7 +266,7 @@ class StatementsTable(QWidget):
             QColor("#ffffff"),
             Qt.ItemDataRole.ForegroundRole,
         )
-        self._fit_category_popup()
+
         self.category_selector.currentIndexChanged.connect(self._select_category)
         self._add_filter_field(filter_layout, "Category", self.category_selector)
 
@@ -452,30 +453,6 @@ class StatementsTable(QWidget):
                 color: #b4bac2;
                 font-size: 12px;
             }
-            QComboBox#filterCombo {
-                color: #e3e5e8;
-                background: #15191e;
-                border: 1px solid #343a43;
-                border-radius: 8px;
-                padding: 8px 30px 8px 12px;
-                min-height: 22px;
-            }
-            QComboBox#filterCombo::drop-down {
-                subcontrol-origin: padding;
-                subcontrol-position: top right;
-                width: 28px;
-                border: none;
-                background: transparent;
-            }
-            QComboBox#filterCombo QAbstractItemView {
-                color: #e3e5e8;
-                background: #22262b;
-                border: 1px solid #40464e;
-                selection-background-color: #3b4858;
-                padding: 0;
-                margin: 0;
-                outline: none;
-            }
             QFrame#filterDivider { color: #343a43; }
             QCheckBox#needsReviewFilter {
                 color: #ffffff;
@@ -504,24 +481,11 @@ class StatementsTable(QWidget):
         title = QLabel(label)
         title.setObjectName("filterLabel")
         selector.setObjectName("filterCombo")
+        selector.setStyleSheet(DROPDOWN_FILTER_STYLE)
         selector.setMinimumWidth(max(130, selector.minimumWidth()))
         field_layout.addWidget(title)
         field_layout.addWidget(selector)
         layout.addWidget(field, 1)
-
-    def _fit_category_popup(self) -> None:
-        longest_label = max(
-            (
-                self.category_selector.fontMetrics().horizontalAdvance(
-                    self.category_selector.itemText(index)
-                )
-                for index in range(self.category_selector.count())
-            ),
-            default=0,
-        )
-        self.category_selector.view().setMinimumWidth(
-            max(220, longest_label + 64)
-        )
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -815,7 +779,7 @@ class StatementsTable(QWidget):
                     QColor("#ffffff"),
                     Qt.ItemDataRole.ForegroundRole,
                 )
-            self._fit_category_popup()
+
             selected = self.category_selector.findData(self.category_filter)
             if selected < 0:
                 self.category_filter = "all"

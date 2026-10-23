@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.ui.theme import COLORS, awesome_icon, set_button_icon
+from app.ui.theme import COLORS, awesome_icon, icon_pixmap, set_button_icon
 
 
 class GenericDialog(QDialog):
@@ -72,7 +72,7 @@ class GenericDialog(QDialog):
         icon_layout.setContentsMargins(0, 0, 0, 0)
         icon = QLabel()
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon.setPixmap(awesome_icon(icon_name, color="#56a9ff").pixmap(29, 29))
+        icon.setPixmap(icon_pixmap(awesome_icon(icon_name, color="#56a9ff"), 29, 29))
         icon_layout.addWidget(icon)
         header.addWidget(self.icon_frame, alignment=Qt.AlignmentFlag.AlignTop)
 
@@ -124,7 +124,7 @@ class GenericDialog(QDialog):
             info_layout.setSpacing(8)
             info_icon = QLabel()
             info_icon.setPixmap(
-                awesome_icon("fa6s.circle-info", color="#4da3ff").pixmap(20, 20)
+                icon_pixmap(awesome_icon("fa6s.circle-info", color="#4da3ff"), 20, 20)
             )
             info_icon.setFixedSize(24, 24)
             info_label = QLabel(info_text)

@@ -12,7 +12,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.ui.theme import COLORS, awesome_icon, set_delete_button_icon, set_label_icon
+from app.ui.theme import (
+    COLORS,
+    awesome_icon,
+    icon_pixmap,
+    set_delete_button_icon,
+    set_label_icon,
+)
 from app.ui.widgets.combo_box import AppComboBox
 from app.utils.constants import SUPPORTED_PARSE_TYPES
 
@@ -153,10 +159,14 @@ class FileRow(QFrame):
             size=16,
         )
         self.file_icon.setPixmap(
-            awesome_icon(
-                "fa6s.file-lines",
-                color=COLORS["negative"] if failed else "#aebed4",
-            ).pixmap(26, 26)
+            icon_pixmap(
+                awesome_icon(
+                    "fa6s.file-lines",
+                    color=COLORS["negative"] if failed else "#aebed4",
+                ),
+                26,
+                26,
+            )
         )
         self.style().unpolish(self)
         self.style().polish(self)

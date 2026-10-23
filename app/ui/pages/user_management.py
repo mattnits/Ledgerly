@@ -32,6 +32,7 @@ from app.ui.sidebar import ElidedLabel, avatar_icon
 from app.ui.theme import (
     COLORS,
     awesome_icon,
+    icon_pixmap,
     set_button_icon,
     set_delete_button_icon,
     set_icon_only_button,
@@ -207,7 +208,7 @@ class UserManagementPage(QWidget):
         layout.setSpacing(8)
         icon = QLabel()
         icon.setPixmap(
-            awesome_icon(icon_name, color="#b8c2d0").pixmap(22, 22)
+            icon_pixmap(awesome_icon(icon_name, color="#b8c2d0"), 22, 22)
         )
         icon.setFixedSize(26, 26)
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -253,7 +254,7 @@ class UserManagementPage(QWidget):
         avatar = QLabel()
         avatar.setFixedSize(60, 60)
         avatar.setPixmap(
-            avatar_icon(user["name"], user["color"], 60).pixmap(60, 60)
+            icon_pixmap(avatar_icon(user["name"], user["color"], 60), 60, 60)
         )
         detail.addWidget(avatar, alignment=Qt.AlignmentFlag.AlignTop)
 
@@ -271,7 +272,7 @@ class UserManagementPage(QWidget):
         if user["is_admin"]:
             star = QLabel()
             star.setPixmap(
-                awesome_icon("fa6s.star", color="#e0b84f").pixmap(14, 14)
+                icon_pixmap(awesome_icon("fa6s.star", color="#e0b84f"), 14, 14)
             )
             star.setToolTip("Admin")
             name_row.addWidget(star)
@@ -321,9 +322,9 @@ class UserManagementPage(QWidget):
             row_layout.setSpacing(8)
             avatar = QLabel()
             avatar.setFixedSize(36, 36)
-            avatar.setPixmap(avatar_icon(
+            avatar.setPixmap(icon_pixmap(avatar_icon(
                 group["name"], group["color"], 36, profile_type="group"
-            ).pixmap(36, 36))
+            ), 36, 36))
             row_layout.addWidget(avatar)
             text = QVBoxLayout()
             text.setSpacing(1)
@@ -434,7 +435,7 @@ class UserManagementPage(QWidget):
         avatar = QLabel()
         avatar.setFixedSize(32, 32)
         avatar.setPixmap(
-            avatar_icon(user["name"], user["color"], 32).pixmap(32, 32)
+            icon_pixmap(avatar_icon(user["name"], user["color"], 32), 32, 32)
         )
         identity_layout.addWidget(avatar)
         name = ElidedLabel(user["name"])
@@ -446,7 +447,7 @@ class UserManagementPage(QWidget):
         if user["is_admin"]:
             star = QLabel()
             star.setPixmap(
-                awesome_icon("fa6s.star", color="#e0b84f").pixmap(12, 12)
+                icon_pixmap(awesome_icon("fa6s.star", color="#e0b84f"), 12, 12)
             )
             star.setToolTip("Admin")
             identity_layout.addWidget(star)
@@ -608,9 +609,9 @@ class UserManagementPage(QWidget):
         identity_layout.setSpacing(8)
         avatar = QLabel()
         avatar.setFixedSize(32, 32)
-        avatar.setPixmap(avatar_icon(
+        avatar.setPixmap(icon_pixmap(avatar_icon(
             group["name"], group["color"], 32, profile_type="group"
-        ).pixmap(32, 32))
+        ), 32, 32))
         identity_layout.addWidget(avatar)
         name = ElidedLabel(group["name"])
         name.setObjectName("managementRowName")

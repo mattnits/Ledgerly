@@ -31,7 +31,13 @@ from app.services.category_rules import (
 from app.core.db import SessionLocal
 from app.models.models import Account, Category
 from app.ui.dialogs.generic_dialog import GenericDialog
-from app.ui.theme import awesome_icon, brand_icon, set_button_icon, set_delete_button_icon
+from app.ui.theme import (
+    awesome_icon,
+    brand_icon,
+    icon_pixmap,
+    set_button_icon,
+    set_delete_button_icon,
+)
 from app.ui.widgets.combo_box import AppComboBox
 from app.utils.constants import (
     CATEGORY_FREE_TRANSACTION_TYPES,
@@ -95,7 +101,11 @@ class ClassificationRulesDialog(QDialog):
         icon = QLabel()
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon.setPixmap(
-            awesome_icon("fa6s.wand-magic-sparkles", color="#56a9ff").pixmap(27, 27)
+            icon_pixmap(
+                awesome_icon("fa6s.wand-magic-sparkles", color="#56a9ff"),
+                27,
+                27,
+            )
         )
         icon_layout.addWidget(icon)
         header.addWidget(icon_frame, alignment=Qt.AlignmentFlag.AlignTop)

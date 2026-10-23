@@ -89,7 +89,7 @@ class MonthYearPickerTest(unittest.TestCase):
             for child in popup.findChildren(QWidget)
             if child.metaObject().className() == "QComboBoxPrivateScroller"
         ]
-        self.assertEqual(popup.objectName(), "monthYearPopup")
+        self.assertEqual(popup.objectName(), "ledgerlyDropdownPopup")
         self.assertEqual(scrollers, [])
         self.assertEqual(popup.height(), combo.view().height())
         self.assertEqual(combo.view().geometry().top(), 0)

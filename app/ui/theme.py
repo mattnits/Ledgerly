@@ -34,10 +34,102 @@ COLORS = {
 }
 
 ICON_TEXT_SPACING = 8
+
+# Dropdowns share these tokens regardless of their closed-control density.
+DROPDOWN = {
+    "background": "#1d2229",
+    "border": "#3a4552",
+    "hover": "#2a3440",
+    "selected": COLORS["primary"],
+    "text": COLORS["text"],
+    "muted": COLORS["text_dim"],
+    "scrollbar": "#596674",
+}
+DROPDOWN_MAX_ROWS = 10
+DROPDOWN_ROW_HEIGHT = 32
+DROPDOWN_FILTER_STYLE = f"""
+QComboBox#filterCombo {{
+    color: #e3e5e8; background: #15191e; border: 1px solid #343a43;
+    border-radius: 8px; padding: 8px 30px 8px 12px; min-height: 22px;
+}}
+QComboBox#filterCombo:hover {{ border-color: #4b5867; }}
+QComboBox#filterCombo:focus {{ border-color: {COLORS['primary']}; }}
+QComboBox#filterCombo:disabled {{ color: {DROPDOWN['muted']}; }}
+"""
+
+DROPDOWN_MENU_STYLE = f"""
+    QMenu {{ background: {DROPDOWN['background']}; color: {DROPDOWN['text']};
+        border: 1px solid {DROPDOWN['border']}; padding: 0; margin: 0; }}
+    QMenu::item {{ min-height: {DROPDOWN_ROW_HEIGHT}px; padding: 0 12px; margin: 0; }}
+    QMenu::item:selected {{ background: {DROPDOWN['selected']}; color: {DROPDOWN['text']}; }}
+    QMenu::item:disabled {{ color: {DROPDOWN['muted']}; }}
+"""
+
+DROPDOWN_POPUP_STYLE = f"""
+    QFrame#ledgerlyDropdownPopup {{ background: {DROPDOWN['background']}; border: none; }}
+    QListView#ledgerlyDropdownList {{
+        background: {DROPDOWN['background']}; color: {DROPDOWN['text']};
+        border: 1px solid {DROPDOWN['border']}; border-radius: 0;
+        padding: 0; margin: 0; outline: none;
+    }}
+    QListView#ledgerlyDropdownList::item {{ padding: 0; margin: 0; border: none; }}
+    QScrollBar:vertical {{ width: 10px; background: {DROPDOWN['background']}; margin: 0; }}
+    QScrollBar::handle:vertical {{ background: {DROPDOWN['scrollbar']}; min-height: 24px; border-radius: 4px; }}
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; border: none; background: transparent; }}
+    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+"""
 _NATIVE_BUTTON_ICON_TEXT_SPACING = 4
 
 
 _qtawesome_available: bool | None = None
+
+
+def icon_render_device_pixel_ratio() -> float:
+    """Render icons at native display density, with 2x supersampling minimum."""
+    app = QApplication.instance()
+    screen_ratios = (
+        [screen.devicePixelRatio() for screen in app.screens()]
+        if app is not None
+        else []
+    )
+    return max(2.0, *screen_ratios)
+
+
+def high_dpi_canvas(width: int, height: int | None = None) -> QPixmap:
+    """Create a transparent pixmap whose logical dimensions stay unchanged."""
+    logical_height = width if height is None else height
+    ratio = icon_render_device_pixel_ratio()
+    pixmap = QPixmap(
+        max(1, round(width * ratio)),
+        max(1, round(logical_height * ratio)),
+    )
+    pixmap.setDevicePixelRatio(ratio)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    return pixmap
+
+
+def icon_pixmap(
+    icon: QIcon,
+    width: int,
+    height: int | None = None,
+    mode: QIcon.Mode = QIcon.Mode.Normal,
+    state: QIcon.State = QIcon.State.Off,
+) -> QPixmap:
+    """Rasterize a scalable icon sharply without changing its logical size."""
+    logical_height = width if height is None else height
+    ratio = icon_render_device_pixel_ratio()
+    size = QSize(width, logical_height)
+    try:
+        return icon.pixmap(size, ratio, mode, state)
+    except TypeError:
+        # Compatibility fallback for older Qt bindings without the DPR overload.
+        pixmap = icon.pixmap(
+            QSize(round(width * ratio), round(logical_height * ratio)),
+            mode,
+            state,
+        )
+        pixmap.setDevicePixelRatio(ratio)
+        return pixmap
 
 
 def awesome_icon(
@@ -95,10 +187,11 @@ def _icon_with_right_padding(icon: QIcon, size: int, padding: int) -> QIcon:
         QIcon.Mode.Selected,
     ):
         for state in (QIcon.State.Off, QIcon.State.On):
-            canvas = QPixmap(size + padding, size)
-            canvas.fill(Qt.GlobalColor.transparent)
+            canvas = high_dpi_canvas(size + padding, size)
             painter = QPainter(canvas)
-            painter.drawPixmap(0, 0, icon.pixmap(size, size, mode, state))
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            painter.drawPixmap(0, 0, icon_pixmap(icon, size, size, mode, state))
             painter.end()
             padded.addPixmap(canvas, mode, state)
     return padded
@@ -193,7 +286,7 @@ def set_label_icon(
     color: str = COLORS["text_muted"],
     size: int = 18,
 ) -> None:
-    label.setPixmap(awesome_icon(name, color=color).pixmap(size, size))
+    label.setPixmap(icon_pixmap(awesome_icon(name, color=color), size, size))
     label.setFixedSize(size, size)
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -231,8 +324,7 @@ def brand_icon(institution: str, *, size: int = 24) -> QIcon:
             int(source.height() * 0.80),
         )
 
-    target = QPixmap(size, size)
-    target.fill(Qt.GlobalColor.transparent)
+    target = high_dpi_canvas(size, size)
     painter = QPainter(target)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
@@ -584,28 +676,16 @@ QComboBox::drop-down {{
     width: 28px;
     border: none;
 }}
-QComboBox QAbstractItemView {{
-    color: #e5e7ea;
-    background: #20242a;
-    border: 1px solid #3a4048;
-    selection-background-color: #315f94;
-    selection-color: #ffffff;
-    padding: 0;
-    margin: 0;
-    outline: none;
+QComboBox:hover {{ border-color: #4b5867; }}
+QComboBox:focus {{ border-color: {COLORS['primary']}; }}
+QComboBox:disabled {{ color: {COLORS['text_dim']}; border-color: #29313a; }}
+QComboBox[dropdownDensity="compact"] {{ min-height: 20px; padding: 4px 28px 4px 10px; }}
+QComboBox#dateDropdown {{
+    color: #e8ebf1; background: #171b21; border: 1px solid #343c48;
+    border-radius: 9px; padding: 8px 34px 8px 12px; font-size: 13px;
 }}
-QComboBox QAbstractItemView::item {{
-    color: #e5e7ea;
-    background: transparent;
-    border: none;
-    min-height: 24px;
-    padding: 7px 10px;
-}}
-QComboBox QAbstractItemView::item:hover {{ background: #2a3038; }}
-QComboBox QAbstractItemView::item:selected {{
-    color: #ffffff;
-    background: #315f94;
-}}
+QComboBox#dateDropdown:hover {{ border-color: #465161; }}
+QComboBox#dateDropdown:focus {{ border-color: {COLORS['primary']}; }}
 QComboBox#transactionTypeCombo {{
     color: #e5e7ea;
     background: #20242a;
