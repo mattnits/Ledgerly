@@ -14,6 +14,7 @@ from app.models.models import (
     InvestmentSnapshot,
     Transaction,
     User,
+    WorkRRSPContribution,
 )
 from app.services.dashboard import get_dashboard_data
 from app.services.investments import (
@@ -168,28 +169,44 @@ class PerformanceArchitectureTest(unittest.TestCase):
         self.assertEqual(accounts[0].current_value, Decimal("125.00"))
         self.assertEqual(accounts[0].last_updated, datetime(2026, 8, 31))
 
-    def test_multiple_work_accounts_share_one_salary_query(self):
+    def test_multiple_work_accounts_share_one_contribution_summary_query(self):
         with self.sessions.begin() as session:
-            session.add_all((
-                InvestmentAccount(
+            first = InvestmentAccount(
                     user_id="user",
                     institution="Employer One",
                     account_name="Work RRSP One",
                     account_type="RRSP",
                     is_work_related=True,
-                    auto_track_from_payroll=True,
-                    employee_contribution_percent=Decimal("5.00"),
                     created_at=datetime(2026, 1, 1),
-                ),
-                InvestmentAccount(
+                )
+            second = InvestmentAccount(
                     user_id="user",
                     institution="Employer Two",
                     account_name="Work RRSP Two",
                     account_type="RRSP",
                     is_work_related=True,
-                    auto_track_from_payroll=True,
-                    employee_contribution_percent=Decimal("3.00"),
                     created_at=datetime(2026, 1, 1),
+                )
+            session.add_all((first, second))
+            session.flush()
+            session.add_all((
+                WorkRRSPContribution(
+                    investment_account_id=first.id,
+                    contribution_date=date(2026, 8, 15),
+                    year=2026,
+                    month=8,
+                    employee_contribution=Decimal("50.00"),
+                    employer_match=Decimal("0.00"),
+                    total_contribution=Decimal("50.00"),
+                ),
+                WorkRRSPContribution(
+                    investment_account_id=second.id,
+                    contribution_date=date(2026, 8, 15),
+                    year=2026,
+                    month=8,
+                    employee_contribution=Decimal("30.00"),
+                    employer_match=Decimal("0.00"),
+                    total_contribution=Decimal("30.00"),
                 ),
             ))
 
@@ -202,8 +219,8 @@ class PerformanceArchitectureTest(unittest.TestCase):
             )
         )
 
-        self.assertEqual(len(statements), 2)
-        self.assertEqual(summary.salary_count, 2)
+        self.assertEqual(len(statements), 1)
+        self.assertEqual(summary.contribution_count, 2)
 
     def test_unfiltered_transaction_page_avoids_duplicate_count_query(self):
         result, statements = self._capture_statements(lambda: fetch_transactions(

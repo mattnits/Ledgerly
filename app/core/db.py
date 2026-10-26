@@ -270,17 +270,14 @@ def _migrate_investment_account_number_last7(db_engine) -> None:
 
 
 def _migrate_work_rrsp_fields(db_engine) -> None:
-    """Add work RRSP settings without changing existing account behaviour."""
+    """Add current settings while retaining ignored legacy payroll columns."""
     columns = _sqlite_columns(db_engine, "investment_accounts")
     if not columns:
         return
     additions = (
         ("is_work_related", "BOOLEAN NOT NULL DEFAULT 0"),
-        ("auto_track_from_payroll", "BOOLEAN NOT NULL DEFAULT 0"),
-        ("employee_contribution_percent", "NUMERIC(7, 4)"),
         ("employer_matching_enabled", "BOOLEAN NOT NULL DEFAULT 0"),
         ("employer_match_percent", "NUMERIC(7, 4)"),
-        ("payroll_tracking_start_date", "DATE"),
     )
     with db_engine.begin() as connection:
         for name, definition in additions:

@@ -1,7 +1,7 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QWidget
 
-from app.ui.theme import brand_icon
+from app.ui.theme import brand_icon, icon_pixmap
 
 
 class AccountBadge(QWidget):
@@ -24,7 +24,9 @@ class AccountBadge(QWidget):
 
         icon_label = QLabel()
         icon_label.setObjectName("accountBrandIcon")
-        icon_label.setPixmap(brand_icon(institution, size=icon_size).pixmap(icon_size, icon_size))
+        icon_label.setPixmap(
+            icon_pixmap(brand_icon(institution, size=icon_size), icon_size, icon_size)
+        )
         icon_label.setFixedSize(icon_size, icon_size)
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(icon_label)

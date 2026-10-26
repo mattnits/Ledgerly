@@ -413,7 +413,7 @@ class SavingsCard(DashboardCard):
         cash = actual if cash_actual is None else cash_actual
         self.cash_saved_row.set_values("Cash saved", format_currency(cash))
         self.work_rrsp_row.set_values(
-            "Work RRSP (excluded)", format_currency(work_rrsp_employee)
+            "Work RRSP", format_currency(work_rrsp_employee)
         )
         self.actual_row.set_values(
             "Net savings toward goal", format_currency(actual)
@@ -421,7 +421,7 @@ class SavingsCard(DashboardCard):
         match_text = format_currency(employer_match)
         if employer_match >= 0:
             match_text = f"+{match_text}"
-        self.employer_match_row.set_values("Employer match (excluded)", match_text)
+        self.employer_match_row.set_values("Employer match", match_text)
         self.balance_row.set_values(
             "Savings balance",
             format_currency(balance) if balance is not None else "Not recorded",

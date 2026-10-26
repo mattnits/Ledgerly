@@ -44,6 +44,7 @@ from app.services.goals import (
     update_savings_goal,
 )
 from app.ui.dialogs.generic_dialog import GenericDialog
+from app.ui.sidebar import ElidedLabel
 from app.ui.widgets.combo_box import AppComboBox
 from app.ui.widgets.date_picker import DatePickerEdit
 from app.ui.widgets.month_year_picker import MonthYearPicker
@@ -52,6 +53,8 @@ from app.ui.theme import (
     COLORS,
     awesome_icon,
     category_icon_name,
+    high_dpi_canvas,
+    icon_pixmap,
     prepare_popup_menu,
     set_button_icon,
     spaced_text_icon,
@@ -98,8 +101,7 @@ def _badge_pixmap(
     background = QColor(color)
     if not background.isValid():
         background = QColor("#398cff")
-    pixmap = QPixmap(size, size)
-    pixmap.fill(Qt.GlobalColor.transparent)
+    pixmap = high_dpi_canvas(size, size)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     tint = QColor(background)
@@ -113,7 +115,9 @@ def _badge_pixmap(
     painter.drawRoundedRect(QRectF(1, 1, size - 2, size - 2), radius, radius)
     icon_size = max(12, int(size * (0.5 if subtle else 0.48)))
     icon_color = background.name() if subtle else "#f8fbff"
-    icon = awesome_icon(icon_name, color=icon_color).pixmap(icon_size, icon_size)
+    icon = icon_pixmap(
+        awesome_icon(icon_name, color=icon_color), icon_size, icon_size
+    )
     offset = (size - icon_size) // 2
     painter.drawPixmap(offset, offset, icon)
     painter.end()
@@ -159,13 +163,13 @@ def _dialog_month_field(year: int, month: int) -> QFrame:
     layout.setSpacing(14)
     calendar = QLabel()
     calendar.setPixmap(
-        awesome_icon("fa6s.calendar-days", color="#b8c9e3").pixmap(20, 20)
+        icon_pixmap(awesome_icon("fa6s.calendar-days", color="#b8c9e3"), 20, 20)
     )
     value = QLabel(date(year, month, 1).strftime("%B %Y"))
     value.setObjectName("dialogDisplayValue")
     chevron = QLabel()
     chevron.setPixmap(
-        awesome_icon("fa6s.chevron-down", color="#9eacc0").pixmap(12, 12)
+        icon_pixmap(awesome_icon("fa6s.chevron-down", color="#9eacc0"), 12, 12)
     )
     layout.addWidget(calendar)
     layout.addWidget(value, 1)
@@ -378,13 +382,15 @@ class MonthlySavingsCard(SectionCard):
         heading = QHBoxLayout()
         heading.setSpacing(0)
         icon = QLabel()
-        icon.setPixmap(awesome_icon("fa6s.bullseye", color="#49a4ff").pixmap(25, 25))
+        icon.setPixmap(
+            icon_pixmap(awesome_icon("fa6s.bullseye", color="#49a4ff"), 25, 25)
+        )
         titles = QVBoxLayout()
         titles.setSpacing(2)
         title = QLabel("Monthly Savings Goal")
         title.setObjectName("goalsSectionTitle")
         self.subtitle = QLabel(
-            "Your target is based on usable income after spending; RRSP contributions are excluded."
+            "Your progress includes cash savings and saved Work RRSP contributions."
         )
         self.subtitle.setObjectName("goalsMuted")
         self.subtitle.setWordWrap(True)
@@ -457,7 +463,7 @@ class MonthlySavingsCard(SectionCard):
         self.breakdown_layout.setContentsMargins(14, 12, 14, 12)
         self.breakdown_layout.setHorizontalSpacing(18)
         self.breakdown_layout.setVerticalSpacing(7)
-        heading_label = QLabel("Goal calculation  (RRSP excluded)")
+        heading_label = QLabel("Goal calculation")
         heading_label.setObjectName("goalsSmallHeading")
         self.breakdown_layout.addWidget(heading_label, 0, 0, 1, 3)
         self.breakdown_values: dict[str, QLabel] = {}
@@ -471,7 +477,7 @@ class MonthlySavingsCard(SectionCard):
         for row, (key, label, color) in enumerate(rows, 1):
             dot = QLabel()
             dot.setFixedWidth(10)
-            dot.setPixmap(awesome_icon("fa6s.circle", color=color).pixmap(7, 7))
+            dot.setPixmap(icon_pixmap(awesome_icon("fa6s.circle", color=color), 7, 7))
             name = QLabel(label)
             name.setObjectName("goalsBreakdownName")
             name.setStyleSheet(f"color: {color};")
@@ -490,7 +496,7 @@ class MonthlySavingsCard(SectionCard):
         net_dot = QLabel()
         net_dot.setFixedWidth(10)
         net_dot.setPixmap(
-            awesome_icon("fa6s.circle", color="#4fd594").pixmap(7, 7)
+            icon_pixmap(awesome_icon("fa6s.circle", color="#4fd594"), 7, 7)
         )
         net_name = QLabel("Net Savings")
         net_name.setStyleSheet("color: #4fd594; font-weight: 650;")
@@ -525,12 +531,12 @@ class MonthlySavingsCard(SectionCard):
         self.breakdown_layout.setVerticalSpacing(4 if dense else 7)
         self.progress.setMinimumWidth(125 if dense else 175)
         self.breakdown_names["employee"].setText(
-            "RRSP employee (excluded)"
-            if dense else "Work RRSP employee (excluded)"
+            "RRSP employee"
+            if dense else "Work RRSP employee"
         )
         self.breakdown_names["employer"].setText(
-            "RRSP employer (excluded)"
-            if dense else "Work RRSP employer (excluded)"
+            "RRSP employer"
+            if dense else "Work RRSP employer"
         )
         self.subtitle.setVisible(not dense)
         self.status_label.setVisible(not dense and bool(self.status_label.text()))
@@ -622,7 +628,7 @@ class QuickStatsCard(SectionCard):
         self.header_icon.setFixedSize(20, 20)
         self.header_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.header_icon.setPixmap(
-            awesome_icon("fa6s.chart-simple", color="#49a4ff").pixmap(20, 20)
+            icon_pixmap(awesome_icon("fa6s.chart-simple", color="#49a4ff"), 20, 20)
         )
         self.title_label = QLabel("Quick Stats")
         self.title_label.setObjectName("goalsSectionTitle")
@@ -713,6 +719,9 @@ class BudgetRow(QFrame):
     DENSE_ACTION_COLUMN_WIDTH = 22
     LEFT_MARGIN = 9
     RIGHT_MARGIN = 7
+    CATEGORY_ICON_SIZE = 32
+    DENSE_CATEGORY_ICON_SIZE = 18
+    CATEGORY_SPACING = 8
 
     def __init__(self, item: CategoryBudgetProgress, compact: bool, dense: bool = False) -> None:
         super().__init__()
@@ -735,19 +744,19 @@ class BudgetRow(QFrame):
         self.category_cell = QWidget()
         category_layout = QHBoxLayout(self.category_cell)
         category_layout.setContentsMargins(0, 0, 0, 0)
-        category_layout.setSpacing(8)
+        category_layout.setSpacing(self.CATEGORY_SPACING)
         self.category_icon = QLabel()
-        badge_size = 18 if dense else 32
+        badge_size = (
+            self.DENSE_CATEGORY_ICON_SIZE if dense else self.CATEGORY_ICON_SIZE
+        )
         self.category_icon.setPixmap(_badge_pixmap(
             category_icon_name(item.category_name), item.category_color, badge_size
         ))
         self.category_icon.setFixedSize(badge_size, badge_size)
-        self.category = QLabel(item.category_name)
+        self.category = ElidedLabel(item.category_name)
         self.category.setObjectName("goalsValue")
-        category_layout.addStretch()
         category_layout.addWidget(self.category_icon)
-        category_layout.addWidget(self.category)
-        category_layout.addStretch()
+        category_layout.addWidget(self.category, 1)
         self.spent = QLabel(_money(item.spent))
         self.target = QLabel(_money(item.target))
         remaining = item.remaining
@@ -795,10 +804,6 @@ class BudgetRow(QFrame):
         self.action.clicked.connect(self._show_menu)
         self.compact = not compact
         self.set_compact(compact)
-
-    def set_category_text_width(self, width: int) -> None:
-        """Keep category icons aligned while names retain natural lengths."""
-        self.category.setFixedWidth(max(0, width))
 
     @classmethod
     def configure_wide_columns(
@@ -1021,8 +1026,8 @@ class MonthlySavingsGoalDialog(GenericDialog):
             icon_name="fa6s.bullseye",
             info_text=(
                 "This target carries forward to future months until you change it. "
-                "Progress uses income - spending. Work RRSP employee contributions "
-                "and employer matches are excluded because they are not currently usable cash."
+                "Progress uses income - spending + Work RRSP employee contributions "
+                "+ employer matching."
             ),
         )
         self.resize(720, 560)
@@ -1216,7 +1221,9 @@ class GoalsPage(QWidget):
         budget_heading = QHBoxLayout()
         budget_heading.setSpacing(8)
         budget_icon = QLabel()
-        budget_icon.setPixmap(awesome_icon("fa6s.chart-pie", color="#49a4ff").pixmap(21, 21))
+        budget_icon.setPixmap(
+            icon_pixmap(awesome_icon("fa6s.chart-pie", color="#49a4ff"), 21, 21)
+        )
         budget_titles = QVBoxLayout()
         budget_title = QLabel("Category Budgets")
         budget_title.setObjectName("goalsSectionTitle")
@@ -1255,7 +1262,11 @@ class GoalsPage(QWidget):
         for column, text in headers:
             label = QLabel(text)
             label.setObjectName("goalsTableHeader")
-            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            label.setAlignment(
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+                if column == 0
+                else Qt.AlignmentFlag.AlignCenter
+            )
             policy = label.sizePolicy()
             policy.setHorizontalPolicy(QSizePolicy.Policy.Ignored)
             label.setSizePolicy(policy)
@@ -1306,7 +1317,9 @@ class GoalsPage(QWidget):
         goals_heading = QHBoxLayout()
         goals_heading.setSpacing(8)
         goals_icon = QLabel()
-        goals_icon.setPixmap(awesome_icon("fa6s.flag", color="#49a4ff").pixmap(21, 21))
+        goals_icon.setPixmap(
+            icon_pixmap(awesome_icon("fa6s.flag", color="#49a4ff"), 21, 21)
+        )
         goals_titles = QVBoxLayout()
         goals_title = QLabel("Savings Goals")
         goals_title.setObjectName("goalsSectionTitle")
@@ -1360,9 +1373,7 @@ class GoalsPage(QWidget):
             QWidget#goalsBudgetHeader {
                 background: #171e26;
                 border: 1px solid #25313c;
-                border-bottom: none;
-                border-top-left-radius: 10px;
-                border-top-right-radius: 10px;
+                border-radius: 10px;
             }
             QWidget#goalsBudgetTable {
                 background: #10171d;
@@ -1597,11 +1608,7 @@ class GoalsPage(QWidget):
             row.edit_requested.connect(self._edit_budget)
             row.delete_requested.connect(self._delete_budget)
             rows.append(row)
-        category_text_width = max(
-            row.category.sizeHint().width() for row in rows
-        )
         for row in rows:
-            row.set_category_text_width(category_text_width)
             self.budget_rows_layout.addWidget(row)
 
     def _render_goal_cards(self) -> None:

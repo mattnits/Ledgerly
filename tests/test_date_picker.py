@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication, QCalendarWidget, QToolButton
 from app.ui.widgets.date_picker import DatePickerCalendar, DatePickerEdit
 from app.ui.widgets.file_selection import FileSelection
 from app.ui.pages.investments import InvestmentAccountDialog, PortfolioEntryDialog
+from app.ui.theme import DROPDOWN_MENU_STYLE
 
 
 class DatePickerTest(unittest.TestCase):
@@ -71,6 +72,7 @@ class DatePickerTest(unittest.TestCase):
         self.assertTrue(calendar.isVisible())
         self.assertFalse(calendar.grab().isNull())
         popup = calendar.window()
+        self.assertTrue(popup.windowFlags() & Qt.WindowType.NoDropShadowWindowHint)
         self.assertTrue(popup.contentsMargins().isNull())
         self.assertEqual(calendar.geometry().top(), 0)
         self.assertEqual(calendar.geometry().bottom(), popup.height() - 1)
@@ -79,6 +81,14 @@ class DatePickerTest(unittest.TestCase):
         calendar.done_button.click()
         self.app.processEvents()
         self.assertFalse(calendar.isVisible())
+        editor.close()
+
+    def test_calendar_month_menu_uses_shared_flat_style(self):
+        editor = DatePickerEdit(QDate(2026, 10, 2))
+        menu = editor.calendarWidget().findChild(QToolButton, "qt_calendar_monthbutton").menu()
+        self.assertEqual(menu.styleSheet(), DROPDOWN_MENU_STYLE)
+        self.assertTrue(menu.windowFlags() & Qt.WindowType.NoDropShadowWindowHint)
+        self.assertEqual(len(menu.actions()), 12)
         editor.close()
 
     def test_import_and_investment_forms_use_the_shared_component(self):

@@ -269,6 +269,29 @@ class SidebarTest(unittest.TestCase):
         self.assertEqual(user_image.pixelColor(4, 4).alpha(), 0)
         self.assertGreater(group_image.pixelColor(4, 4).alpha(), 0)
 
+        text_pixels = [
+            (x, y)
+            for y in range(user_image.height())
+            for x in range(user_image.width())
+            if (
+                user_image.pixelColor(x, y).alpha() > 0
+                and user_image.pixelColor(x, y).red() > 220
+                and user_image.pixelColor(x, y).green() > 220
+                and user_image.pixelColor(x, y).blue() > 220
+            )
+        ]
+        self.assertTrue(text_pixels)
+        text_bounds = (
+            min(x for x, _ in text_pixels),
+            min(y for _, y in text_pixels),
+            max(x for x, _ in text_pixels),
+            max(y for _, y in text_pixels),
+        )
+        self.assertGreaterEqual(text_bounds[0], 8)
+        self.assertGreaterEqual(text_bounds[1], 8)
+        self.assertLessEqual(text_bounds[2], 27)
+        self.assertLessEqual(text_bounds[3], 27)
+
     def test_user_bar_fills_expanded_sidebar_width(self):
         margins = self.sidebar.sidebar_layout.contentsMargins()
         expected_width = (

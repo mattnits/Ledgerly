@@ -39,7 +39,7 @@ Ledgerly is a private, easy-to-use finance tracker built with PySide6. The goal 
 - **Goals that stay visible** — Track monthly savings targets, category budgets,
   and longer-term goals with progress indicators.
 - **Investment tracking** — Record TFSA, FHSA, RRSP, and general investment
-  accounts, including payroll-based work RRSP contribution estimates.
+  accounts, including manual paystub-based Work RRSP contributions and matches.
 - **Multiple profiles and groups** — Keep personal finances separate or create
   shared group views with configurable membership and permissions.
 - **Self-contained desktop builds** — Windows and Linux downloads include
@@ -133,6 +133,22 @@ a backup location so sidecar files from two different databases are never
 mixed, then copy in a complete Ledgerly database backup. On startup, Ledgerly
 checks the replacement before applying migrations. Damaged, incomplete, and
 unrelated SQLite files are left untouched and shown with a retry option.
+
+### Work RRSP contribution migration
+
+On startup, Ledgerly creates the `work_rrsp_contributions` table when it is
+missing. Existing investment accounts, employer match settings, and portfolio
+snapshots are preserved. Older `auto_track_from_payroll`,
+`employee_contribution_percent`, and `payroll_tracking_start_date` columns may
+remain in an upgraded SQLite database for non-destructive compatibility, but
+the application no longer maps or uses them.
+
+The previous Work RRSP amounts were estimates calculated dynamically from
+Salary transactions, not reliable saved contribution records. Ledgerly does
+not turn those estimates into historical contributions. Manual Work RRSP
+history therefore begins with entries recorded from paystubs after this
+upgrade. Back up `finance.db` before upgrading as part of normal database
+maintenance; no manual SQL or database replacement is required.
 
 ## Run from source
 

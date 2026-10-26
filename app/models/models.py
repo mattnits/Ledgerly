@@ -608,20 +608,11 @@ class InvestmentAccount(Base):
     is_work_related: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="0", nullable=False
     )
-    auto_track_from_payroll: Mapped[bool] = mapped_column(
-        Boolean, default=False, server_default="0", nullable=False
-    )
-    employee_contribution_percent: Mapped[Decimal | None] = mapped_column(
-        Numeric(7, 4), nullable=True
-    )
     employer_matching_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="0", nullable=False
     )
     employer_match_percent: Mapped[Decimal | None] = mapped_column(
         Numeric(7, 4), nullable=True
-    )
-    payroll_tracking_start_date: Mapped[date | None] = mapped_column(
-        Date, nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, nullable=False
@@ -635,6 +626,11 @@ class InvestmentAccount(Base):
         cascade="all, delete-orphan",
         order_by="InvestmentSnapshot.snapshot_datetime",
     )
+    work_rrsp_contributions: Mapped[list["WorkRRSPContribution"]] = relationship(
+        back_populates="investment_account",
+        cascade="all, delete-orphan",
+        order_by="WorkRRSPContribution.contribution_date",
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -646,12 +642,6 @@ class InvestmentAccount(Base):
             "account_number_last7 IS NULL OR "
             "length(account_number_last7) BETWEEN 1 AND 7",
             name="ck_investment_account_last7",
-        ),
-        CheckConstraint(
-            "employee_contribution_percent IS NULL OR "
-            "(employee_contribution_percent >= 0 AND "
-            "employee_contribution_percent < 100)",
-            name="ck_investment_account_employee_percent",
         ),
         CheckConstraint(
             "employer_match_percent IS NULL OR employer_match_percent >= 0",
@@ -692,6 +682,57 @@ class InvestmentSnapshot(Base):
             "total_value >= 0", name="ck_investment_snapshot_nonnegative_value"
         ),
     )
+
+
+class WorkRRSPContribution(Base):
+    """A paystub-sourced Work RRSP contribution and its saved employer match."""
+
+    __tablename__ = "work_rrsp_contributions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    investment_account_id: Mapped[int] = mapped_column(
+        ForeignKey("investment_accounts.id", ondelete="CASCADE"), nullable=False
+    )
+    contribution_date: Mapped[date] = mapped_column(Date, nullable=False)
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    month: Mapped[int] = mapped_column(Integer, nullable=False)
+    employee_contribution: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), nullable=False
+    )
+    employer_match: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    total_contribution: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, onupdate=datetime.now, nullable=False
+    )
+
+    investment_account: Mapped["InvestmentAccount"] = relationship(
+        back_populates="work_rrsp_contributions"
+    )
+
+    __table_args__ = (
+        CheckConstraint("month BETWEEN 1 AND 12", name="ck_work_rrsp_month"),
+        CheckConstraint(
+            "employee_contribution >= 0", name="ck_work_rrsp_employee_nonnegative"
+        ),
+        CheckConstraint(
+            "employer_match >= 0", name="ck_work_rrsp_employer_nonnegative"
+        ),
+        CheckConstraint(
+            "total_contribution >= 0", name="ck_work_rrsp_total_nonnegative"
+        ),
+        Index(
+            "ix_work_rrsp_contributions_account_date",
+            "investment_account_id",
+            "contribution_date",
+        ),
+        Index("ix_work_rrsp_contributions_year_month", "year", "month"),
+    )
+
 
 class SavingsSnapshot(Base):
     __tablename__ = "savings_snapshots"

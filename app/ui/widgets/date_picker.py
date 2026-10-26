@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.ui.theme import COLORS, set_button_icon
+from app.ui.theme import COLORS, DROPDOWN_MENU_STYLE, prepare_popup_menu, set_button_icon
 
 
 class DatePickerCalendar(QCalendarWidget):
@@ -120,6 +120,13 @@ class DatePickerEdit(QDateEdit):
         calendar = DatePickerCalendar(self)
         self.setCalendarWidget(calendar)
         self._configure_calendar(calendar)
+        popup = calendar.window()
+        if popup is not self:
+            popup.setWindowFlags(popup.windowFlags() | Qt.WindowType.NoDropShadowWindowHint)
+            popup.setContentsMargins(0, 0, 0, 0)
+            if popup.layout() is not None:
+                popup.layout().setContentsMargins(0, 0, 0, 0)
+                popup.layout().setSpacing(0)
 
     def showPopup(self) -> None:  # noqa: N802
         super().showPopup()
@@ -207,6 +214,11 @@ class DatePickerEdit(QDateEdit):
                 )
 
         calendar.setStyleSheet(DatePickerEdit._calendar_stylesheet())
+        month_button = calendar.findChild(QToolButton, "qt_calendar_monthbutton")
+        if month_button is not None and month_button.menu() is not None:
+            menu = prepare_popup_menu(month_button.menu())
+            menu.setStyleSheet(DROPDOWN_MENU_STYLE)
+            menu.setCursor(Qt.CursorShape.PointingHandCursor)
 
     @staticmethod
     def _editor_stylesheet() -> str:
