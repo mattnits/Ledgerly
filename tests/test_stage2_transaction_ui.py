@@ -17,6 +17,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.db import Base
 from app.models.models import Account, Category, Transaction, User
 from app.ui.widgets.statements_table import StatementsTable
+from app.ui.widgets.transaction_row import WheelSafeComboBox
 from app.utils.constants import TransactionType
 
 
@@ -110,35 +111,42 @@ class Stage2TransactionUiTest(unittest.TestCase):
             table.category_selector.width(),
         )
         table.category_selector.hidePopup()
-        for row in table.rows:
-            for index in range(row.category_combo.count()):
-                self.assertEqual(
-                    row.category_combo.itemData(
-                        index,
-                        Qt.ItemDataRole.ForegroundRole,
-                    ),
-                    QColor("#ffffff"),
-                )
-            row.category_combo.showPopup()
-            app.processEvents()
-            if row.category_combo.isEnabled():
-                self.assertGreaterEqual(
-                    row.category_combo.view().window().width(),
-                    row.category_combo.width(),
-                )
-            else:
-                self.assertFalse(row.category_combo.view().window().isVisible())
-            row.category_combo.hidePopup()
+        category_index = table.table_model.index(
+            0, table.table_model.CATEGORY_COLUMN
+        )
+        QTest.mouseClick(
+            table.table.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=table.table.visualRect(category_index).center(),
+        )
+        app.processEvents()
+        self.assertFalse(table.table.selectionModel().hasSelection())
+        editors = table.table.findChildren(WheelSafeComboBox)
+        self.assertEqual(len(editors), 1)
+        editor = editors[0]
+        self.assertLess(editor.height(), table.table.verticalHeader().defaultSectionSize())
+        self.assertIn("border-radius: 9px", editor.styleSheet())
+        self.assertIn("#f97316", editor.styleSheet())
+        for index in range(1, editor.count()):
+            self.assertEqual(
+                editor.itemData(index, Qt.ItemDataRole.ForegroundRole),
+                QColor("#ffffff"),
+            )
+        self.assertGreaterEqual(
+            editor.view().window().width(),
+            editor.width(),
+        )
+        editor.hidePopup()
+        QTest.qWait(10)
+        app.processEvents()
+        self.assertEqual(table.table.findChildren(WheelSafeComboBox), [])
+        self.assertFalse(table.table.selectionModel().hasSelection())
         self.assertEqual(
             table.table.columnWidth(StatementsTable.ACTION_COLUMN),
             80,
         )
-        action_button = table.rows[0].action_button
-        action_cell = table.rows[0].action_cell
-        self.assertGreaterEqual(action_button.geometry().left(), 8)
-        self.assertGreaterEqual(
-            action_cell.width() - action_button.geometry().right() - 1,
-            8,
+        action_rect = table.table.visualRect(
+            table.table_model.index(0, StatementsTable.ACTION_COLUMN)
         )
         imported_text_width = max(
             table.table.fontMetrics().horizontalAdvance(text)
@@ -148,18 +156,15 @@ class Stage2TransactionUiTest(unittest.TestCase):
             table.table.columnWidth(StatementsTable.IMPORTED_AT_COLUMN),
             imported_text_width + 16,
         )
-        imported_margins = table.rows[0].imported_label.contentsMargins()
-        self.assertEqual(imported_margins.left(), 8)
-        self.assertEqual(imported_margins.right(), 8)
         self.assertEqual(
             sum(
                 table.table.columnWidth(column)
-                for column in range(table.table.columnCount())
+                for column in range(table.table_model.columnCount())
             ),
             table.table.viewport().width(),
         )
         self.assertLessEqual(
-            action_cell.geometry().right(),
+            action_rect.right(),
             table.table.viewport().width() - 1,
         )
         self.assertGreaterEqual(
@@ -191,7 +196,7 @@ class Stage2TransactionUiTest(unittest.TestCase):
         self.assertEqual(
             sum(
                 table.table.columnWidth(column)
-                for column in range(table.table.columnCount())
+                for column in range(table.table_model.columnCount())
             ),
             table.table.viewport().width(),
         )
@@ -213,17 +218,19 @@ class Stage2TransactionUiTest(unittest.TestCase):
         self._wait_for(lambda: not table._loading and table.filtered_count == 2)
         self.assertEqual(table.filtered_count, 2)
 
-        description_label = table.rows[0].description_label
-        description_label.setSelection(0, 3)
-        description_label.setFocus()
+        description_index = table.table_model.index(
+            0, StatementsTable.DESCRIPTION_COLUMN
+        )
+        table.table.setCurrentIndex(description_index)
+        table.table.setFocus()
         QTest.keyClick(
-            description_label,
+            table.table,
             Qt.Key.Key_C,
             Qt.KeyboardModifier.ControlModifier,
         )
         self.assertEqual(
             QApplication.clipboard().text(),
-            description_label.selectedText(),
+            description_index.data(Qt.ItemDataRole.DisplayRole),
         )
 
         prefills = []
@@ -241,8 +248,6 @@ class Stage2TransactionUiTest(unittest.TestCase):
 
             def ignore(self):
                 self.ignored = True
-
-        from app.ui.widgets.transaction_row import WheelSafeComboBox
 
         app = QApplication.instance() or QApplication([])
         combo = WheelSafeComboBox()

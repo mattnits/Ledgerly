@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 import qtawesome as qta
 from PySide6.QtCore import QRectF, QSize, Qt
@@ -132,6 +133,7 @@ def icon_pixmap(
         return pixmap
 
 
+@lru_cache(maxsize=256)
 def awesome_icon(
     name: str,
     *,
@@ -291,6 +293,7 @@ def set_label_icon(
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
 
+@lru_cache(maxsize=64)
 def brand_icon(institution: str, *, size: int = 24) -> QIcon:
     """Return known institution artwork, with a neutral bank fallback."""
     normalized = " ".join(re.findall(r"[a-z0-9]+", institution.casefold()))
@@ -348,6 +351,7 @@ TRANSACTION_TYPE_ICONS = {
 }
 
 
+@lru_cache(maxsize=64)
 def transaction_type_icon(transaction_type, *, color: str = "#b2b8c1") -> QIcon:
     value = getattr(transaction_type, "value", transaction_type)
     name = TRANSACTION_TYPE_ICONS.get(value, "fa6s.circle-question")

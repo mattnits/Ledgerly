@@ -32,7 +32,7 @@ class TransactionScrollTest(unittest.TestCase):
             QTest.qWait(10)
         raise AssertionError("Timed out waiting for background transaction query")
 
-    def test_category_change_keeps_scroll_after_paginated_reload(self):
+    def test_category_change_is_saved_without_reloading_or_moving_scroll(self):
         engine = create_engine(
             "sqlite://",
             connect_args={"check_same_thread": False},
@@ -65,9 +65,8 @@ class TransactionScrollTest(unittest.TestCase):
 
         app = QApplication.instance() or QApplication([])
         table = StatementsTable(session_factory=sessions)
-        # Exercise pagination without constructing hundreds of heavyweight Qt
-        # rows. The production page size is covered independently; this test
-        # only needs more than one page to verify the preserved reload state.
+        # Exercise pagination so an inline edit proves it does not rebuild the
+        # already loaded model.
         table.PAGE_SIZE = self.TEST_PAGE_SIZE
         table.resize(1150, 520)
         table.show()
@@ -82,20 +81,12 @@ class TransactionScrollTest(unittest.TestCase):
             and table.loaded_count == self.TRANSACTION_COUNT
         )
         self.assertEqual(table.loaded_count, self.TRANSACTION_COUNT)
-        action_cell = table.rows[0].action_cell
-        action_button = table.rows[0].action_button
-        self._wait_for(
-            lambda: action_cell.geometry().right()
-            <= table.table.viewport().width() - 1
+        action_rect = table.table.visualRect(
+            table.table_model.index(0, StatementsTable.ACTION_COLUMN)
         )
         self.assertLessEqual(
-            action_cell.geometry().right(),
+            action_rect.right(),
             table.table.viewport().width() - 1,
-        )
-        self.assertGreaterEqual(action_button.geometry().left(), 8)
-        self.assertGreaterEqual(
-            action_cell.width() - action_button.geometry().right() - 1,
-            8,
         )
 
         scrollbar = table.table.verticalScrollBar()
@@ -106,13 +97,18 @@ class TransactionScrollTest(unittest.TestCase):
         row = table.rows[self.TEST_PAGE_SIZE + 5]
         transaction_id = row.transaction_id
         generation = table._query_generation
-        row.category_combo.setCurrentIndex(row.category_combo.findData(category_id))
+        table.table_model.setData(
+            table.table_model.index(
+                self.TEST_PAGE_SIZE + 5,
+                table.table_model.CATEGORY_COLUMN,
+            ),
+            category_id,
+        )
         self._wait_for(
-            lambda: table._query_generation > generation
-            and not table._loading
-            and table.loaded_count == self.TRANSACTION_COUNT
+            lambda: transaction_id not in table._assignment_active
         )
 
+        self.assertEqual(table._query_generation, generation)
         self.assertEqual(table.loaded_count, self.TRANSACTION_COUNT)
         self.assertEqual(scrollbar.value(), original_position)
         with sessions() as session:

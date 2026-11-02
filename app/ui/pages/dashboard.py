@@ -300,6 +300,9 @@ class DashboardPage(QWidget):
 
         self.files_to_parse = dialog.get_files()
         window = self.window()
+        statements_table = getattr(window.transactions_page, "statements_table", None)
+        if statements_table is not None:
+            statements_table.invalidate_metadata()
         if hasattr(window, "mark_monthly_pages_dirty"):
             window.mark_monthly_pages_dirty(window.transactions_page)
         else:
