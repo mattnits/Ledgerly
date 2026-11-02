@@ -4,7 +4,7 @@ from decimal import Decimal
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QFrame
 from PySide6.QtTest import QSignalSpy
 
 from app.services.dashboard import CategorySpending
@@ -15,7 +15,9 @@ from app.ui.widgets.dashboard_cards import (
     InvestingCard,
     MetricCard,
     SavingsCard,
+    SavingsProgressTrack,
 )
+from app.ui.pages.dashboard import _ResponsiveDashboardCards
 
 
 class DashboardUiTest(unittest.TestCase):
@@ -44,6 +46,85 @@ class DashboardUiTest(unittest.TestCase):
                 "Open Goals",
             )
             card.close()
+
+    def test_savings_card_matches_goal_hierarchy_and_reflows(self):
+        card = SavingsCard()
+        card.set_data(
+            "September 2026",
+            Decimal("2000"),
+            Decimal("2784"),
+            None,
+            Decimal("2784"),
+            Decimal("0"),
+            Decimal("0"),
+        )
+        card.resize(520, 460)
+        card.show()
+        self.app.processEvents()
+
+        self.assertEqual(card.goal_value.text(), "$2,000")
+        self.assertEqual(card.actual_value.text(), "$2,784")
+        self.assertEqual(card.actual_caption.text(), "$2,784 / $2,000")
+        self.assertEqual(card.status_label.text(), "Exceeded goal by $784")
+        self.assertEqual(card.progress_label.text(), "139% of goal")
+        self.assertIsInstance(card.progress, SavingsProgressTrack)
+        self.assertAlmostEqual(card.progress.percentage, 139.2)
+        self.assertAlmostEqual(card.progress.goal_fraction, 2000 / 2784)
+        wide_position = card.summary_layout.getItemPosition(
+            card.summary_layout.indexOf(card.status_chip)
+        )
+        self.assertEqual(wide_position[:2], (0, 1))
+
+        card.resize(330, 500)
+        self.app.processEvents()
+        compact_position = card.summary_layout.getItemPosition(
+            card.summary_layout.indexOf(card.status_chip)
+        )
+        self.assertEqual(compact_position[:2], (1, 0))
+        self.assertLessEqual(
+            card.status_chip.geometry().right(),
+            card.summary_widget.contentsRect().right(),
+        )
+        card.close()
+
+    def test_savings_card_handles_no_goal_and_negative_resize(self):
+        card = SavingsCard()
+        card.set_data(
+            "November 2026",
+            None,
+            Decimal("-10"),
+            None,
+        )
+        card.resize(520, 460)
+        card.show()
+        self.app.processEvents()
+
+        self.assertEqual(card.goal_value.text(), "Not set")
+        self.assertEqual(card.status_label.text(), "Set a goal to track progress")
+        self.assertIsNone(card.progress.percentage)
+        self.assertIn("#ff4d4f", card.actual_value.styleSheet())
+
+        card.resize(330, 500)
+        self.app.processEvents()
+        self.assertIn("#ff4d4f", card.actual_value.styleSheet())
+        card.close()
+
+    def test_dashboard_card_grid_reflows_without_horizontal_overflow(self):
+        cards = _ResponsiveDashboardCards()
+        children = tuple(QFrame() for _ in range(6))
+        for child in children:
+            child.setMinimumSize(280, 250)
+        children[2].setMinimumHeight(430)
+        cards.add_cards(*children)
+
+        cards.set_available_width(1000)
+        self.assertEqual(cards.column_count, 3)
+        cards.set_available_width(700)
+        self.assertEqual(cards.column_count, 2)
+        cards.set_available_width(500)
+        self.assertEqual(cards.column_count, 1)
+        self.assertGreaterEqual(cards.minimumHeight(), 6 * 250 + 5 * 16)
+        cards.close()
 
     def test_investment_change_shows_dollars_and_percentage(self):
         card = InvestingCard()

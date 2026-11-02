@@ -13,6 +13,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QProgressBar,
@@ -345,53 +346,248 @@ class MetricCard(DashboardCard):
         self.chart.set_data(trend_values)
 
 
+class SavingsProgressTrack(QWidget):
+    """Paint goal progress with an over-goal marker without clipping values."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.goal: Decimal | None = None
+        self.actual = Decimal()
+        self.percentage: float | None = None
+        self.goal_fraction: float | None = None
+        self.setMinimumHeight(70)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+
+    def set_data(self, actual: Decimal, goal: Decimal | None) -> None:
+        self.actual = actual
+        self.goal = goal
+        if goal is None or goal <= 0:
+            self.percentage = None
+            self.goal_fraction = None
+        else:
+            self.percentage = float(actual / goal * 100)
+            largest = max(actual, goal)
+            self.goal_fraction = float(goal / largest) if largest > 0 else 1.0
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt API spelling
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        width = max(self.width(), 1)
+        track = QRectF(0, 27, width, 10)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(COLORS["surface_hover"]))
+        painter.drawRoundedRect(track, 5, 5)
+        if self.percentage is None:
+            return
+
+        fill_fraction = max(0.0, min(self.percentage / 100, 1.0))
+        if fill_fraction > 0:
+            fill = QRectF(track.left(), track.top(), track.width() * fill_fraction, 10)
+            gradient = QLinearGradient(fill.left(), 0, fill.right(), 0)
+            gradient.setColorAt(0, QColor("#19bd7f"))
+            gradient.setColorAt(1, QColor("#42e5a5"))
+            painter.setBrush(gradient)
+            painter.drawRoundedRect(fill, 5, 5)
+
+        marker_fraction = max(0.0, min(self.goal_fraction or 1.0, 1.0))
+        marker_x = track.left() + track.width() * marker_fraction
+        painter.setPen(QPen(QColor("#f0f5f7"), 2))
+        painter.drawLine(
+            QPointF(marker_x, track.top() - 3),
+            QPointF(marker_x, track.bottom() + 4),
+        )
+
+        percent_text = f"{self.percentage:.0f}%"
+        painter.setFont(QFont(self.font().family(), 8, QFont.Weight.DemiBold))
+        text_width = painter.fontMetrics().horizontalAdvance(percent_text)
+        badge_width = max(42, text_width + 14)
+        progress_x = track.left() + track.width() * fill_fraction
+        badge_x = max(0.0, min(progress_x - badge_width / 2, width - badge_width))
+        badge = QRectF(badge_x, 1, badge_width, 21)
+        painter.setPen(QPen(QColor("#42e5a5"), 1.3))
+        painter.setBrush(QColor("#163126"))
+        painter.drawRoundedRect(badge, 7, 7)
+        painter.setPen(QColor("#54e7ad"))
+        painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, percent_text)
+
+        goal_text = f"{format_currency(self.goal or Decimal())} goal"
+        painter.setFont(QFont(self.font().family(), 8))
+        label_width = min(
+            max(painter.fontMetrics().horizontalAdvance(goal_text) + 8, 70),
+            width,
+        )
+        label_x = max(0.0, min(marker_x - label_width / 2, width - label_width))
+        painter.setPen(QColor(COLORS["text_dim"]))
+        painter.drawText(
+            QRectF(label_x, 43, label_width, 20),
+            Qt.AlignmentFlag.AlignCenter,
+            goal_text,
+        )
+
+
 class SavingsCard(DashboardCard):
     goals_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("Savings", "fa6s.piggy-bank", "#56c596", parent)
+        self.setMinimumHeight(430)
+        self.layout.setContentsMargins(18, 16, 18, 16)
+        self.layout.setSpacing(9)
         self.open_goals_button = self.add_header_action("Open Goals")
         self.open_goals_button.clicked.connect(self.goals_requested.emit)
+
+        self.goal_frame = QFrame()
+        self.goal_frame.setObjectName("savingsGoalStrip")
+        goal_layout = QHBoxLayout(self.goal_frame)
+        goal_layout.setContentsMargins(12, 8, 12, 8)
+        goal_layout.setSpacing(10)
         self.goal_caption = QLabel("Monthly goal")
         self.goal_caption.setStyleSheet(
-            f"color: {COLORS['text_muted']}; font-size: 11px;"
+            f"color: {COLORS['text_muted']}; font-size: 11px; font-weight: 550;"
         )
         self.goal_value = QLabel("Not set")
-        self.goal_value.setStyleSheet(
-            f"color: {COLORS['text']}; font-size: 29px; font-weight: 800;"
+        self.goal_value.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
+        self.goal_value.setStyleSheet(
+            f"color: {COLORS['text']}; font-size: 17px; font-weight: 800;"
+        )
+        goal_layout.addWidget(self.goal_caption, 1)
+        goal_layout.addWidget(self.goal_value)
+
+        self.summary_widget = QWidget()
+        self.summary_layout = QGridLayout(self.summary_widget)
+        self.summary_layout.setContentsMargins(0, 0, 0, 0)
+        self.summary_layout.setHorizontalSpacing(12)
+        self.summary_layout.setVerticalSpacing(7)
+        self.actual_block = QWidget()
+        actual_layout = QVBoxLayout(self.actual_block)
+        actual_layout.setContentsMargins(0, 0, 0, 0)
+        actual_layout.setSpacing(0)
+        self.actual_value = QLabel("$0")
+        self.actual_value.setObjectName("savingsActualValue")
+        self.actual_caption = QLabel("Net savings this period")
+        self.actual_caption.setObjectName("savingsActualCaption")
+        actual_layout.addWidget(self.actual_value)
+        actual_layout.addWidget(self.actual_caption)
+
+        self.status_chip = QFrame()
+        self.status_chip.setObjectName("savingsStatusChip")
+        status_layout = QHBoxLayout(self.status_chip)
+        status_layout.setContentsMargins(10, 6, 10, 6)
+        status_layout.setSpacing(7)
+        self.status_icon = QLabel()
+        self.status_label = QLabel("Set a goal to track progress")
+        self.status_label.setWordWrap(True)
+        self.status_label.setMinimumWidth(0)
+        self.status_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
+        status_layout.addWidget(self.status_icon)
+        status_layout.addWidget(self.status_label, 1)
+
+        self.progress_label = QLabel("Progress")
+        self.progress_label.setObjectName("savingsProgressLabel")
+        self.progress = SavingsProgressTrack()
+        self._actual = Decimal()
+
+        divider = QFrame()
+        divider.setObjectName("savingsDivider")
+        divider.setFrameShape(QFrame.Shape.HLine)
+
         self.cash_saved_row = SummaryRow("Cash saved", "$0")
         self.work_rrsp_row = SummaryRow("Work RRSP", "$0")
-        self.actual_row = SummaryRow("Personal savings total", "$0")
         self.employer_match_row = SummaryRow("Employer match", "+$0")
+        self.actual_row = SummaryRow("Net savings toward goal", "$0")
         self.balance_row = SummaryRow("Savings balance", "Not recorded")
-        self.progress = QProgressBar()
-        self.progress.setObjectName("savingsProgress")
-        self.progress.setRange(0, 100)
-        self.progress.setTextVisible(False)
-        self.progress.setFixedHeight(8)
-        self.progress_label = QLabel("Set a goal to track progress")
-        self.progress_label.setStyleSheet(
-            f"color: {COLORS['text_dim']}; font-size: 10px;"
-        )
-        self.layout.addWidget(self.goal_caption)
-        self.layout.addWidget(self.goal_value)
-        self.layout.addWidget(self.cash_saved_row)
-        self.layout.addWidget(self.work_rrsp_row)
-        self.layout.addWidget(self.actual_row)
-        self.layout.addWidget(self.employer_match_row)
-        self.layout.addWidget(self.balance_row)
-        self.layout.addStretch()
-        self.layout.addWidget(self.progress)
+        self.breakdown = QWidget()
+        breakdown_layout = QVBoxLayout(self.breakdown)
+        breakdown_layout.setContentsMargins(0, 0, 0, 0)
+        breakdown_layout.setSpacing(3)
+        breakdown_layout.addWidget(self.cash_saved_row)
+        breakdown_layout.addWidget(self.work_rrsp_row)
+        breakdown_layout.addWidget(self.employer_match_row)
+        breakdown_layout.addWidget(self.actual_row)
+        breakdown_layout.addWidget(self.balance_row)
+
+        self.layout.addWidget(self.goal_frame)
+        self.layout.addWidget(self.summary_widget)
         self.layout.addWidget(self.progress_label)
-        self.progress.setStyleSheet(f"""
-            QProgressBar#savingsProgress {{
-                background: {COLORS['surface_alt']}; border: none; border-radius: 4px;
+        self.layout.addWidget(self.progress)
+        self.layout.addWidget(divider)
+        self.layout.addWidget(self.breakdown)
+        self.layout.addStretch()
+        self._compact: bool | None = None
+        self._set_compact(True)
+        self.setStyleSheet(self.styleSheet() + f"""
+            QFrame#savingsGoalStrip {{
+                background: {COLORS['surface_alt']};
+                border: 1px solid #303943;
+                border-radius: 10px;
             }}
-            QProgressBar#savingsProgress::chunk {{
-                background: #56c596; border-radius: 4px;
+            QLabel#savingsActualValue {{
+                color: {COLORS['positive']};
+                font-size: 32px;
+                font-weight: 800;
+            }}
+            QLabel#savingsActualCaption {{
+                color: {COLORS['text_muted']};
+                font-size: 11px;
+            }}
+            QFrame#savingsStatusChip {{
+                background: #123525;
+                border: 1px solid #17613f;
+                border-radius: 10px;
+            }}
+            QFrame#savingsStatusChip QLabel {{
+                color: #b9f5d8;
+                font-size: 10px;
+                font-weight: 650;
+            }}
+            QLabel#savingsProgressLabel {{
+                color: #4fe2a9;
+                font-size: 11px;
+                font-weight: 700;
+            }}
+            QFrame#savingsDivider {{
+                color: {COLORS['border_soft']};
             }}
         """)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt API spelling
+        super().resizeEvent(event)
+        self._set_compact(self.contentsRect().width() < 390)
+
+    def _set_compact(self, compact: bool) -> None:
+        if compact == self._compact:
+            return
+        self._compact = compact
+        self.summary_layout.removeWidget(self.actual_block)
+        self.summary_layout.removeWidget(self.status_chip)
+        if compact:
+            self.summary_layout.addWidget(self.actual_block, 0, 0)
+            self.summary_layout.addWidget(self.status_chip, 1, 0)
+            self.summary_layout.setColumnStretch(0, 1)
+            self.summary_layout.setColumnStretch(1, 0)
+            value_size = 29
+        else:
+            self.summary_layout.addWidget(self.actual_block, 0, 0)
+            self.summary_layout.addWidget(self.status_chip, 0, 1)
+            self.summary_layout.setColumnStretch(0, 3)
+            self.summary_layout.setColumnStretch(1, 2)
+            value_size = 32
+        actual_color = (
+            COLORS["positive"] if self._actual >= 0 else COLORS["negative"]
+        )
+        self.actual_value.setStyleSheet(
+            f"color: {actual_color}; font-size: {value_size}px; font-weight: 800;"
+        )
 
     def set_data(
         self,
@@ -426,23 +622,63 @@ class SavingsCard(DashboardCard):
             "Savings balance",
             format_currency(balance) if balance is not None else "Not recorded",
         )
+        self._actual = actual
+        self.actual_value.setText(format_currency(actual))
+        actual_color = COLORS["positive"] if actual >= 0 else COLORS["negative"]
+        value_size = 29 if self._compact else 32
+        self.actual_value.setStyleSheet(
+            f"color: {actual_color}; font-size: {value_size}px; font-weight: 800;"
+        )
         if goal is None or goal <= 0:
-            self.progress.setValue(0)
-            self.progress_label.setText("Set a monthly goal to track progress")
-            color = COLORS["text_dim"]
-            weight = 400
+            self.actual_caption.setText("Net savings this period")
+            self.progress_label.setText("Progress")
+            self.status_label.setText("Set a goal to track progress")
+            status_icon = "fa6s.bullseye"
+            status_color = "#8fc5ff"
+            status_background = "#172c42"
+            status_border = "#315a82"
         else:
             percentage = float(actual / goal * 100)
-            self.progress.setValue(min(round(percentage), 100))
-            met = actual >= goal
-            remaining = format_currency(goal - actual)
-            self.progress_label.setText(
-                f"{percentage:.0f}% complete - {'goal met' if met else remaining + ' to go'}"
+            self.actual_caption.setText(
+                f"{format_currency(actual)} / {format_currency(goal)}"
             )
-            color = COLORS["positive"] if met else COLORS["text_muted"]
-            weight = 650
+            self.progress_label.setText(f"{percentage:.0f}% of goal")
+            met = actual >= goal
+            difference = actual - goal
+            if met:
+                self.status_label.setText(
+                    "Goal reached"
+                    if difference == 0
+                    else f"Exceeded goal by {format_currency(difference)}"
+                )
+                status_icon = "fa6s.check"
+                status_color = "#42e5a5"
+                status_background = "#123525"
+                status_border = "#17613f"
+            else:
+                self.status_label.setText(
+                    f"{format_currency(-difference)} to reach goal"
+                )
+                status_icon = "fa6s.arrow-trend-up"
+                status_color = "#8fc5ff"
+                status_background = "#172c42"
+                status_border = "#315a82"
+        set_label_icon(self.status_icon, status_icon, color=status_color, size=14)
+        self.status_chip.setStyleSheet(f"""
+            QFrame#savingsStatusChip {{
+                background: {status_background};
+                border: 1px solid {status_border};
+                border-radius: 10px;
+            }}
+            QFrame#savingsStatusChip QLabel {{
+                color: {status_color};
+                font-size: 10px;
+                font-weight: 650;
+            }}
+        """)
+        self.progress.set_data(actual, goal)
         self.progress_label.setStyleSheet(
-            f"color: {color}; font-size: 10px; font-weight: {weight};"
+            f"color: {status_color}; font-size: 11px; font-weight: 700;"
         )
 
 class DonutChart(QWidget):
