@@ -145,6 +145,11 @@ class Stage2TransactionUiTest(unittest.TestCase):
             table.table.columnWidth(StatementsTable.ACTION_COLUMN),
             80,
         )
+        self.assertTrue(table.table.hasMouseTracking())
+        action_delegate = table.table.itemDelegate()
+        self.assertEqual(action_delegate.ACTION_BUTTON_WIDTH, 52)
+        self.assertEqual(action_delegate.ACTION_BUTTON_HEIGHT, 32)
+        self.assertEqual(action_delegate.ACTION_ICON_SIZE, 18)
         action_rect = table.table.visualRect(
             table.table_model.index(0, StatementsTable.ACTION_COLUMN)
         )

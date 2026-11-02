@@ -353,6 +353,10 @@ class _TransactionEditorCombo(WheelSafeComboBox):
 
 
 class TransactionItemDelegate(QStyledItemDelegate):
+    ACTION_BUTTON_WIDTH = 52
+    ACTION_BUTTON_HEIGHT = 32
+    ACTION_ICON_SIZE = 18
+
     def createEditor(self, parent, option, index):
         if index.column() not in (
             TransactionTableModel.TYPE_COLUMN,
@@ -471,11 +475,21 @@ class TransactionItemDelegate(QStyledItemDelegate):
             painter.fillRect(option.rect, background)
         if column == TransactionTableModel.ACTION_COLUMN:
             icon = index.data(Qt.ItemDataRole.DecorationRole)
-            icon.paint(
-                painter,
-                option.rect.adjusted(20, 12, -20, -12),
-                Qt.AlignmentFlag.AlignCenter,
+            button_rect = QRect(
+                0,
+                0,
+                self.ACTION_BUTTON_WIDTH,
+                self.ACTION_BUTTON_HEIGHT,
             )
+            button_rect.moveCenter(option.rect.center())
+            if option.state & QStyle.StateFlag.State_MouseOver:
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                painter.setPen(QPen(QColor("#414a55"), 1))
+                painter.setBrush(QColor("#252b33"))
+                painter.drawRoundedRect(button_rect, 9, 9)
+            icon_rect = QRect(0, 0, self.ACTION_ICON_SIZE, self.ACTION_ICON_SIZE)
+            icon_rect.moveCenter(option.rect.center())
+            icon.paint(painter, icon_rect, Qt.AlignmentFlag.AlignCenter)
             painter.setPen(QColor("#262c34"))
             painter.drawLine(option.rect.bottomLeft(), option.rect.bottomRight())
             painter.restore()
@@ -519,6 +533,7 @@ class TransactionTableView(QTableView):
         self.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.setAlternatingRowColors(True)
+        self.setMouseTracking(True)
         self.setShowGrid(False)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setWordWrap(False)

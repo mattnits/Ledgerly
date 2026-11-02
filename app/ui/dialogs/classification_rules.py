@@ -1,4 +1,6 @@
-from PySide6.QtCore import Qt, QTimer, Signal
+import logging
+
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -55,6 +57,54 @@ MATCH_TYPE_LABELS = {
 }
 
 
+logger = logging.getLogger(__name__)
+
+
+class _RuleSaveSignals(QObject):
+    succeeded = Signal(int, bool)
+    failed = Signal(object)
+
+
+class _RuleSaveWorker(QRunnable):
+    def __init__(
+        self,
+        session_factory,
+        user_id: str,
+        rule_values: dict,
+        apply_to_existing: bool,
+    ):
+        super().__init__()
+        self.session_factory = session_factory
+        self.user_id = user_id
+        self.rule_values = rule_values
+        self.apply_to_existing = apply_to_existing
+        self.signals = _RuleSaveSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            with self.session_factory.begin() as session:
+                saved_rule = save_category_rule(
+                    session,
+                    self.user_id,
+                    **self.rule_values,
+                )
+                updated = (
+                    apply_rule_to_existing_transactions(
+                        session,
+                        self.user_id,
+                        saved_rule,
+                    )
+                    if self.apply_to_existing
+                    else 0
+                )
+        except Exception as exc:
+            logger.exception("Could not save classification rule")
+            self.signals.failed.emit(exc)
+            return
+        self.signals.succeeded.emit(updated, self.apply_to_existing)
+
+
 class ClassificationRulesDialog(QDialog):
     rules_changed = Signal()
 
@@ -64,10 +114,13 @@ class ClassificationRulesDialog(QDialog):
         parent=None,
         session_factory=SessionLocal,
         prefill: RulePrefill | None = None,
+        thread_pool: QThreadPool | None = None,
     ):
         super().__init__(parent)
         self.user_id = user_id
         self.session_factory = session_factory
+        self._thread_pool = thread_pool or QThreadPool.globalInstance()
+        self._active_save_workers: set[_RuleSaveWorker] = set()
         self.rules: list[RuleSummary] = []
         self.setWindowTitle("Classification Rules")
         self.resize(1080, 560)
@@ -459,37 +512,57 @@ class ClassificationRulesDialog(QDialog):
                     dialog, "Invalid Rule", "Select a transaction type."
                 )
                 return
-            try:
-                with self.session_factory.begin() as session:
-                    saved_rule = save_category_rule(
-                        session,
-                        self.user_id,
-                        pattern_input.text(),
-                        transaction_type,
-                        category_input.currentData(),
-                        account_id=account_input.currentData(),
-                        match_type=match_type_input.currentData(),
-                        priority=priority_input.value(),
-                        is_active=active_input.isChecked(),
-                        rule_id=rule.id if rule else None,
+            apply_to_existing = apply_input.isChecked()
+            worker = _RuleSaveWorker(
+                self.session_factory,
+                self.user_id,
+                {
+                    "pattern": pattern_input.text(),
+                    "transaction_type": transaction_type,
+                    "category_id": category_input.currentData(),
+                    "account_id": account_input.currentData(),
+                    "match_type": match_type_input.currentData(),
+                    "priority": priority_input.value(),
+                    "is_active": active_input.isChecked(),
+                    "rule_id": rule.id if rule else None,
+                },
+                apply_to_existing,
+            )
+            self._active_save_workers.add(worker)
+
+            def save_succeeded(updated: int, applied: bool) -> None:
+                self._active_save_workers.discard(worker)
+                dialog.hide_busy()
+                dialog.accept()
+                self.reload()
+                self.rules_changed.emit()
+                if applied:
+                    QTimer.singleShot(
+                        0,
+                        lambda: QMessageBox.information(
+                            self,
+                            "Classification Rule",
+                            f"Updated {updated} existing matching transaction(s).",
+                        ),
                     )
-                    updated = 0
-                    if apply_input.isChecked():
-                        updated = apply_rule_to_existing_transactions(
-                            session, self.user_id, saved_rule
-                        )
-            except Exception as exc:
-                QMessageBox.critical(dialog, "Error", f"Could not save rule:\n{exc}")
-                return
-            dialog.accept()
-            self.reload()
-            self.rules_changed.emit()
-            if apply_input.isChecked():
-                QMessageBox.information(
-                    self,
-                    "Classification Rule",
-                    f"Updated {updated} existing matching transaction(s).",
+
+            def save_failed(exc: Exception) -> None:
+                self._active_save_workers.discard(worker)
+                dialog.hide_busy()
+                QMessageBox.critical(
+                    dialog,
+                    "Error",
+                    f"Could not save rule:\n{exc}",
                 )
+
+            worker.signals.succeeded.connect(save_succeeded)
+            worker.signals.failed.connect(save_failed)
+            dialog.show_busy(
+                "Applying rule to matching transactions..."
+                if apply_to_existing
+                else "Saving classification rule..."
+            )
+            self._thread_pool.start(worker)
 
         dialog.submitted.connect(submit)
         dialog.exec()

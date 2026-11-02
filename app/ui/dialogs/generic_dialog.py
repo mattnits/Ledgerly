@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui.theme import COLORS, awesome_icon, icon_pixmap, set_button_icon
+from app.ui.widgets.loading_state import LoadingOverlay
 
 
 class GenericDialog(QDialog):
@@ -169,9 +170,38 @@ class GenericDialog(QDialog):
 
         self.cancel_button.clicked.connect(self.reject)
         self.submit_button.clicked.connect(self._submit)
+        self._busy = False
+        self.loading_overlay = LoadingOverlay(self.card)
 
     def _submit(self) -> None:
+        if self._busy:
+            return
         self.submitted.emit()
+
+    def show_busy(self, message: str = "Working...") -> None:
+        self._busy = True
+        self.submit_button.setEnabled(False)
+        self.cancel_button.setEnabled(False)
+        self.close_button.setEnabled(False)
+        self.loading_overlay.show_loading(message)
+
+    def hide_busy(self) -> None:
+        self.loading_overlay.hide_loading()
+        self.submit_button.setEnabled(True)
+        self.cancel_button.setEnabled(True)
+        self.close_button.setEnabled(True)
+        self._busy = False
+
+    def reject(self) -> None:
+        if self._busy:
+            return
+        super().reject()
+
+    def closeEvent(self, event) -> None:
+        if self._busy:
+            event.ignore()
+            return
+        super().closeEvent(event)
 
     def showEvent(self, event) -> None:  # noqa: N802 - Qt API spelling
         super().showEvent(event)

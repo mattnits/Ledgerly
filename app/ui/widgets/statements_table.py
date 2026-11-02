@@ -3,6 +3,7 @@ from datetime import date
 
 from PySide6.QtCore import (
     QObject,
+    QRect,
     QRunnable,
     QSignalBlocker,
     QThreadPool,
@@ -11,7 +12,7 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -68,6 +69,79 @@ from app.utils.constants import (
 
 
 logger = logging.getLogger(__name__)
+
+
+class TransactionActionMenu(QMenu):
+    """Popup menu with flush selection and consistently inset content."""
+
+    ICON_LEFT_INSET = 16
+    ICON_SIZE = 16
+    TEXT_LEFT_INSET = 46
+    TEXT_RIGHT_INSET = 18
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt API spelling
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setFont(self.font())
+        active_action = self.activeAction()
+        for action in self.actions():
+            if action.isSeparator():
+                continue
+            rect = self.actionGeometry(action)
+            painter.fillRect(
+                rect,
+                QColor("#315f94")
+                if action is active_action
+                else QColor("#20242a"),
+            )
+            icon_rect = QRect(
+                rect.left() + self.ICON_LEFT_INSET,
+                rect.center().y() - self.ICON_SIZE // 2,
+                self.ICON_SIZE,
+                self.ICON_SIZE,
+            )
+            action.icon().paint(painter, icon_rect, Qt.AlignmentFlag.AlignCenter)
+            painter.setPen(
+                QColor("#ffffff") if action is active_action else QColor("#e5e7ea")
+            )
+            painter.drawText(
+                rect.adjusted(
+                    self.TEXT_LEFT_INSET,
+                    0,
+                    -self.TEXT_RIGHT_INSET,
+                    0,
+                ),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                action.text(),
+            )
+
+
+TRANSACTION_ACTION_MENU_STYLE = """
+    QMenu#transactionActionMenu {
+        color: #e5e7ea;
+        background: #20242a;
+        border: 1px solid #3a4048;
+        padding: 0;
+        margin: 0;
+    }
+    QMenu#transactionActionMenu::item {
+        background: transparent;
+        padding: 9px 24px 9px 20px;
+        margin: 0;
+    }
+    QMenu#transactionActionMenu::item:selected {
+        background: #315f94;
+        color: #ffffff;
+    }
+"""
+
+
+def prepare_transaction_action_menu(parent: QWidget) -> QMenu:
+    """Create a flush action menu whose complete row responds to hover."""
+    menu = prepare_popup_menu(TransactionActionMenu(parent))
+    menu.setObjectName("transactionActionMenu")
+    menu.setStyleSheet(TRANSACTION_ACTION_MENU_STYLE)
+    return menu
 
 
 class _QuerySignals(QObject):
@@ -1467,7 +1541,7 @@ class StatementsTable(QWidget):
         if row.is_deleted:
             self._set_deleted(transaction_id, False)
             return
-        menu = prepare_popup_menu(QMenu(self.table))
+        menu = prepare_transaction_action_menu(self.table)
         create_rule = menu.addAction(
             awesome_icon("fa6s.wand-magic-sparkles", color="#b9bec5"),
             "Create Rule From Transaction",
