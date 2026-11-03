@@ -640,8 +640,8 @@ def update_savings_goal(
 def add_savings_to_goal(
     goal_id: int,
     amount: Decimal,
-    year: int,
-    month: int,
+    year: int | None = None,
+    month: int | None = None,
     *,
     user_id: str | None = None,
     group_id: int | None = None,
@@ -649,6 +649,10 @@ def add_savings_to_goal(
 ) -> Decimal:
     """Increment an active goal and return its new total."""
     validate_owner(user_id, group_id)
+    _validate_optional_period(year, month)
+    if year is None:
+        today = date.today()
+        year, month = today.year, today.month
     _validate_period(year, month)
     amount = Decimal(amount).quantize(Decimal("0.01"))
     if amount <= 0:
@@ -705,16 +709,19 @@ def archive_savings_goal(
     group_id: int | None = None,
     session_factory=SessionLocal,
 ) -> None:
-    """Backward-compatible archive operation using the current month."""
+    """Idempotently archive a goal using the current month."""
+    validate_owner(user_id, group_id)
     today = date.today()
-    finish_savings_goal(
-        goal_id,
-        today.year,
-        today.month,
-        user_id=user_id,
-        group_id=group_id,
-        session_factory=session_factory,
-    )
+    with session_factory.begin() as session:
+        item = session.scalar(select(LongTermSavingsGoal).where(
+            LongTermSavingsGoal.id == goal_id,
+            direct_owner_scope(LongTermSavingsGoal, user_id, group_id),
+        ))
+        if item is None or item.is_archived:
+            return
+        item.is_archived = True
+        item.finished_year = today.year
+        item.finished_month = today.month
 
 
 def delete_savings_goal(

@@ -18,6 +18,7 @@ from app.services.goals import (
     CategoryBudgetProgress,
     MonthlySavingsBreakdown,
     add_savings_to_goal,
+    archive_savings_goal,
     create_or_update_category_budget,
     create_savings_goal,
     delete_category_budget,
@@ -598,6 +599,37 @@ class GoalsServiceTest(unittest.TestCase):
         )[0]
         self.assertEqual(september.current_amount, Decimal("50.00"))
         self.assertEqual(october.current_amount, Decimal("150.00"))
+
+    def test_add_and_archive_services_remain_backward_compatible(self):
+        goal_id = create_savings_goal(
+            "Buffer",
+            Decimal("1000"),
+            Decimal("100"),
+            user_id="owner",
+            session_factory=self.sessions,
+        )
+        total = add_savings_to_goal(
+            goal_id,
+            Decimal("25"),
+            user_id="owner",
+            session_factory=self.sessions,
+        )
+        self.assertEqual(total, Decimal("125.00"))
+
+        archive_savings_goal(
+            goal_id,
+            user_id="owner",
+            session_factory=self.sessions,
+        )
+        archive_savings_goal(
+            goal_id,
+            user_id="owner",
+            session_factory=self.sessions,
+        )
+        self.assertEqual(
+            get_savings_goals(user_id="owner", session_factory=self.sessions),
+            (),
+        )
 
 
 class GoalsPageLayoutTest(unittest.TestCase):
