@@ -32,10 +32,12 @@ from app.services.goals import (
     CategoryBudgetProgress,
     MonthlySavingsBreakdown,
     SavingsGoalRecord,
+    add_savings_to_goal,
     create_or_update_category_budget,
     create_savings_goal,
     delete_category_budget,
     delete_savings_goal,
+    finish_savings_goal,
     get_category_budgets,
     get_monthly_savings_breakdown,
     get_savings_goals,
@@ -896,12 +898,15 @@ def _goal_visual(name: str) -> tuple[str, str]:
 
 
 class SavingsGoalCard(SectionCard):
+    add_savings_requested = Signal(int)
+    finish_requested = Signal(int)
     edit_requested = Signal(int)
     delete_requested = Signal(int)
 
     def __init__(self, item: SavingsGoalRecord, dense: bool = False) -> None:
         super().__init__("savingsGoalCard")
         self.item = item
+        self.setProperty("finished", item.is_finished)
         self.setMinimumWidth(190 if dense else 235)
         self.setMinimumHeight(82 if dense else 136)
         layout = QVBoxLayout(self)
@@ -924,14 +929,23 @@ class SavingsGoalCard(SectionCard):
         title = QLabel(item.name)
         title.setObjectName("savingsGoalTitle")
         title.setWordWrap(True)
-        term = QLabel(
-            "Long term goal" if item.target_date is None else "Savings target",
-            self,
-        )
-        term.setObjectName("goalsMuted")
+        if item.is_finished and item.finished_year and item.finished_month:
+            finished_label = date(
+                item.finished_year,
+                item.finished_month,
+                1,
+            ).strftime("%b %Y")
+            term = QLabel(f"Finished · {finished_label}", self)
+            term.setObjectName("savingsGoalFinished")
+        else:
+            term = QLabel(
+                "Long term goal" if item.target_date is None else "Savings target",
+                self,
+            )
+            term.setObjectName("goalsMuted")
         title_box.addWidget(title)
         title_box.addWidget(term)
-        term.setHidden(dense)
+        term.setHidden(dense and not item.is_finished)
         action = QToolButton()
         action.setObjectName("goalsMenuButton")
         action.setFixedSize(24 if dense else 32, 22 if dense else 30)
@@ -979,6 +993,18 @@ class SavingsGoalCard(SectionCard):
 
     def _show_menu(self) -> None:
         menu = prepare_popup_menu(QMenu(self))
+        add_action = None
+        finish_action = None
+        if not self.item.is_archived:
+            add_action = menu.addAction(
+                awesome_icon("fa6s.piggy-bank", color="#57de9b"),
+                "Add savings",
+            )
+            finish_action = menu.addAction(
+                awesome_icon("fa6s.circle-check", color="#57de9b"),
+                "Finish goal",
+            )
+            menu.addSeparator()
         edit_action = menu.addAction(
             awesome_icon("fa6s.gear", color=COLORS["text_muted"]),
             "Edit goal",
@@ -990,7 +1016,11 @@ class SavingsGoalCard(SectionCard):
         selected = menu.exec(
             self.action.mapToGlobal(self.action.rect().bottomLeft())
         )
-        if selected is edit_action:
+        if selected is add_action:
+            self.add_savings_requested.emit(self.item.id)
+        elif selected is finish_action:
+            self.finish_requested.emit(self.item.id)
+        elif selected is edit_action:
             self.edit_requested.emit(self.item.id)
         elif selected is delete_action:
             self.delete_requested.emit(self.item.id)
@@ -1032,6 +1062,72 @@ class MonthlySavingsGoalDialog(GenericDialog):
         )
         self.resize(720, 560)
         self.setMinimumSize(580, 510)
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt API spelling
+        super().showEvent(event)
+        self.amount.setFocus()
+        self.amount.selectAll()
+
+
+class AddSavingsDialog(GenericDialog):
+    """Collect one increment without exposing the goal's mutable total."""
+
+    def __init__(
+        self,
+        goal: SavingsGoalRecord,
+        year: int,
+        month: int,
+        parent=None,
+    ) -> None:
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(9)
+
+        summary = QFrame()
+        summary.setObjectName("dialogDisplayField")
+        summary.setMinimumHeight(54)
+        summary_layout = QHBoxLayout(summary)
+        summary_layout.setContentsMargins(16, 0, 16, 0)
+        summary_layout.setSpacing(12)
+        goal_label = QLabel(goal.name)
+        goal_label.setObjectName("dialogDisplayValue")
+        current_label = QLabel(f"Current total: {_money(goal.current_amount)}")
+        current_label.setObjectName("dialogFieldHint")
+        current_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        summary_layout.addWidget(goal_label, 1)
+        summary_layout.addWidget(current_label)
+        layout.addWidget(summary)
+        layout.addSpacing(10)
+
+        self.amount = _money_editor()
+        self.amount.setObjectName("dialogMoneyInput")
+        self.amount.setMinimum(0.01)
+        self.amount.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
+        self.amount.setMinimumHeight(56)
+        self.amount.setAccessibleName("Savings amount to add")
+        layout.addWidget(_dialog_field_label("Amount to add", self.amount))
+        layout.addWidget(self.amount)
+        period = QLabel(date(year, month, 1).strftime("Adding in %B %Y"))
+        period.setObjectName("dialogFieldHint")
+        layout.addWidget(period)
+        layout.addStretch()
+
+        super().__init__(
+            "Add Savings",
+            content,
+            parent,
+            submit_label="Add Savings",
+            subtitle=f"Increase {goal.name} by a new contribution.",
+            icon_name="fa6s.piggy-bank",
+            info_text=(
+                "Enter only the amount you are adding now. Ledgerly adds it to "
+                "the current goal total instead of replacing that total."
+            ),
+        )
+        self.resize(620, 520)
 
     def showEvent(self, event) -> None:  # noqa: N802 - Qt API spelling
         super().showEvent(event)
@@ -1119,7 +1215,10 @@ class SavingsGoalDialog(GenericDialog):
         self.notes.setPlaceholderText("Optional notes")
         form.addRow("Name", self.name)
         form.addRow("Target amount", self.target)
-        form.addRow("Current amount", self.current)
+        form.addRow(
+            "Current total (manual correction)" if existing else "Starting amount",
+            self.current,
+        )
         form.addRow("Target date", date_box)
         form.addRow("Notes", self.notes)
         _style_form_labels(
@@ -1365,6 +1464,10 @@ class GoalsPage(QWidget):
                 border: 1px solid #303b46;
                 border-radius: 14px;
             }
+            QFrame#savingsGoalCard[finished="true"] {
+                background: #14231e;
+                border-color: #2b654c;
+            }
             QFrame#goalsMetricTile, QFrame#goalsBreakdown {
                 background: #111820;
                 border: 1px solid #293641;
@@ -1407,6 +1510,15 @@ class GoalsPage(QWidget):
             QLabel#goalsStatus[state="warning"] { background:#35291a; color:#efb958; border:1px solid #5b4320; }
             QLabel#savingsGoalTitle { color:#f2f5f8; font-size:11px; font-weight:650; }
             QLabel#savingsGoalAmount { color: #f4f6f8; font-size: 16px; font-weight: 700; }
+            QLabel#savingsGoalFinished {
+                color: #64dfa4;
+                background: #17372a;
+                border: 1px solid #285d47;
+                border-radius: 6px;
+                padding: 2px 6px;
+                font-size: 9px;
+                font-weight: 650;
+            }
             QLabel#goalsPercent { color:#dce3ea; font-size:10px; }
             QLabel#goalsBudgetCompactAmount { color:#e4e9ef; font-weight:600; }
             QProgressBar#goalsProgress { background:#293440; border:none; border-radius:5px; min-height:10px; max-height:10px; }
@@ -1451,6 +1563,7 @@ class GoalsPage(QWidget):
         )
         self._goal_items = get_savings_goals(
             user_id=self.user_id, group_id=self.group_id,
+            year=year, month=month,
             session_factory=self.session_factory,
         )
         self._render_budget_rows()
@@ -1623,6 +1736,8 @@ class GoalsPage(QWidget):
         columns = max(1, self._goal_columns)
         for index, item in enumerate(self._goal_items):
             card = SavingsGoalCard(item, bool(self._dense))
+            card.add_savings_requested.connect(self._add_savings_to_goal)
+            card.finish_requested.connect(self._finish_long_term_goal)
             card.edit_requested.connect(self._edit_long_term_goal)
             card.delete_requested.connect(self._delete_long_term_goal)
             self.goals_grid.addWidget(card, index // columns, index % columns)
@@ -1760,7 +1875,12 @@ class GoalsPage(QWidget):
                 if existing is None:
                     create_savings_goal(**values)
                 else:
-                    update_savings_goal(existing.id, **values)
+                    update_savings_goal(
+                        existing.id,
+                        year=self.selected_month[0],
+                        month=self.selected_month[1],
+                        **values,
+                    )
             except ValueError as exc:
                 QMessageBox.warning(dialog, "Invalid Savings Goal", str(exc))
                 return
@@ -1777,6 +1897,84 @@ class GoalsPage(QWidget):
         dialog.exec()
         if saved:
             self.reload()
+
+    def _add_savings_to_goal(self, goal_id: int) -> None:
+        item = next((value for value in self._goal_items if value.id == goal_id), None)
+        if item is None or item.is_archived:
+            return
+        year, month = self.selected_month
+        dialog = AddSavingsDialog(item, year, month, self)
+        saved = False
+
+        def save() -> None:
+            nonlocal saved
+            try:
+                add_savings_to_goal(
+                    item.id,
+                    Decimal(str(dialog.amount.value())),
+                    year,
+                    month,
+                    user_id=self.user_id,
+                    group_id=self.group_id,
+                    session_factory=self.session_factory,
+                )
+            except ValueError as exc:
+                QMessageBox.warning(dialog, "Invalid Savings Amount", str(exc))
+                return
+            except SQLAlchemyError:
+                QMessageBox.critical(
+                    dialog,
+                    "Savings not added",
+                    "Ledgerly could not add these savings. Please retry.",
+                )
+                return
+            saved = True
+            dialog.accept()
+
+        dialog.submitted.connect(save)
+        dialog.exec()
+        if saved:
+            self.reload()
+
+    def _finish_long_term_goal(self, goal_id: int) -> None:
+        item = next((value for value in self._goal_items if value.id == goal_id), None)
+        if item is None or item.is_archived:
+            return
+        year, month = self.selected_month
+        month_label = date(year, month, 1).strftime("%B %Y")
+        answer = QMessageBox.question(
+            self,
+            "Finish Savings Goal",
+            (
+                f"Finish “{item.name}” in {month_label}?\n\n"
+                "It will remain visible in this month and earlier months, "
+                "then be hidden from later months."
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            finish_savings_goal(
+                item.id,
+                year,
+                month,
+                user_id=self.user_id,
+                group_id=self.group_id,
+                session_factory=self.session_factory,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Goal not finished", str(exc))
+            return
+        except SQLAlchemyError:
+            QMessageBox.critical(
+                self,
+                "Goal not finished",
+                "Ledgerly could not finish this goal. Please retry.",
+            )
+            return
+        self.reload()
 
     def _delete_long_term_goal(self, goal_id: int) -> None:
         item = next((value for value in self._goal_items if value.id == goal_id), None)

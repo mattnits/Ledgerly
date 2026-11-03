@@ -18,6 +18,57 @@ from app.core.db import init_db
 
 
 class DatabaseMigrationTest(unittest.TestCase):
+    def test_legacy_long_term_goals_gain_finish_period_without_data_loss(self):
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            connection.exec_driver_sql("""
+                CREATE TABLE long_term_savings_goals (
+                    id INTEGER PRIMARY KEY,
+                    user_id VARCHAR(36),
+                    group_id INTEGER,
+                    name VARCHAR(120) NOT NULL,
+                    target_amount NUMERIC(14, 2) NOT NULL,
+                    current_amount NUMERIC(14, 2) NOT NULL DEFAULT 0,
+                    target_date DATE,
+                    notes VARCHAR(1000),
+                    is_archived BOOLEAN NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                )
+            """)
+            connection.exec_driver_sql("""
+                INSERT INTO long_term_savings_goals (
+                    id, user_id, name, target_amount, current_amount,
+                    is_archived, created_at, updated_at
+                ) VALUES (
+                    1, 'owner', 'Emergency Fund', 10000, 2500,
+                    0, '2026-01-01', '2026-01-01'
+                )
+            """)
+
+        init_db(engine)
+        columns = {
+            column["name"]
+            for column in inspect(engine).get_columns("long_term_savings_goals")
+        }
+        with engine.connect() as connection:
+            row = connection.exec_driver_sql(
+                "SELECT name, current_amount, starting_amount, "
+                "finished_year, finished_month "
+                "FROM long_term_savings_goals WHERE id = 1"
+            ).one()
+
+        self.assertIn("starting_amount", columns)
+        self.assertIn("finished_year", columns)
+        self.assertIn("finished_month", columns)
+        self.assertIn("savings_goal_updates", inspect(engine).get_table_names())
+        self.assertEqual(row[0], "Emergency Fund")
+        self.assertEqual(row[1], 2500)
+        self.assertEqual(row[2], 2500)
+        self.assertIsNone(row[3])
+        self.assertIsNone(row[4])
+        engine.dispose()
+
     def test_legacy_category_budgets_become_recurring(self):
         engine = create_engine("sqlite://")
         with engine.begin() as connection:

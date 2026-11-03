@@ -7,7 +7,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QEvent, QObject, QPoint, Qt
-from PySide6.QtWidgets import QApplication, QLabel, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QWidget
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
@@ -17,10 +17,12 @@ from app.core.db import Base
 from app.services.goals import (
     CategoryBudgetProgress,
     MonthlySavingsBreakdown,
+    add_savings_to_goal,
     create_or_update_category_budget,
     create_savings_goal,
     delete_category_budget,
     delete_savings_goal,
+    finish_savings_goal,
     get_category_budgets,
     get_monthly_savings_breakdown,
     get_savings_goals,
@@ -46,6 +48,7 @@ from app.models.models import (
     User,
 )
 from app.ui.pages.goals import (
+    AddSavingsDialog,
     BudgetDialog,
     BudgetRow,
     GoalsPage,
@@ -470,9 +473,131 @@ class GoalsServiceTest(unittest.TestCase):
         updated = get_savings_goals(user_id="owner", session_factory=self.sessions)[0]
         self.assertEqual(updated.target_amount, Decimal("12000.00"))
         self.assertEqual(updated.percent, Decimal("25.00"))
+        new_total = add_savings_to_goal(
+            goal_id,
+            Decimal("500"),
+            2026,
+            9,
+            user_id="owner",
+            session_factory=self.sessions,
+        )
+        self.assertEqual(new_total, Decimal("3500.00"))
+        new_total = add_savings_to_goal(
+            goal_id,
+            Decimal("200"),
+            2026,
+            10,
+            user_id="owner",
+            session_factory=self.sessions,
+        )
+        self.assertEqual(new_total, Decimal("3700.00"))
+        with self.assertRaisesRegex(ValueError, "greater than zero"):
+            add_savings_to_goal(
+                goal_id,
+                Decimal("0"),
+                2026,
+                10,
+                user_id="owner",
+                session_factory=self.sessions,
+            )
+
+        finish_savings_goal(
+            goal_id,
+            2026,
+            10,
+            user_id="owner",
+            session_factory=self.sessions,
+        )
+        august = get_savings_goals(
+            user_id="owner",
+            year=2026,
+            month=8,
+            session_factory=self.sessions,
+        )
+        september = get_savings_goals(
+            user_id="owner",
+            year=2026,
+            month=9,
+            session_factory=self.sessions,
+        )
+        october = get_savings_goals(
+            user_id="owner",
+            year=2026,
+            month=10,
+            session_factory=self.sessions,
+        )
+        november = get_savings_goals(
+            user_id="owner",
+            year=2026,
+            month=11,
+            session_factory=self.sessions,
+        )
+        self.assertEqual(august[0].current_amount, Decimal("3000.00"))
+        self.assertEqual(september[0].current_amount, Decimal("3500.00"))
+        self.assertTrue(september[0].is_archived)
+        self.assertFalse(september[0].is_finished)
+        self.assertEqual(len(october), 1)
+        self.assertEqual(october[0].current_amount, Decimal("3700.00"))
+        self.assertTrue(october[0].is_finished)
+        self.assertEqual(november, ())
+        self.assertEqual(
+            get_savings_goals(user_id="owner", session_factory=self.sessions),
+            (),
+        )
+        with self.assertRaisesRegex(ValueError, "cannot receive"):
+            add_savings_to_goal(
+                goal_id,
+                Decimal("50"),
+                2026,
+                10,
+                user_id="owner",
+                session_factory=self.sessions,
+            )
         delete_savings_goal(goal_id, user_id="owner", session_factory=self.sessions)
         with self.sessions() as session:
             self.assertIsNone(session.get(LongTermSavingsGoal, goal_id))
+
+    def test_historical_manual_correction_preserves_later_updates(self):
+        goal_id = create_savings_goal(
+            "Travel",
+            Decimal("2000"),
+            Decimal("100"),
+            user_id="owner",
+            session_factory=self.sessions,
+        )
+        add_savings_to_goal(
+            goal_id,
+            Decimal("100"),
+            2026,
+            10,
+            user_id="owner",
+            session_factory=self.sessions,
+        )
+        update_savings_goal(
+            goal_id,
+            "Travel",
+            Decimal("2000"),
+            Decimal("50"),
+            user_id="owner",
+            year=2026,
+            month=9,
+            session_factory=self.sessions,
+        )
+
+        september = get_savings_goals(
+            user_id="owner",
+            year=2026,
+            month=9,
+            session_factory=self.sessions,
+        )[0]
+        october = get_savings_goals(
+            user_id="owner",
+            year=2026,
+            month=10,
+            session_factory=self.sessions,
+        )[0]
+        self.assertEqual(september.current_amount, Decimal("50.00"))
+        self.assertEqual(october.current_amount, Decimal("150.00"))
 
 
 class GoalsPageLayoutTest(unittest.TestCase):
@@ -720,6 +845,27 @@ class GoalsPageLayoutTest(unittest.TestCase):
         )
         dialog.close()
 
+    def test_add_savings_dialog_collects_an_increment(self):
+        goal = SavingsGoalRecord(
+            1,
+            "Emergency Fund",
+            Decimal("10000"),
+            Decimal("2500"),
+            None,
+            None,
+        )
+        dialog = AddSavingsDialog(goal, 2026, 10)
+
+        self.assertEqual(dialog.windowTitle(), "Add Savings")
+        self.assertEqual(dialog.submit_button.text(), "Add Savings")
+        self.assertEqual(dialog.amount.value(), 0.01)
+        self.assertEqual(dialog.amount.accessibleName(), "Savings amount to add")
+        info_text = " ".join(
+            label.text() for label in dialog.info_panel.findChildren(QLabel)
+        )
+        self.assertIn("instead of replacing", info_text)
+        dialog.close()
+
     def test_budget_dialog_applies_to_future_months_by_default(self):
         dialog = BudgetDialog(
             [(1, "Bills", "#398cff")],
@@ -829,6 +975,114 @@ class GoalsPageLayoutTest(unittest.TestCase):
 
         self.assertEqual(shown_windows, [])
         card.close()
+
+    def test_finished_goal_card_has_subtle_historical_state(self):
+        card = SavingsGoalCard(SavingsGoalRecord(
+            1,
+            "Emergency Fund",
+            Decimal("10000"),
+            Decimal("10000"),
+            date(2027, 12, 31),
+            None,
+            is_archived=True,
+            is_finished=True,
+            finished_year=2026,
+            finished_month=10,
+        ))
+
+        self.assertTrue(card.property("finished"))
+        visible_text = " ".join(label.text() for label in card.findChildren(QLabel))
+        self.assertIn("Finished", visible_text)
+        self.assertIn("Oct 2026", visible_text)
+        card.close()
+
+    def test_savings_goal_menu_starts_with_add_and_finish_actions(self):
+        card = SavingsGoalCard(SavingsGoalRecord(
+            7,
+            "Emergency Fund",
+            Decimal("10000"),
+            Decimal("1000"),
+            None,
+            None,
+        ))
+        requested = []
+        card.add_savings_requested.connect(lambda goal_id: requested.append(("add", goal_id)))
+        card.finish_requested.connect(lambda goal_id: requested.append(("finish", goal_id)))
+        action_labels = []
+
+        class FakeAction:
+            def __init__(self, text):
+                self.text = text
+
+        class FakeMenu:
+            def __init__(self):
+                self.actions = []
+
+            def addAction(self, _icon, text):
+                action = FakeAction(text)
+                self.actions.append(action)
+                return action
+
+            def addSeparator(self):
+                return None
+
+            def exec(self, _point):
+                action_labels.extend(action.text for action in self.actions)
+                return self.actions[0]
+
+        fake_menu = FakeMenu()
+        with patch(
+            "app.ui.pages.goals.prepare_popup_menu",
+            return_value=fake_menu,
+        ):
+            card._show_menu()
+
+        self.assertEqual(action_labels[:2], ["Add savings", "Finish goal"])
+        self.assertEqual(requested, [("add", 7)])
+        card.close()
+
+    def test_add_savings_and_finish_goal_refresh_month_history(self):
+        goal_id = create_savings_goal(
+            "Emergency Fund",
+            Decimal("1000"),
+            Decimal("100"),
+            user_id="owner",
+            session_factory=self.sessions,
+        )
+        page = GoalsPage(session_factory=self.sessions)
+        page.month_navigator.set_month(2026, 9)
+        page.set_profile(user_id="owner")
+
+        def complete_add_dialog(dialog):
+            dialog.amount.setValue(250)
+            dialog.submitted.emit()
+            return dialog.result()
+
+        with patch.object(AddSavingsDialog, "exec", new=complete_add_dialog):
+            page._add_savings_to_goal(goal_id)
+
+        self.assertEqual(page._goal_items[0].current_amount, Decimal("350.00"))
+        with patch.object(
+            QMessageBox,
+            "question",
+            return_value=QMessageBox.StandardButton.Yes,
+        ):
+            page._finish_long_term_goal(goal_id)
+
+        self.assertEqual(len(page._goal_items), 1)
+        self.assertTrue(page._goal_items[0].is_finished)
+
+        page.month_navigator.set_month(2026, 10)
+        page.reload()
+        self.assertEqual(page._goal_items, ())
+
+        page.month_navigator.set_month(2026, 8)
+        page.reload()
+        self.assertEqual(len(page._goal_items), 1)
+        self.assertEqual(page._goal_items[0].current_amount, Decimal("100.00"))
+        self.assertTrue(page._goal_items[0].is_archived)
+        self.assertFalse(page._goal_items[0].is_finished)
+        page.close()
 
     def test_narrow_layout_reflows_and_page_is_vertically_scrollable(self):
         page = GoalsPage(session_factory=self.sessions)

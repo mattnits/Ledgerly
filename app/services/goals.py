@@ -14,6 +14,7 @@ from app.models.models import (
     LongTermSavingsGoal,
     MonthlyCategoryBudget,
     SavingsGoal,
+    SavingsGoalUpdate,
     Transaction,
 )
 from app.services.profiles import direct_owner_scope, validate_owner, visible_account_scope
@@ -65,6 +66,10 @@ class SavingsGoalRecord:
     current_amount: Decimal
     target_date: date | None
     notes: str | None
+    is_archived: bool = False
+    is_finished: bool = False
+    finished_year: int | None = None
+    finished_month: int | None = None
 
     @property
     def percent(self) -> Decimal:
@@ -89,6 +94,36 @@ def _decimal_value(value) -> Decimal:
 def _owner_kwargs(user_id: str | None, group_id: int | None) -> dict:
     validate_owner(user_id, group_id)
     return {"user_id": user_id, "group_id": group_id}
+
+
+def _validate_period(year: int, month: int) -> None:
+    if year < 1:
+        raise ValueError("Year must be greater than zero.")
+    if month not in range(1, 13):
+        raise ValueError("Month must be between 1 and 12.")
+
+
+def _validate_optional_period(year: int | None, month: int | None) -> None:
+    if (year is None) != (month is None):
+        raise ValueError("Select both a year and month for this goal update.")
+    if year is not None:
+        _validate_period(year, month)
+
+
+def _goal_amount_as_of(session, item, year: int, month: int) -> Decimal:
+    updates = session.scalar(
+        select(func.sum(SavingsGoalUpdate.amount)).where(
+            SavingsGoalUpdate.goal_id == item.id,
+            or_(
+                SavingsGoalUpdate.year < year,
+                and_(
+                    SavingsGoalUpdate.year == year,
+                    SavingsGoalUpdate.month <= month,
+                ),
+            ),
+        )
+    )
+    return _decimal_value(item.starting_amount) + _decimal_value(updates)
 
 
 def get_monthly_savings_goal(
@@ -427,21 +462,81 @@ def get_savings_goals(
     *,
     user_id: str | None = None,
     group_id: int | None = None,
+    year: int | None = None,
+    month: int | None = None,
     include_archived: bool = False,
     session_factory=SessionLocal,
 ) -> tuple[SavingsGoalRecord, ...]:
     validate_owner(user_id, group_id)
+    if (year is None) != (month is None):
+        raise ValueError("Select both a year and month for historical goals.")
+    if month is not None and month not in range(1, 13):
+        raise ValueError("Month must be between 1 and 12.")
     filters = [direct_owner_scope(LongTermSavingsGoal, user_id, group_id)]
     if not include_archived:
-        filters.append(LongTermSavingsGoal.is_archived.is_(False))
+        if year is None:
+            filters.append(LongTermSavingsGoal.is_archived.is_(False))
+        else:
+            selected_period = year * 12 + month
+            finished_period = (
+                LongTermSavingsGoal.finished_year * 12
+                + LongTermSavingsGoal.finished_month
+            )
+            filters.append(or_(
+                LongTermSavingsGoal.is_archived.is_(False),
+                and_(
+                    LongTermSavingsGoal.finished_year.is_not(None),
+                    LongTermSavingsGoal.finished_month.is_not(None),
+                    finished_period >= selected_period,
+                ),
+            ))
     with session_factory() as session:
         rows = session.scalars(
             select(LongTermSavingsGoal).where(*filters)
             .order_by(LongTermSavingsGoal.target_date.is_(None), LongTermSavingsGoal.target_date, LongTermSavingsGoal.name)
         ).all()
+        update_totals: dict[int, Decimal] = {}
+        if year is not None and rows:
+            update_totals = {
+                goal_id: _decimal_value(total)
+                for goal_id, total in session.execute(
+                    select(
+                        SavingsGoalUpdate.goal_id,
+                        func.sum(SavingsGoalUpdate.amount),
+                    )
+                    .where(
+                        SavingsGoalUpdate.goal_id.in_([item.id for item in rows]),
+                        or_(
+                            SavingsGoalUpdate.year < year,
+                            and_(
+                                SavingsGoalUpdate.year == year,
+                                SavingsGoalUpdate.month <= month,
+                            ),
+                        ),
+                    )
+                    .group_by(SavingsGoalUpdate.goal_id)
+                )
+            }
         return tuple(SavingsGoalRecord(
-            item.id, item.name, item.target_amount, item.current_amount,
-            item.target_date, item.notes,
+            id=item.id,
+            name=item.name,
+            target_amount=item.target_amount,
+            current_amount=(
+                _decimal_value(item.current_amount)
+                if year is None
+                else _decimal_value(item.starting_amount)
+                + update_totals.get(item.id, Decimal())
+            ),
+            target_date=item.target_date,
+            notes=item.notes,
+            is_archived=item.is_archived,
+            is_finished=(
+                item.is_archived
+                and year is not None
+                and (item.finished_year, item.finished_month) == (year, month)
+            ),
+            finished_year=item.finished_year,
+            finished_month=item.finished_month,
         ) for item in rows)
 
 
@@ -476,7 +571,9 @@ def create_savings_goal(
     with session_factory.begin() as session:
         item = LongTermSavingsGoal(
             **_owner_kwargs(user_id, group_id), name=name,
-            target_amount=target_amount, current_amount=current_amount,
+            target_amount=target_amount,
+            current_amount=current_amount,
+            starting_amount=current_amount,
             target_date=target_date, notes=(notes or "").strip() or None,
         )
         session.add(item)
@@ -494,9 +591,12 @@ def update_savings_goal(
     *,
     user_id: str | None = None,
     group_id: int | None = None,
+    year: int | None = None,
+    month: int | None = None,
     session_factory=SessionLocal,
 ) -> None:
     validate_owner(user_id, group_id)
+    _validate_optional_period(year, month)
     name, target_amount, current_amount = _validate_long_term_values(name, target_amount, current_amount)
     with session_factory.begin() as session:
         item = session.scalar(select(LongTermSavingsGoal).where(
@@ -505,11 +605,97 @@ def update_savings_goal(
         ))
         if item is None:
             raise ValueError("The savings goal no longer exists.")
+        cached_total = _decimal_value(item.current_amount)
         item.name = name
         item.target_amount = target_amount
-        item.current_amount = current_amount
+        difference = current_amount - (
+            _goal_amount_as_of(session, item, year, month)
+            if year is not None
+            else _decimal_value(item.current_amount)
+        )
+        if difference:
+            if year is None:
+                item.starting_amount = (
+                    _decimal_value(item.starting_amount) + difference
+                )
+            else:
+                session.add(SavingsGoalUpdate(
+                    goal_id=item.id,
+                    year=year,
+                    month=month,
+                    amount=difference,
+                ))
+        updated_cached_total = (
+            current_amount if year is None else cached_total + difference
+        )
+        if updated_cached_total < 0:
+            raise ValueError(
+                "This correction would make the goal total negative in a later month."
+            )
+        item.current_amount = updated_cached_total
         item.target_date = target_date
         item.notes = (notes or "").strip() or None
+
+
+def add_savings_to_goal(
+    goal_id: int,
+    amount: Decimal,
+    year: int,
+    month: int,
+    *,
+    user_id: str | None = None,
+    group_id: int | None = None,
+    session_factory=SessionLocal,
+) -> Decimal:
+    """Increment an active goal and return its new total."""
+    validate_owner(user_id, group_id)
+    _validate_period(year, month)
+    amount = Decimal(amount).quantize(Decimal("0.01"))
+    if amount <= 0:
+        raise ValueError("Enter an amount greater than zero.")
+    with session_factory.begin() as session:
+        item = session.scalar(select(LongTermSavingsGoal).where(
+            LongTermSavingsGoal.id == goal_id,
+            direct_owner_scope(LongTermSavingsGoal, user_id, group_id),
+        ))
+        if item is None:
+            raise ValueError("The savings goal no longer exists.")
+        if item.is_archived:
+            raise ValueError("Finished savings goals cannot receive new savings.")
+        session.add(SavingsGoalUpdate(
+            goal_id=item.id,
+            year=year,
+            month=month,
+            amount=amount,
+        ))
+        item.current_amount = _decimal_value(item.current_amount) + amount
+        session.flush()
+        return item.current_amount
+
+
+def finish_savings_goal(
+    goal_id: int,
+    year: int,
+    month: int,
+    *,
+    user_id: str | None = None,
+    group_id: int | None = None,
+    session_factory=SessionLocal,
+) -> None:
+    validate_owner(user_id, group_id)
+    _validate_period(year, month)
+    with session_factory.begin() as session:
+        item = session.scalar(select(LongTermSavingsGoal).where(
+            LongTermSavingsGoal.id == goal_id,
+            direct_owner_scope(LongTermSavingsGoal, user_id, group_id),
+        ))
+        if item is None:
+            raise ValueError("The savings goal no longer exists.")
+        if item.is_archived:
+            raise ValueError("This savings goal is already finished.")
+        item.is_archived = True
+        item.finished_year = year
+        item.finished_month = month
 
 
 def archive_savings_goal(
@@ -519,14 +705,16 @@ def archive_savings_goal(
     group_id: int | None = None,
     session_factory=SessionLocal,
 ) -> None:
-    validate_owner(user_id, group_id)
-    with session_factory.begin() as session:
-        item = session.scalar(select(LongTermSavingsGoal).where(
-            LongTermSavingsGoal.id == goal_id,
-            direct_owner_scope(LongTermSavingsGoal, user_id, group_id),
-        ))
-        if item is not None:
-            item.is_archived = True
+    """Backward-compatible archive operation using the current month."""
+    today = date.today()
+    finish_savings_goal(
+        goal_id,
+        today.year,
+        today.month,
+        user_id=user_id,
+        group_id=group_id,
+        session_factory=session_factory,
+    )
 
 
 def delete_savings_goal(
