@@ -569,11 +569,16 @@ class LongTermSavingsGoal(Base):
     current_amount: Mapped[Decimal] = mapped_column(
         Numeric(14, 2), nullable=False, default=Decimal("0.00"), server_default="0"
     )
+    starting_amount: Mapped[Decimal] = mapped_column(
+        Numeric(14, 2), nullable=False, default=Decimal("0.00"), server_default="0"
+    )
     target_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     notes: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     is_archived: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="0"
     )
+    finished_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    finished_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.now
     )
@@ -583,6 +588,11 @@ class LongTermSavingsGoal(Base):
 
     user: Mapped["User | None"] = relationship(back_populates="long_term_savings_goals")
     group: Mapped["Group | None"] = relationship(back_populates="long_term_savings_goals")
+    updates: Mapped[list["SavingsGoalUpdate"]] = relationship(
+        back_populates="goal",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -592,6 +602,37 @@ class LongTermSavingsGoal(Base):
         ),
         CheckConstraint("target_amount > 0", name="ck_long_term_goal_positive_target"),
         CheckConstraint("current_amount >= 0", name="ck_long_term_goal_nonnegative_current"),
+        CheckConstraint(
+            "(finished_year IS NULL AND finished_month IS NULL) OR "
+            "(finished_year IS NOT NULL AND finished_month BETWEEN 1 AND 12)",
+            name="ck_long_term_goal_finished_period",
+        ),
+    )
+
+
+class SavingsGoalUpdate(Base):
+    """A dated balance change used to reconstruct long-term goal history."""
+
+    __tablename__ = "savings_goal_updates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    goal_id: Mapped[int] = mapped_column(
+        ForeignKey("long_term_savings_goals.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    month: Mapped[int] = mapped_column(Integer, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.now
+    )
+
+    goal: Mapped["LongTermSavingsGoal"] = relationship(back_populates="updates")
+
+    __table_args__ = (
+        CheckConstraint("month BETWEEN 1 AND 12", name="ck_savings_goal_update_month"),
+        CheckConstraint("amount != 0", name="ck_savings_goal_update_nonzero"),
+        Index("ix_savings_goal_updates_goal_period", "goal_id", "year", "month"),
     )
 
 

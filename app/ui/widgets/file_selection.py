@@ -1,6 +1,7 @@
 from datetime import date, timedelta
+from pathlib import Path
 
-from PySide6.QtCore import QDate, Qt, Signal
+from PySide6.QtCore import QDate, QStandardPaths, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
@@ -31,6 +32,14 @@ def previous_month_bounds(reference: date) -> tuple[date, date]:
         1,
     )
     return first_of_previous_month, last_of_previous_month
+
+
+def default_file_dialog_directory() -> str:
+    """Return the platform's Downloads folder for file and folder pickers."""
+    downloads = QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.DownloadLocation
+    )
+    return downloads or str(Path.home() / "Downloads")
 
 
 class ErrorSummary(QFrame):
@@ -97,7 +106,9 @@ class FilePickerPanel(QFrame):
         self.button = QPushButton("Choose CSV files")
         self.button.setObjectName("statementChooseFilesButton")
         set_button_icon(self.button, "fa6s.file-circle-plus", size=20)
-        self.help_label = QLabel("You can select multiple files at once.")
+        self.help_label = QLabel(
+            "You can select multiple files at once or add more later."
+        )
         self.help_label.setObjectName("statementFilePickerHelp")
         self.help_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.button, alignment=Qt.AlignmentFlag.AlignCenter)
@@ -257,11 +268,11 @@ class FileSelection(QWidget):
         files, _ = QFileDialog.getOpenFileNames(
             self,
             "Select transaction files",
-            "",
+            default_file_dialog_directory(),
             "Data Files (*.csv *.xlsx *.xls);;All Files (*)",
         )
         if files:
-            self.set_files(files)
+            self.add_files(files)
 
     def set_files(self, files: list[str]) -> None:
         self._clear_rows()
@@ -269,16 +280,19 @@ class FileSelection(QWidget):
         self._errors.clear()
         self.error_summary.hide()
         for filename in self.selected_files:
-            row = FileRow(filename)
-            row.remove_requested.connect(self.remove_file)
-            row.parser_changed.connect(
-                lambda _value, selected=row: self._parser_changed(selected)
-            )
-            self.file_rows_layout.addWidget(row)
-            self.file_rows.append(row)
-        self.empty_state.setVisible(not self.file_rows)
-        self.label.setText(f"{len(self.selected_files)} file(s) selected")
-        self.queue_changed.emit(bool(self.file_rows))
+            self._add_file_row(filename)
+        self._refresh_queue_state()
+
+    def add_files(self, files: list[str]) -> None:
+        """Append new files without disturbing the existing import queue."""
+        existing = set(self.selected_files)
+        for filename in files:
+            if filename in existing:
+                continue
+            existing.add(filename)
+            self.selected_files.append(filename)
+            self._add_file_row(filename)
+        self._refresh_queue_state()
 
     def remove_file(self, filename: str) -> None:
         row = next(
@@ -355,6 +369,24 @@ class FileSelection(QWidget):
             self.file_rows_layout.removeWidget(row)
             row.deleteLater()
         self.file_rows = []
+
+    def _add_file_row(self, filename: str) -> None:
+        row = FileRow(filename)
+        row.remove_requested.connect(self.remove_file)
+        row.parser_changed.connect(
+            lambda _value, selected=row: self._parser_changed(selected)
+        )
+        self.file_rows_layout.addWidget(row)
+        self.file_rows.append(row)
+
+    def _refresh_queue_state(self) -> None:
+        self.empty_state.setVisible(not self.file_rows)
+        self.label.setText(
+            f"{len(self.selected_files)} file(s) selected"
+            if self.selected_files
+            else "No files selected"
+        )
+        self.queue_changed.emit(bool(self.file_rows))
 
     @staticmethod
     def _stylesheet() -> str:

@@ -24,7 +24,11 @@ from app.models.models import (
     User,
 )
 from app.services.profiles import ProfileContext, ProfileType
-from app.services.transactions import TransactionQueryParams, fetch_transactions
+from app.services.transactions import (
+    TransactionQueryParams,
+    fetch_transaction_metadata,
+    fetch_transactions,
+)
 from app.ui.dialogs.add_user import AddUserDialog
 from app.ui.dialogs.switch_user import SwitchUserDialog
 from app.utils.constants import TransactionType
@@ -178,7 +182,8 @@ class GroupFeatureTest(unittest.TestCase):
             {row.description for row in result.rows}, {"Matt", "Alyssa", "Joint"}
         )
         self.assertEqual(len({row.id for row in result.rows}), 3)
-        self.assertEqual({row[0] for row in result.accounts}, {1, 2, 3})
+        metadata = fetch_transaction_metadata(None, group_id, self.sessions)
+        self.assertEqual({row[0] for row in metadata.accounts}, {1, 2, 3})
 
     def test_group_dashboard_aggregates_transactions_but_uses_group_goals(self):
         group_id = self._group_with_accounts()

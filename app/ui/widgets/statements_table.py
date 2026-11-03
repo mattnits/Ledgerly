@@ -3,6 +3,7 @@ from datetime import date
 
 from PySide6.QtCore import (
     QObject,
+    QRect,
     QRunnable,
     QSignalBlocker,
     QThreadPool,
@@ -11,7 +12,7 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -20,45 +21,127 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMenu,
     QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 from app.core.db import SessionLocal
-from app.services.category_rules import rule_prefill_from_transaction
-from app.models.models import Category, Transaction
+from app.services.category_rules import (
+    normalize_description,
+    rule_prefill_from_transaction,
+    transaction_type_requires_category,
+)
 from app.services.transactions import (
+    TransactionFilterMetadata,
     TransactionQueryParams,
     TransactionQueryResult,
+    fetch_transaction_metadata,
     fetch_transactions,
     get_visible_transaction,
+    save_transaction_assignment,
     set_transaction_deleted,
 )
 from app.ui.widgets.date_dropdown import DateDropdown
-from app.ui.theme import DROPDOWN_FILTER_STYLE
 from app.ui.widgets.combo_box import AppComboBox
-from app.ui.widgets.generic_table import GenericTable
 from app.ui.widgets.loading_state import LoadingOverlay
 from app.ui.widgets.period_selector import PeriodSelector
 from app.ui.widgets.transaction_row import TransactionRow
+from app.ui.widgets.transaction_table import (
+    TransactionTableModel,
+    TransactionTableView,
+)
 from app.ui.theme import (
+    DROPDOWN_FILTER_STYLE,
     awesome_icon,
     brand_icon,
     category_icon_name,
+    prepare_popup_menu,
     spaced_text_icon,
     spaced_text_icon_size,
     transaction_type_icon,
 )
 from app.utils.constants import (
-    CATEGORY_FREE_TRANSACTION_TYPES,
-    ClassificationSource,
     TRANSACTION_TYPE_LABELS,
     TransactionType,
 )
 
 
 logger = logging.getLogger(__name__)
+
+
+class TransactionActionMenu(QMenu):
+    """Popup menu with flush selection and consistently inset content."""
+
+    ICON_LEFT_INSET = 16
+    ICON_SIZE = 16
+    TEXT_LEFT_INSET = 46
+    TEXT_RIGHT_INSET = 18
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt API spelling
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setFont(self.font())
+        active_action = self.activeAction()
+        for action in self.actions():
+            if action.isSeparator():
+                continue
+            rect = self.actionGeometry(action)
+            painter.fillRect(
+                rect,
+                QColor("#315f94")
+                if action is active_action
+                else QColor("#20242a"),
+            )
+            icon_rect = QRect(
+                rect.left() + self.ICON_LEFT_INSET,
+                rect.center().y() - self.ICON_SIZE // 2,
+                self.ICON_SIZE,
+                self.ICON_SIZE,
+            )
+            action.icon().paint(painter, icon_rect, Qt.AlignmentFlag.AlignCenter)
+            painter.setPen(
+                QColor("#ffffff") if action is active_action else QColor("#e5e7ea")
+            )
+            painter.drawText(
+                rect.adjusted(
+                    self.TEXT_LEFT_INSET,
+                    0,
+                    -self.TEXT_RIGHT_INSET,
+                    0,
+                ),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                action.text(),
+            )
+
+
+TRANSACTION_ACTION_MENU_STYLE = """
+    QMenu#transactionActionMenu {
+        color: #e5e7ea;
+        background: #20242a;
+        border: 1px solid #3a4048;
+        padding: 0;
+        margin: 0;
+    }
+    QMenu#transactionActionMenu::item {
+        background: transparent;
+        padding: 9px 24px 9px 20px;
+        margin: 0;
+    }
+    QMenu#transactionActionMenu::item:selected {
+        background: #315f94;
+        color: #ffffff;
+    }
+"""
+
+
+def prepare_transaction_action_menu(parent: QWidget) -> QMenu:
+    """Create a flush action menu whose complete row responds to hover."""
+    menu = prepare_popup_menu(TransactionActionMenu(parent))
+    menu.setObjectName("transactionActionMenu")
+    menu.setStyleSheet(TRANSACTION_ACTION_MENU_STYLE)
+    return menu
 
 
 class _QuerySignals(QObject):
@@ -108,6 +191,99 @@ class _TransactionQueryWorker(QRunnable):
             self.request_id,
             self.params.offset,
             result,
+        )
+
+
+class _MetadataSignals(QObject):
+    succeeded = Signal(int, object)
+    failed = Signal(int, object)
+
+
+class _MetadataWorker(QRunnable):
+    def __init__(
+        self,
+        generation: int,
+        user_id: str | None,
+        group_id: int | None,
+        metadata_loader,
+        session_factory,
+    ):
+        super().__init__()
+        self.generation = generation
+        self.user_id = user_id
+        self.group_id = group_id
+        self.metadata_loader = metadata_loader
+        self.session_factory = session_factory
+        self.signals = _MetadataSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            metadata = self.metadata_loader(
+                self.user_id,
+                self.group_id,
+                session_factory=self.session_factory,
+            )
+        except Exception as exc:
+            logger.exception("Transaction filter metadata query failed")
+            self.signals.failed.emit(self.generation, exc)
+            return
+        self.signals.succeeded.emit(self.generation, metadata)
+
+
+class _AssignmentSignals(QObject):
+    succeeded = Signal(int, int, object, object)
+    failed = Signal(int, int, object)
+
+
+class _AssignmentWorker(QRunnable):
+    def __init__(
+        self,
+        request_id: int,
+        transaction_id: int,
+        transaction_type,
+        category_id,
+        user_id: str | None,
+        group_id: int | None,
+        session_factory,
+    ):
+        super().__init__()
+        self.request_id = request_id
+        self.transaction_id = transaction_id
+        self.transaction_type = transaction_type
+        self.category_id = category_id
+        self.user_id = user_id
+        self.group_id = group_id
+        self.session_factory = session_factory
+        self.signals = _AssignmentSignals()
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            save_transaction_assignment(
+                self.transaction_id,
+                self.transaction_type,
+                self.category_id,
+                user_id=self.user_id,
+                group_id=self.group_id,
+                session_factory=self.session_factory,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Transaction assignment save failed (transaction=%s)",
+                self.transaction_id,
+            )
+            self.signals.failed.emit(
+                self.request_id,
+                self.transaction_id,
+                exc,
+            )
+            return
+        self.signals.succeeded.emit(
+            self.request_id,
+            self.transaction_id,
+            self.transaction_type,
+            self.category_id,
         )
 
 
@@ -162,20 +338,36 @@ class StatementsTable(QWidget):
         parent=None,
         session_factory=SessionLocal,
         query_loader=fetch_transactions,
+        metadata_loader=None,
         thread_pool: QThreadPool | None = None,
     ):
         super().__init__(parent)
         self.session_factory = session_factory
         self.query_loader = query_loader
+        self.metadata_loader = (
+            fetch_transaction_metadata
+            if metadata_loader is None and query_loader is fetch_transactions
+            else metadata_loader
+        )
         self._thread_pool = thread_pool or QThreadPool.globalInstance()
         self._query_generation = 0
         self._request_serial = 0
         self._active_workers: dict[int, _TransactionQueryWorker] = {}
         self._request_contexts: dict[int, dict] = {}
         self._last_failed_context: dict | None = None
+        self._metadata_generation = 0
+        self._metadata_worker: _MetadataWorker | None = None
+        self._metadata_ready = self.metadata_loader is None
+        self._metadata_cache: dict[
+            tuple[str | None, int | None], TransactionFilterMetadata
+        ] = {}
+        self._assignment_serial = 0
+        self._assignment_workers: dict[int, _AssignmentWorker] = {}
+        self._assignment_active: dict[int, int] = {}
+        self._assignment_queued: dict[int, tuple[object, object]] = {}
+        self._closing = False
         self.user_id: str | None = None
         self.group_id: int | None = None
-        self.rows: list[TransactionRow] = []
         self.category_options: list[tuple[int, str, str]] = []
         self.total_count = 0
         self.filtered_count = 0
@@ -354,7 +546,9 @@ class StatementsTable(QWidget):
         card_layout.setContentsMargins(0, 0, 0, 0)
         card_layout.setSpacing(0)
 
-        self.table = GenericTable(self.COLUMN_HEADERS)
+        self.table_model = TransactionTableModel(self)
+        self.rows = self.table_model.rows
+        self.table = TransactionTableView(self.table_model)
         table_header = self.table.horizontalHeader()
         table_header.setSectionsClickable(True)
         table_header.setMinimumSectionSize(48)
@@ -370,6 +564,10 @@ class StatementsTable(QWidget):
         self.table.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
+        self.table_model.assignment_requested.connect(
+            self._queue_assignment_save
+        )
+        self.table.action_requested.connect(self._show_row_actions)
         for column, width in self.MAXIMUM_COLUMN_WIDTHS.items():
             table_header.setSectionResizeMode(
                 column, QHeaderView.ResizeMode.Interactive
@@ -380,12 +578,6 @@ class StatementsTable(QWidget):
                 column, QHeaderView.ResizeMode.Fixed
             )
             self.table.setColumnWidth(column, width)
-        self.table.horizontalHeaderItem(2).setTextAlignment(
-            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter
-        )
-        self.table.horizontalHeaderItem(4).setTextAlignment(
-            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter
-        )
         self._update_sort_headers()
         card_layout.addWidget(self.table, 1)
         QTimer.singleShot(0, self._fit_table_columns)
@@ -415,6 +607,19 @@ class StatementsTable(QWidget):
                 background: #171b20;
                 border: 1px solid #303740;
                 border-radius: 14px;
+            }
+            QTableView#transactionTable {
+                color: #dfe2e6;
+                background: #171b20;
+                alternate-background-color: #1a1e23;
+                border: none;
+                outline: none;
+                selection-background-color: #293a50;
+                selection-color: #ffffff;
+            }
+            QTableView#transactionTable::item {
+                border-bottom: 1px solid #262c34;
+                padding: 0 10px;
             }
             QWidget#transactionsFooter {
                 background: #171b20;
@@ -698,8 +903,16 @@ class StatementsTable(QWidget):
         group_id: int | None = None,
         reload: bool = True,
     ) -> None:
+        owner_changed = (self.user_id, self.group_id) != (user_id, group_id)
         self.user_id = user_id
         self.group_id = group_id
+        cached_metadata = self._metadata_cache.get((user_id, group_id))
+        if owner_changed:
+            self._metadata_generation += 1
+            self._metadata_worker = None
+            self._metadata_ready = (
+                self.metadata_loader is None or cached_metadata is not None
+            )
         today = date.today()
         self.selected_month = (today.year, today.month)
         self.period_filter = "monthly"
@@ -713,11 +926,81 @@ class StatementsTable(QWidget):
         with QSignalBlocker(self.search), QSignalBlocker(self.needs_review_checkbox):
             self.search.clear()
             self.needs_review_checkbox.setChecked(False)
+        if cached_metadata is not None:
+            self._update_filter_options(
+                cached_metadata.accounts,
+                cached_metadata.categories,
+                cached_metadata.available_months,
+            )
         if reload:
             self.reload()
 
     def reload(self) -> None:
+        if (
+            self.metadata_loader is not None
+            and not self._metadata_ready
+            and (self.user_id is not None or self.group_id is not None)
+        ):
+            self._start_metadata_query()
+            return
         self._apply_filters()
+
+    def invalidate_metadata(self, *, reload: bool = False) -> None:
+        """Drop cached choices after accounts, categories, or imports change."""
+        self._metadata_cache.pop((self.user_id, self.group_id), None)
+        self._metadata_generation += 1
+        self._metadata_worker = None
+        self._metadata_ready = self.metadata_loader is None
+        if reload:
+            self.reload()
+
+    def refresh_metadata(self) -> None:
+        self.invalidate_metadata(reload=True)
+
+    def _start_metadata_query(self) -> None:
+        if self._metadata_worker is not None or self.metadata_loader is None:
+            return
+        generation = self._metadata_generation
+        worker = _MetadataWorker(
+            generation,
+            self.user_id,
+            self.group_id,
+            self.metadata_loader,
+            self.session_factory,
+        )
+        worker.signals.succeeded.connect(self._metadata_succeeded)
+        worker.signals.failed.connect(self._metadata_failed)
+        self._metadata_worker = worker
+        self._set_loading(True)
+        self.loading_overlay.show_loading("Loading transactions...")
+        self._thread_pool.start(worker)
+
+    @Slot(int, object)
+    def _metadata_succeeded(
+        self,
+        generation: int,
+        metadata: TransactionFilterMetadata,
+    ) -> None:
+        if self._closing or generation != self._metadata_generation:
+            return
+        self._metadata_worker = None
+        self._metadata_ready = True
+        self._metadata_cache[(self.user_id, self.group_id)] = metadata
+        self._update_filter_options(
+            metadata.accounts,
+            metadata.categories,
+            metadata.available_months,
+        )
+        self._apply_filters()
+
+    @Slot(int, object)
+    def _metadata_failed(self, generation: int, _exception: Exception) -> None:
+        if self._closing or generation != self._metadata_generation:
+            return
+        self._metadata_worker = None
+        self._set_loading(False)
+        self._last_failed_context = {"kind": "metadata"}
+        self.loading_overlay.show_error("Could not load transaction filters.")
 
     def _update_filter_options(
         self,
@@ -726,6 +1009,7 @@ class StatementsTable(QWidget):
         available_months: frozenset[tuple[int, int]],
     ) -> None:
         self.category_options = list(categories)
+        self.table_model.set_categories(self.category_options)
         self.available_months = set(available_months)
         self._refresh_month_choices()
         with QSignalBlocker(self.account_selector):
@@ -829,11 +1113,10 @@ class StatementsTable(QWidget):
         self._apply_filters()
 
     def _update_sort_headers(self) -> None:
-        arrow = "↑" if self.sort_order == Qt.SortOrder.AscendingOrder else "↓"
-        for index, label in enumerate(self.COLUMN_HEADERS):
-            self.table.horizontalHeaderItem(index).setText(
-                f"{label} {arrow}" if index == self.sort_column else label
-            )
+        self.table_model.set_sort(
+            self.sort_column,
+            self.sort_order == Qt.SortOrder.DescendingOrder,
+        )
 
     def _on_scroll(self, value: int) -> None:
         scrollbar = self.table.verticalScrollBar()
@@ -844,6 +1127,13 @@ class StatementsTable(QWidget):
 
     def _apply_filters(self, preserve_scroll: bool = False) -> None:
         self._search_timer.stop()
+        if (
+            self.metadata_loader is not None
+            and not self._metadata_ready
+            and (self.user_id is not None or self.group_id is not None)
+        ):
+            self._start_metadata_query()
+            return
         vertical_scrollbar = self.table.verticalScrollBar()
         horizontal_scrollbar = self.table.horizontalScrollBar()
         scroll_position = vertical_scrollbar.value() if preserve_scroll else 0
@@ -943,7 +1233,7 @@ class StatementsTable(QWidget):
             )
             return
 
-        if context.get("kind") != "append":
+        if context.get("kind") != "append" and self.metadata_loader is None:
             previous_selection = (self.period_filter, self.selected_month)
             self._update_filter_options(
                 result.accounts,
@@ -993,13 +1283,9 @@ class StatementsTable(QWidget):
     def _replace_rows(self, result: TransactionQueryResult, context: dict) -> None:
         vertical_scrollbar = self.table.verticalScrollBar()
         horizontal_scrollbar = self.table.horizontalScrollBar()
-        for row in self.rows:
-            row.deleteLater()
-        self.rows = []
         self.loaded_count = 0
-        self.table.setRowCount(0)
         vertical_scrollbar.setValue(0)
-        self._append_rows(result.rows)
+        self.table_model.replace_rows(result.rows)
         self.loaded_count = len(result.rows)
         self.range_label.setText(
             f"Showing {self.loaded_count:,} of {self.filtered_count:,} transactions"
@@ -1050,6 +1336,9 @@ class StatementsTable(QWidget):
         if context is None or (self.user_id is None and self.group_id is None):
             return
         self._last_failed_context = None
+        if context.get("kind") == "metadata":
+            self._start_metadata_query()
+            return
         if context.get("kind") == "append":
             self._start_query(
                 offset=context.get("offset", self.loaded_count),
@@ -1063,10 +1352,7 @@ class StatementsTable(QWidget):
         self.total_count = 0
         self.filtered_count = 0
         self.loaded_count = 0
-        for row in self.rows:
-            row.deleteLater()
-        self.rows = []
-        self.table.setRowCount(0)
+        self.table_model.clear()
         self.count_label.setText("0 transactions")
         self.count_changed.emit(0)
         self.range_label.setText("Showing 0 transactions")
@@ -1074,40 +1360,7 @@ class StatementsTable(QWidget):
         self.message.show()
 
     def _append_rows(self, transactions) -> None:
-        new_rows = []
-        for transaction in transactions:
-            row = TransactionRow(
-                transaction.id,
-                transaction.transaction_date,
-                transaction.description,
-                transaction.amount,
-                transaction.transaction_type,
-                transaction.imported_at,
-                transaction.category_id,
-                transaction.account_name,
-                transaction.institution,
-                transaction.is_deleted,
-                self.category_options,
-                parent=self,
-            )
-            row.category_changed.connect(
-                lambda transaction_id, _category_id, row=row:
-                self._save_assignment(row, transaction_id)
-            )
-            row.transaction_type_changed.connect(
-                lambda transaction_id, _transaction_type, row=row:
-                self._save_assignment(row, transaction_id)
-            )
-            row.deletion_changed.connect(self._set_deleted)
-            row.create_rule_requested.connect(self._request_rule)
-            new_rows.append(row)
-
-        self.table.setUpdatesEnabled(False)
-        try:
-            self.table.append_rows([row.cells for row in new_rows])
-        finally:
-            self.table.setUpdatesEnabled(True)
-        self.rows.extend(new_rows)
+        self.table_model.append_rows(transactions)
 
     def _request_rule(self, transaction_id: int) -> None:
         if self.group_id is not None:
@@ -1131,41 +1384,177 @@ class StatementsTable(QWidget):
             return
         self.create_rule_requested.emit(prefill)
 
-    def _save_assignment(
+    @Slot(int, object, object)
+    def _queue_assignment_save(
         self,
-        row: TransactionRow,
         transaction_id: int,
+        transaction_type,
+        category_id,
     ) -> None:
-        transaction_type = row.transaction_type_combo.currentData()
-        category_id = row.category_combo.currentData()
-        if transaction_type in CATEGORY_FREE_TRANSACTION_TYPES:
-            category_id = None
-            with QSignalBlocker(row.category_combo):
-                row.category_combo.setCurrentIndex(0)
-            row._style_category()
-        try:
-            with self.session_factory.begin() as session:
-                transaction = get_visible_transaction(
-                    session,
-                    transaction_id,
-                    user_id=self.user_id,
-                    group_id=self.group_id,
-                )
-                if transaction is None:
-                    raise ValueError("Transaction is no longer available")
-                if category_id is not None and session.get(Category, category_id) is None:
-                    raise ValueError("Category is no longer available")
-                transaction.transaction_type = transaction_type
-                transaction.category_id = category_id
-                transaction.classification_source = ClassificationSource.MANUAL.value
-        except Exception as exc:
-            row.restore_assignment()
-            self.message.setText(f"Could not save transaction assignment: {exc}")
-            self.message.show()
-            return
+        """Coalesce rapid edits and keep at most one save active per row."""
+        self._assignment_queued[transaction_id] = (
+            transaction_type,
+            category_id,
+        )
+        if transaction_id not in self._assignment_active:
+            self._start_next_assignment_save(transaction_id)
 
-        row.mark_saved(transaction_type, category_id)
-        QTimer.singleShot(0, lambda: self._apply_filters(preserve_scroll=True))
+    def _start_next_assignment_save(self, transaction_id: int) -> None:
+        assignment = self._assignment_queued.pop(transaction_id, None)
+        if assignment is None or self._closing:
+            return
+        transaction_type, category_id = assignment
+        self._assignment_serial += 1
+        request_id = self._assignment_serial
+        worker = _AssignmentWorker(
+            request_id,
+            transaction_id,
+            transaction_type,
+            category_id,
+            self.user_id,
+            self.group_id,
+            self.session_factory,
+        )
+        worker.signals.succeeded.connect(self._assignment_succeeded)
+        worker.signals.failed.connect(self._assignment_failed)
+        self._assignment_workers[request_id] = worker
+        self._assignment_active[transaction_id] = request_id
+        self._thread_pool.start(worker)
+
+    @Slot(int, int, object, object)
+    def _assignment_succeeded(
+        self,
+        request_id: int,
+        transaction_id: int,
+        transaction_type,
+        category_id,
+    ) -> None:
+        worker = self._assignment_workers.pop(request_id, None)
+        if self._assignment_active.get(transaction_id) != request_id:
+            return
+        self._assignment_active.pop(transaction_id, None)
+        same_profile = worker is not None and (
+            worker.user_id,
+            worker.group_id,
+        ) == (self.user_id, self.group_id)
+        if same_profile and not self._closing:
+            self.table_model.mark_saved(
+                transaction_id,
+                transaction_type,
+                category_id,
+            )
+            if self.filtered_count:
+                self.message.hide()
+        if transaction_id in self._assignment_queued:
+            self._start_next_assignment_save(transaction_id)
+        elif same_profile and not self._row_matches_active_filters(transaction_id):
+            if self.table_model.remove_transaction(transaction_id):
+                self.loaded_count = max(0, self.loaded_count - 1)
+                self.filtered_count = max(0, self.filtered_count - 1)
+                self._update_range_label()
+                if self.filtered_count == 0:
+                    self.message.setText(
+                        "No transactions match your search or filter"
+                    )
+                    self.message.show()
+
+    @Slot(int, int, object)
+    def _assignment_failed(
+        self,
+        request_id: int,
+        transaction_id: int,
+        exception: Exception,
+    ) -> None:
+        worker = self._assignment_workers.pop(request_id, None)
+        if self._assignment_active.get(transaction_id) != request_id:
+            return
+        self._assignment_active.pop(transaction_id, None)
+        same_profile = worker is not None and (
+            worker.user_id,
+            worker.group_id,
+        ) == (self.user_id, self.group_id)
+        if transaction_id in self._assignment_queued:
+            self._start_next_assignment_save(transaction_id)
+            return
+        if same_profile and not self._closing:
+            self.table_model.restore_confirmed(transaction_id)
+            self.message.setText(
+                f"Could not save transaction assignment: {exception}"
+            )
+            self.message.show()
+
+    def _row_matches_active_filters(self, transaction_id: int) -> bool:
+        found = self.table_model.find_row(transaction_id)
+        if found is None:
+            return True
+        _index, row = found
+        if self.category_filter not in ("all", "deleted"):
+            if row.category_id != self.category_filter:
+                return False
+        if self.transaction_type_filter != "all":
+            if row.transaction_type != self.transaction_type_filter:
+                return False
+        if self.needs_review_filter and not (
+            row.transaction_type is None
+            or (
+                transaction_type_requires_category(row.transaction_type)
+                and row.category_id is None
+            )
+        ):
+            return False
+        search = self.search.text().strip().casefold()
+        if not search:
+            return True
+        category_name = self.table_model.category_name(
+            row.category_id,
+            row.transaction_type,
+        )
+        type_label = TRANSACTION_TYPE_LABELS.get(row.transaction_type, "")
+        values = (
+            row.description,
+            row.account_name,
+            category_name,
+            type_label,
+            getattr(row.transaction_type, "value", ""),
+            str(row.transaction_date),
+            str(row.amount),
+        )
+        if any(search in str(value).casefold() for value in values):
+            return True
+        description_tokens = normalize_description(search).split()
+        normalized_description = normalize_description(row.description)
+        return bool(description_tokens) and all(
+            token in normalized_description for token in description_tokens
+        )
+
+    def _update_range_label(self) -> None:
+        self.range_label.setText(
+            f"Showing {self.loaded_count:,} of "
+            f"{self.filtered_count:,} transactions"
+        )
+
+    def _show_row_actions(self, transaction_id: int, global_point) -> None:
+        found = self.table_model.find_row(transaction_id)
+        if found is None:
+            return
+        _index, row = found
+        if row.is_deleted:
+            self._set_deleted(transaction_id, False)
+            return
+        menu = prepare_transaction_action_menu(self.table)
+        create_rule = menu.addAction(
+            awesome_icon("fa6s.wand-magic-sparkles", color="#b9bec5"),
+            "Create Rule From Transaction",
+        )
+        remove = menu.addAction(
+            awesome_icon("fa6s.trash", color="#ff8587"),
+            "Remove Transaction",
+        )
+        selected = menu.exec(global_point)
+        if selected == create_rule:
+            self._request_rule(transaction_id)
+        elif selected == remove:
+            self._set_deleted(transaction_id, True)
 
     def _set_deleted(self, transaction_id: int, deleted: bool) -> None:
         try:
@@ -1182,3 +1571,11 @@ class StatementsTable(QWidget):
             return
 
         QTimer.singleShot(0, lambda: self._apply_filters(preserve_scroll=True))
+
+    def closeEvent(self, event) -> None:
+        self._closing = True
+        self._query_generation += 1
+        self._metadata_generation += 1
+        self._metadata_worker = None
+        self._assignment_queued.clear()
+        super().closeEvent(event)

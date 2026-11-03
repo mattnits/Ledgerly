@@ -177,6 +177,7 @@ def init_db(db_engine=engine):
     _migrate_category_rule_account_scope(db_engine)
     _migrate_transaction_deduplication(db_engine)
     _migrate_category_budget_recurrence(db_engine)
+    _migrate_long_term_goal_history(db_engine)
     _migrate_goal_unique_indexes(db_engine)
     _migrate_performance_indexes(db_engine)
 
@@ -434,6 +435,33 @@ def _migrate_category_budget_recurrence(db_engine) -> None:
             "ALTER TABLE monthly_category_budgets "
             "ADD COLUMN applies_to_future BOOLEAN NOT NULL DEFAULT 1"
         ))
+
+
+def _migrate_long_term_goal_history(db_engine) -> None:
+    """Preserve legacy totals as the baseline for month-aware goal history."""
+    columns = _sqlite_columns(db_engine, "long_term_savings_goals")
+    if not columns:
+        return
+    with db_engine.begin() as connection:
+        if "starting_amount" not in columns:
+            connection.execute(text(
+                "ALTER TABLE long_term_savings_goals "
+                "ADD COLUMN starting_amount NUMERIC(14, 2) NOT NULL DEFAULT 0"
+            ))
+            connection.execute(text(
+                "UPDATE long_term_savings_goals "
+                "SET starting_amount = current_amount"
+            ))
+        if "finished_year" not in columns:
+            connection.execute(text(
+                "ALTER TABLE long_term_savings_goals "
+                "ADD COLUMN finished_year INTEGER"
+            ))
+        if "finished_month" not in columns:
+            connection.execute(text(
+                "ALTER TABLE long_term_savings_goals "
+                "ADD COLUMN finished_month INTEGER"
+            ))
 
 
 def _migrate_goal_unique_indexes(db_engine) -> None:

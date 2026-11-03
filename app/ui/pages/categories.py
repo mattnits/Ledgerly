@@ -1,3 +1,4 @@
+from PySide6.QtCore import Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QColorDialog,
@@ -20,6 +21,8 @@ from app.ui.theme import set_button_icon, set_delete_button_icon
 
 
 class CategoriesPage(QWidget):
+    categories_changed = Signal()
+
     def __init__(self):
         super().__init__()
         self.current_user_id: str | None = None
@@ -127,6 +130,7 @@ class CategoriesPage(QWidget):
             else:
                 dialog.accept()
                 self.reload()
+                self.categories_changed.emit()
 
         dialog.submitted.connect(submit)
         dialog.exec()
@@ -145,3 +149,4 @@ class CategoriesPage(QWidget):
             QMessageBox.critical(self, "Error", f"Could not delete category:\n{exc}")
         else:
             self.reload()
+            self.categories_changed.emit()

@@ -97,6 +97,9 @@ class ShellWindow(QMainWindow):
         self.categories_page = CategoriesPage()
         self.goals_page = GoalsPage()
         self.user_management_page = UserManagementPage()
+        self.categories_page.categories_changed.connect(
+            self._handle_categories_changed
+        )
 
         # Month/year navigation is shared across the monthly pages.  The
         # value is initialized from the dashboard once the active profile is
@@ -200,7 +203,9 @@ class ShellWindow(QMainWindow):
         self.user_management_page.add_profile_requested.connect(
             self.show_add_profile_from_management
         )
-        self.user_management_page.profiles_changed.connect(self.refresh_profiles)
+        self.user_management_page.profiles_changed.connect(
+            self._handle_profiles_changed
+        )
         self.transactions_page.statements_table.loading_changed.connect(
             self._handle_startup_loading_changed
         )
@@ -581,6 +586,14 @@ class ShellWindow(QMainWindow):
     def mark_monthly_pages_dirty(self, *pages: QWidget) -> None:
         targets = pages or ShellWindow._monthly_pages(self)
         self._dirty_monthly_pages.update(targets)
+
+    def _handle_categories_changed(self) -> None:
+        self.transactions_page.statements_table.invalidate_metadata()
+        self.mark_monthly_pages_dirty()
+
+    def _handle_profiles_changed(self) -> None:
+        self.transactions_page.statements_table.invalidate_metadata()
+        self.refresh_profiles()
 
     def handle_data_reset(self) -> None:
         self.mark_monthly_pages_dirty()

@@ -43,6 +43,44 @@ class StatementDialogTest(unittest.TestCase):
             ],
         )
 
+    def test_adding_another_batch_keeps_existing_files_and_parser_choices(self):
+        selection = FileSelection()
+        selection.set_files([str(self.amex)])
+        selection.file_rows[0].parse_type.setCurrentText(
+            SUPPORTED_PARSE_TYPES.AMEX.value
+        )
+
+        selection.add_files([str(self.amex), str(self.td)])
+
+        self.assertEqual(selection.get_files(), [str(self.amex), str(self.td)])
+        self.assertEqual(
+            selection.get_file_parse_types(),
+            [
+                (str(self.amex), SUPPORTED_PARSE_TYPES.AMEX.value),
+                (str(self.td), SUPPORTED_PARSE_TYPES.TD_DEBIT.value),
+            ],
+        )
+
+    @patch("app.ui.widgets.file_selection.QFileDialog.getOpenFileNames")
+    @patch("app.ui.widgets.file_selection.default_file_dialog_directory")
+    def test_file_picker_starts_in_downloads_and_appends_selection(
+        self, downloads_directory, get_open_file_names
+    ):
+        downloads_directory.return_value = "C:/Users/example/Downloads"
+        get_open_file_names.return_value = ([str(self.td)], "Data Files")
+        selection = FileSelection()
+        selection.set_files([str(self.amex)])
+
+        selection.select_files()
+
+        get_open_file_names.assert_called_once_with(
+            selection,
+            "Select transaction files",
+            "C:/Users/example/Downloads",
+            "Data Files (*.csv *.xlsx *.xls);;All Files (*)",
+        )
+        self.assertEqual(selection.get_files(), [str(self.amex), str(self.td)])
+
     def test_ready_file_row_stays_compact(self):
         dialog = FileUploadDialog()
         dialog.file_selection.set_files([str(self.amex)])

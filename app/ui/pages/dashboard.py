@@ -1,4 +1,4 @@
-from PySide6.QtCore import QTimer, Signal
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QDialog,
     QFrame,
@@ -27,6 +27,61 @@ from app.ui.widgets.period_selector import PeriodSelector
 from app.ui.theme import set_button_icon
 from app.utils.import_archive import stage_import_files
 from app.utils.constants import ADD_STATMENT_LABEL
+
+
+class _ResponsiveDashboardCards(QWidget):
+    """Reflow dashboard cards to avoid clipped or horizontally scrolling panels."""
+
+    CARD_MINIMUM_WIDTH = 280
+    SPACING = 16
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.grid = QGridLayout(self)
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setHorizontalSpacing(self.SPACING)
+        self.grid.setVerticalSpacing(self.SPACING)
+        self.cards: list[QWidget] = []
+        self.column_count = 0
+        self._row_count = 0
+
+    def add_cards(self, *cards: QWidget) -> None:
+        self.cards.extend(cards)
+        self.set_available_width(self.width())
+
+    def set_available_width(self, available_width: int) -> None:
+        three_columns = self.CARD_MINIMUM_WIDTH * 3 + self.SPACING * 2
+        two_columns = self.CARD_MINIMUM_WIDTH * 2 + self.SPACING
+        columns = (
+            3
+            if available_width >= three_columns
+            else 2
+            if available_width >= two_columns
+            else 1
+        )
+        if columns == self.column_count:
+            return
+        self.column_count = columns
+        for card in self.cards:
+            self.grid.removeWidget(card)
+        for column in range(3):
+            self.grid.setColumnStretch(column, 1 if column < columns else 0)
+        for row in range(self._row_count):
+            self.grid.setRowStretch(row, 0)
+        row_heights: list[int] = []
+        for index, card in enumerate(self.cards):
+            row, column = divmod(index, columns)
+            self.grid.addWidget(card, row, column)
+            if row == len(row_heights):
+                row_heights.append(card.minimumHeight())
+            else:
+                row_heights[row] = max(row_heights[row], card.minimumHeight())
+        self._row_count = len(row_heights)
+        for row in range(self._row_count):
+            self.grid.setRowStretch(row, 1)
+        minimum_height = sum(row_heights) + self.SPACING * max(self._row_count - 1, 0)
+        self.setMinimumHeight(minimum_height)
+        self.updateGeometry()
 
 
 class DashboardPage(QWidget):
@@ -60,13 +115,9 @@ class DashboardPage(QWidget):
         self.period_selector.selection_changed.connect(self._period_changed)
         layout.addWidget(self.period_selector)
 
-        cards = QWidget()
+        cards = _ResponsiveDashboardCards()
+        self.cards = cards
         cards.setObjectName("dashboardCards")
-        cards.setMinimumHeight(545)
-        cards_layout = QGridLayout(cards)
-        cards_layout.setContentsMargins(0, 0, 0, 0)
-        cards_layout.setHorizontalSpacing(16)
-        cards_layout.setVerticalSpacing(16)
 
         self.income_card = MetricCard(
             "Income", "fa6s.briefcase", "#18d98b", False
@@ -81,21 +132,23 @@ class DashboardPage(QWidget):
         self.savings_card.goals_requested.connect(self.goals_requested.emit)
         self.budget_card.goals_requested.connect(self.goals_requested.emit)
 
-        cards_layout.addWidget(self.income_card, 0, 0)
-        cards_layout.addWidget(self.spending_card, 0, 1)
-        cards_layout.addWidget(self.savings_card, 0, 2)
-        cards_layout.addWidget(self.category_card, 1, 0)
-        cards_layout.addWidget(self.budget_card, 1, 1)
-        cards_layout.addWidget(self.investing_card, 1, 2)
-        for column in range(3):
-            cards_layout.setColumnStretch(column, 1)
-        cards_layout.setRowStretch(0, 1)
-        cards_layout.setRowStretch(1, 1)
+        cards.add_cards(
+            self.income_card,
+            self.spending_card,
+            self.savings_card,
+            self.category_card,
+            self.budget_card,
+            self.investing_card,
+        )
 
         scroll = QScrollArea()
         scroll.setObjectName("dashboardScroll")
+        self.cards_scroll = scroll
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
         scroll.setWidget(cards)
         scroll.setStyleSheet("""
             QScrollArea#dashboardScroll { background: transparent; border: none; }
@@ -108,6 +161,16 @@ class DashboardPage(QWidget):
             }
         """)
         layout.addWidget(scroll, 1)
+        QTimer.singleShot(0, self._update_card_columns)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt API spelling
+        super().resizeEvent(event)
+        self._update_card_columns()
+
+    def _update_card_columns(self) -> None:
+        if not hasattr(self, "cards_scroll"):
+            return
+        self.cards.set_available_width(self.cards_scroll.viewport().width())
 
     @property
     def period_filter(self) -> str:
@@ -300,6 +363,9 @@ class DashboardPage(QWidget):
 
         self.files_to_parse = dialog.get_files()
         window = self.window()
+        statements_table = getattr(window.transactions_page, "statements_table", None)
+        if statements_table is not None:
+            statements_table.invalidate_metadata()
         if hasattr(window, "mark_monthly_pages_dirty"):
             window.mark_monthly_pages_dirty(window.transactions_page)
         else:

@@ -5,6 +5,7 @@ import unittest
 from datetime import date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -16,7 +17,11 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.db import Base
 from app.models.models import Account, Transaction, User
-from app.services.transactions import TransactionQueryResult, TransactionRowData
+from app.services.transactions import (
+    TransactionFilterMetadata,
+    TransactionQueryResult,
+    TransactionRowData,
+)
 from app.ui.widgets.statements_table import StatementsTable
 from app.ui.shell import ShellWindow
 from app.utils.constants import TRANSACTIONS_PAGE, TransactionType
@@ -197,11 +202,123 @@ class TransactionAsyncLoadingTest(unittest.TestCase):
         table.set_user_id("test-user")
         self._wait_for(lambda: not table._loading and table.loaded_count == 1)
 
-        self.assertEqual(len(created_threads), 1)
+        # Filter metadata and page rows use separate worker-owned sessions.
+        self.assertEqual(len(created_threads), 2)
         self.assertEqual(closed_threads, created_threads)
-        self.assertNotEqual(created_threads[0], main_thread)
+        self.assertTrue(all(thread != main_thread for thread in created_threads))
         table.close()
         engine.dispose()
+
+    def test_optimistic_assignment_is_immediate_and_saved_off_main_thread(self):
+        save_started = threading.Event()
+        save_release = threading.Event()
+        save_threads = []
+
+        def slow_save(*_args, **_kwargs):
+            save_threads.append(threading.get_ident())
+            save_started.set()
+            save_release.wait(2)
+
+        table = StatementsTable(query_loader=lambda *_args, **_kwargs: _result("row"))
+        table.show()
+        table.set_user_id("test-user")
+        self._wait_for(lambda: not table._loading and table.loaded_count == 1)
+        generation = table._query_generation
+
+        with patch(
+            "app.ui.widgets.statements_table.save_transaction_assignment",
+            side_effect=slow_save,
+        ):
+            table.table_model.setData(
+                table.table_model.index(0, table.table_model.CATEGORY_COLUMN),
+                42,
+            )
+            self._wait_for(save_started.is_set)
+            self.assertEqual(table.rows[0].category_id, 42)
+            self.assertTrue(table.rows[0].pending)
+            self.assertEqual(table._query_generation, generation)
+            save_release.set()
+            self._wait_for(lambda: not table._assignment_active)
+
+        self.assertFalse(table.rows[0].pending)
+        self.assertTrue(save_threads)
+        self.assertNotEqual(save_threads[0], threading.get_ident())
+        self.assertEqual(table._assignment_workers, {})
+        table.close()
+
+    def test_failed_optimistic_assignment_restores_confirmed_value(self):
+        def fail_save(*_args, **_kwargs):
+            raise RuntimeError("save failed")
+
+        table = StatementsTable(query_loader=lambda *_args, **_kwargs: _result("row"))
+        table.show()
+        table.set_user_id("test-user")
+        self._wait_for(lambda: not table._loading and table.loaded_count == 1)
+
+        with (
+            patch(
+                "app.ui.widgets.statements_table.save_transaction_assignment",
+                side_effect=fail_save,
+            ),
+            self.assertLogs("app.ui.widgets.statements_table", level="ERROR"),
+        ):
+            table.table_model.setData(
+                table.table_model.index(0, table.table_model.CATEGORY_COLUMN),
+                42,
+            )
+            self._wait_for(lambda: not table._assignment_active)
+
+        self.assertIsNone(table.rows[0].category_id)
+        self.assertFalse(table.rows[0].pending)
+        self.assertIn("Could not save", table.message.text())
+        table.close()
+
+    def test_saved_assignment_removes_row_only_when_filter_no_longer_matches(self):
+        table = StatementsTable(query_loader=lambda *_args, **_kwargs: _result("row"))
+        table.show()
+        table.set_user_id("test-user")
+        self._wait_for(lambda: not table._loading and table.loaded_count == 1)
+        table.category_filter = None
+
+        with patch("app.ui.widgets.statements_table.save_transaction_assignment"):
+            table.table_model.setData(
+                table.table_model.index(0, table.table_model.CATEGORY_COLUMN),
+                42,
+            )
+            self._wait_for(lambda: not table._assignment_active)
+
+        self.assertEqual(table.rows, [])
+        self.assertEqual(table.loaded_count, 0)
+        self.assertEqual(table.filtered_count, 0)
+        table.close()
+
+    def test_filter_metadata_is_cached_per_profile(self):
+        metadata_calls = []
+
+        def metadata_loader(user_id, group_id, session_factory):
+            metadata_calls.append((user_id, group_id))
+            return TransactionFilterMetadata(
+                accounts=((1, "Checking", "Test"),),
+                categories=(),
+                available_months=frozenset({(date.today().year, date.today().month)}),
+            )
+
+        table = StatementsTable(
+            query_loader=lambda *_args, **_kwargs: _result("row"),
+            metadata_loader=metadata_loader,
+        )
+        table.show()
+        table.set_user_id("first")
+        self._wait_for(lambda: not table._loading and table.loaded_count == 1)
+        table.set_user_id("first")
+        self._wait_for(lambda: not table._loading)
+        table.set_user_id("second")
+        self._wait_for(lambda: not table._loading)
+        table.set_user_id("first")
+        self._wait_for(lambda: not table._loading)
+
+        self.assertEqual(metadata_calls, [("first", None), ("second", None)])
+        table.close()
 
     def test_navigation_refreshes_a_dirty_transactions_page_after_switch(self):
         events = []

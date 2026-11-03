@@ -10,12 +10,17 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import date, datetime
 from decimal import Decimal
+import os
 from statistics import median
 from time import perf_counter
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PySide6.QtWidgets import QApplication
 
 from app.core.db import Base
 from app.models.models import (
@@ -41,7 +46,15 @@ from app.services.investments import (
     get_portfolio_history,
     get_recent_snapshots,
 )
-from app.services.transactions import TransactionQueryParams, fetch_transactions
+from app.services.transactions import (
+    TransactionQueryParams,
+    fetch_transaction_metadata,
+    fetch_transactions,
+)
+from app.ui.widgets.transaction_table import (
+    TransactionTableModel,
+    TransactionTableView,
+)
 from app.services.summary_cache import clear_summary_cache
 from app.utils.constants import ClassificationSource, TransactionType
 
@@ -245,7 +258,21 @@ def _measure(
     return median(timings), int(median(query_counts))
 
 
+def _render_transaction_page(rows, categories) -> None:
+    model = TransactionTableModel()
+    model.set_categories(list(categories))
+    view = TransactionTableView(model)
+    view.resize(1200, 620)
+    model.replace_rows(rows)
+    view.show()
+    QApplication.processEvents()
+    view.close()
+    view.deleteLater()
+    QApplication.processEvents()
+
+
 def main() -> None:
+    _app = QApplication.instance() or QApplication([])
     engine, sessions = _build_database()
     params = TransactionQueryParams(
         user_id="benchmark-user",
@@ -276,6 +303,16 @@ def main() -> None:
             before_each=(clear_summary_cache if label == "Dashboard month" else None),
         )
         print(f"{label}: {milliseconds:.2f} ms median, {queries} SQL statements")
+    page = fetch_transactions(params, sessions)
+    metadata = fetch_transaction_metadata("benchmark-user", None, sessions)
+    render_ms, render_queries = _measure(
+        engine,
+        lambda: _render_transaction_page(page.rows, metadata.categories),
+    )
+    print(
+        f"Transactions render ({len(page.rows)} rows): {render_ms:.2f} ms median, "
+        f"{render_queries} SQL statements"
+    )
     get_dashboard_data("benchmark-user", "monthly", TARGET_MONTH, sessions)
     cached_ms, cached_queries = _measure(
         engine,

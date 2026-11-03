@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QImage, QPainter
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QScrollArea, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QScrollArea, QToolButton
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -29,6 +29,7 @@ from app.models.models import Account, Category, Transaction, User
 from app.services.investments import (
     create_investment_account, create_investment_snapshot, get_investment_accounts,
 )
+from app.services.transactions import TransactionRowData
 from app.services.goals import CategoryBudgetProgress, SavingsGoalRecord
 from app.ui.dialogs.add_user import AddUserDialog
 from app.ui.dialogs.classification_rules import ClassificationRulesDialog
@@ -51,14 +52,23 @@ from app.ui.theme import apply_theme
 from app.ui.widgets.combo_box import AppComboBox
 from app.ui.widgets.date_picker import DatePickerEdit
 from app.ui.widgets.statements_table import StatementsTable
-from app.ui.widgets.transaction_row import TransactionRow
+from app.ui.widgets.transaction_table import (
+    TransactionTableModel,
+    TransactionTableView,
+)
 from app.utils.constants import TransactionType
 
 
 def main() -> None:
     # Normal inherited permissions are needed for viewing screenshots in a
     # separate process on Windows; tempfile.mkdtemp uses an owner-only ACL.
-    output = Path(__file__).resolve().parents[1] / f"dropdown-review-{uuid4().hex[:8]}"
+    requested_output = os.environ.get("LEDGERLY_VISUAL_AUDIT_DIR")
+    output = (
+        Path(requested_output)
+        if requested_output
+        else Path(__file__).resolve().parents[1]
+        / f"dropdown-review-{uuid4().hex[:8]}"
+    )
     output.mkdir()
 
     def reject_default_connection(*_args):
@@ -215,14 +225,23 @@ def main() -> None:
             id="audit", name="Example User", color="#398cff", is_admin=True, type="user"))
         profile.adjustSize()
         capture_surface("profile-menu", profile)
-        inline = QWidget()
-        layout = QVBoxLayout(inline)
-        row = TransactionRow(1, date.today(), "Example purchase", Decimal(-10),
-                             TransactionType.EXPENSE, datetime.now(), 1,
-                             "Everyday account", "Example Bank", False, categories)
-        layout.addWidget(row.transaction_type_cell)
-        layout.addWidget(row.category_cell)
-        inline.resize(320, 110)
+        inline_model = TransactionTableModel()
+        inline_model.set_categories(categories)
+        inline_model.replace_rows((TransactionRowData(
+            1, date.today(), "Example purchase", Decimal(-10),
+            TransactionType.EXPENSE, datetime.now(), 1,
+            "Everyday account", "Example Bank", False,
+        ),))
+        inline = TransactionTableView(inline_model)
+        inline.resize(1100, 150)
+        inline.show()
+        category_index = inline_model.index(0, inline_model.CATEGORY_COLUMN)
+        QTest.mouseClick(
+            inline.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=inline.visualRect(category_index).center(),
+        )
+        app.processEvents()
         capture_surface("transaction-inline", inline)
 
     for count in (1, 3, 6, 20):

@@ -63,20 +63,28 @@ class TransactionQueryResult:
     rows: tuple[TransactionRowData, ...]
     total_count: int
     filtered_count: int
+    # Compatibility fields for injected query loaders. Production metadata is
+    # fetched separately and cached by the Transactions page.
+    accounts: tuple[tuple[int, str, str], ...] = ()
+    categories: tuple[tuple[int, str, str], ...] = ()
+    available_months: frozenset[tuple[int, int]] = frozenset()
+
+
+@dataclass(frozen=True)
+class TransactionFilterMetadata:
     accounts: tuple[tuple[int, str, str], ...]
     categories: tuple[tuple[int, str, str], ...]
     available_months: frozenset[tuple[int, int]]
 
 
-def fetch_transactions(
-    params: TransactionQueryParams,
+def fetch_transaction_metadata(
+    user_id: str | None,
+    group_id: int | None = None,
     session_factory: Callable[[], Session] = SessionLocal,
-) -> TransactionQueryResult:
-    """Fetch one page as detached plain data using a worker-owned session."""
-
-    started = perf_counter()
-    validate_owner(params.user_id, params.group_id)
-    account_scope = visible_account_scope(params.user_id, params.group_id)
+) -> TransactionFilterMetadata:
+    """Load stable filter choices independently from transaction pages."""
+    validate_owner(user_id, group_id)
+    account_scope = visible_account_scope(user_id, group_id)
     with session_factory() as session:
         account_rows = session.execute(
             select(
@@ -96,7 +104,7 @@ def fetch_transactions(
                 account_id,
                 (
                     f"{name} — {user_name or group_name}"
-                    if params.group_id is not None and (user_name or group_name)
+                    if group_id is not None and (user_name or group_name)
                     else name
                 ),
                 institution,
@@ -112,12 +120,27 @@ def fetch_transactions(
             .where(account_scope)
             .distinct()
         ).all()
-        available_months = frozenset(
+    return TransactionFilterMetadata(
+        accounts=accounts,
+        categories=categories,
+        available_months=frozenset(
             (int(month[:4]), int(month[5:7]))
             for month in month_values
             if month
-        )
+        ),
+    )
 
+
+def fetch_transactions(
+    params: TransactionQueryParams,
+    session_factory: Callable[[], Session] = SessionLocal,
+) -> TransactionQueryResult:
+    """Fetch one page as detached plain data using a worker-owned session."""
+
+    started = perf_counter()
+    validate_owner(params.user_id, params.group_id)
+    account_scope = visible_account_scope(params.user_id, params.group_id)
+    with session_factory() as session:
         base = (
             select(
                 Transaction.id,
@@ -222,9 +245,6 @@ def fetch_transactions(
         rows=rows,
         total_count=total_count,
         filtered_count=filtered_count,
-        accounts=accounts,
-        categories=categories,
-        available_months=available_months,
     )
     logger.debug(
         "Transaction page query finished in %.1f ms (rows=%s, offset=%s)",
@@ -233,6 +253,35 @@ def fetch_transactions(
         params.offset,
     )
     return result
+
+
+def save_transaction_assignment(
+    transaction_id: int,
+    transaction_type: TransactionType | None,
+    category_id: int | None,
+    *,
+    user_id: str | None = None,
+    group_id: int | None = None,
+    session_factory=SessionLocal,
+) -> None:
+    """Persist one optimistic table edit in a worker-owned transaction."""
+    validate_owner(user_id, group_id)
+    if transaction_type in CATEGORY_FREE_TRANSACTION_TYPES:
+        category_id = None
+    with session_factory.begin() as session:
+        transaction = get_visible_transaction(
+            session,
+            transaction_id,
+            user_id=user_id,
+            group_id=group_id,
+        )
+        if transaction is None:
+            raise ValueError("Transaction is no longer available")
+        if category_id is not None and session.get(Category, category_id) is None:
+            raise ValueError("Category is no longer available")
+        transaction.transaction_type = transaction_type
+        transaction.category_id = category_id
+        transaction.classification_source = ClassificationSource.MANUAL.value
 
 
 def get_transaction_months(
